@@ -4,7 +4,7 @@
 
 ## 代码仓库与当前版本
 
-代码仓库：[blueforst/dafeiyu](https://github.com/blueforst/dafeiyu)。本次首次提交对应 2026-10-27 已验收上线的 **0.1.10**，包含 Claude 面板及配套模型配置接口。服务保持暂停、草稿模式。详细结果见 [0.1.10 发布记录](docs/发布记录/2026-10-27-0.1.10.md)。
+代码仓库：[blueforst/dafeiyu](https://github.com/blueforst/dafeiyu)。当前版本为 **0.1.12**：包含 Claude 面板与模型配置接口，浏览器固定使用 Camoufox，按浏览器当前登录账号工作。服务保持暂停、草稿模式。详细结果见 [0.1.12 发布记录](docs/发布记录/2026-10-27-0.1.12.md)。
 
 仓库包含源码、配置示例、部署文件及 `dev/` 下的开发验收脚本。实际 `.env`、入口密码、模型 Key、浏览器 profile、数据库和本机交付资料保留在运行环境中。
 
@@ -16,21 +16,22 @@
 
 ## 架构
 
-宿主 Nginx 提供 HTTPS 与密码认证。业务容器为 TypeScript / Fastify / SQLite；浏览器容器为 Playwright / Chromium / Xvfb / Openbox / x11vnc / noVNC。Pi AI 负责模型协议适配。
+宿主 Nginx 提供 HTTPS 与密码认证。业务容器为 TypeScript / Fastify / SQLite；浏览器容器为 Camoufox / Xvfb / Openbox / x11vnc / noVNC。Pi AI 负责模型协议适配。
 
 - 仅 `127.0.0.1:8080` 发布宿主端口；浏览器内部 API、VNC、CDP 不暴露公网。
-- Chromium 使用非 root 用户和用户命名空间沙箱。seccomp 基于 Playwright 官方配置，仅增加沙箱需要的 chroot；不使用 privileged，不挂载 Docker socket。
-- 浏览器 profile 由文件锁保护，崩溃遗留的 Singleton 锁只能在拿到独占锁后清理。
+- 浏览器使用非 root、只读根目录、capabilities 清空及 seccomp 限制，不使用 privileged，不挂载 Docker socket。
+- 浏览器 profile 由文件锁保护，崩溃遗留的 Firefox 锁只能在拿到独占锁后清理。
 - 程序启动保持暂停；人工接管前排空当前操作，释放时关闭 VNC 客户端并继续暂停。
 - 可选的 [X 浏览器专用出口](docs/X浏览器代理.md) 通过内部 Mihomo 服务接入固定节点，独立于宿主网络设置。
 - 当前生产浏览器使用服务器直连；Bitz 节点已按用户要求移除。
+- 业务浏览器固定使用 Camoufox，已移除 Chromium 及构建选择；见 [Camoufox 浏览器](docs/Camoufox浏览器.md)。
 
 ## 目录
 
 服务器代码：`/srv/role-workflow`。持久数据：`/var/lib/role-workflow`。
 
-- `config/config.json`：角色、限速、运行模式，以及面板未设置时使用的预期账号和模型。
-- `app/panel/settings.json`：面板保存的预期账号和模型设置，优先于 `config.json` 的对应字段。
+- `config/config.json`：角色、限速、运行模式，以及面板未设置时使用的模型。
+- `app/panel/settings.json`：面板保存的模型设置，优先于 `config.json` 的对应字段。
 - `app/panel/model-keys.json`：面板保存的模型 Key，按"服务商@接口主机"分别存放，权限 0600；面板和日志只显示末 4 位。
 - `secrets/app/model_api_key`：旧方式的模型密钥，只在面板从未保存过模型时使用。
 - `app/workflow.sqlite`：队列、记忆、回执和日志。
@@ -44,9 +45,9 @@
 
 1. 打开 HTTPS 面板，用交付资料中的凭据登录。面板分"概览 / 模型 / 浏览器"三页，右上角是运行状态和"恢复处理 / 暂停"。
 2. 在"浏览器"页点"接管并连接"，由账号所有者完成 X 登录、验证码及私信解锁，然后点右上角"释放接管"。浏览器页平时不连接。
-3. 在"概览"页填写预期账号（不带 @），或点"用当前登录"。处理运行中不能修改，需要先暂停。运行模式仍在 `config.json` 里设置，保持 `mode: "draft"`。
+3. "概览"页显示浏览器当前登录的账号，工作流直接使用此账号，无需另外配置。运行模式仍在 `config.json` 里设置，保持 `mode: "draft"`。
 4. 在"模型"页选择服务商：pi 内置服务商会自动带出 Base URL、协议、上下文长度和推理档位；中转站或自建服务选"自定义"，填 Base URL 并选择协议。填写 API Key，可以"用 Key 拉取"接口上的模型列表，然后"测试连接"（会产生少量费用），最后"保存"。
-5. 点右上角"恢复处理"。账号身份必须与预期账号一致。
+5. 点右上角"恢复处理"。需要浏览器已登录并完成人工验证；处理期间退出登录或切换账号会暂停，检查后可重新恢复。
 
 面板保存的设置和配置文件都在每轮重新读取，不用重启或重建镜像。Pi 上游包为 `@earendil-works/pi-ai@1.4.0`。只支持 API Key 方式，不支持订阅账号登录；需要额外参数的服务商（Bedrock、Azure、Cloudflare、Vertex）不在面板列表里。Base URL 不能指向本机、内部服务或云元数据地址。
 
@@ -79,7 +80,7 @@ docker compose exec -T app node dist/cli.js backup
 - 私信按会话独立记忆，公开记忆不会读取私信。当前没有自动跨渠道用户身份合并。
 - 最近三次原文作为短期上下文；每累计五条新记录，按公开/私信分别整理摘要。
 - 忘记指令会清理消息和摘要、增加记忆代次，并停止后续记录。正在生成的旧摘要不能重新写回。
-- 默认保留原始消息 30 天。数据库备份保留最近七份；遗忘元数据独立保存，恢复时继续生效。
+- 默认保留原始消息 30 天。手动数据库备份保留最近七份；升级不自动备份。遗忘元数据独立保存，恢复时继续生效。
 - 模型输出只接受 reply/skip 结构，发送前校验链接、额外 @ 和公开回复的加权字符长度。
 
 ## 发送与恢复
@@ -100,24 +101,26 @@ X 页面可能变化；遇到不识别的输入框、聊天方向或回执时停
 
 ## 升级和回滚
 
-先在服务器构建和测试新镜像。升级脚本暂停业务、在线备份数据库、停止浏览器并冷备 profile，再切换版本。升级后保持暂停。
+先在服务器构建和测试新镜像。升级脚本暂停业务、停止浏览器后切换版本，升级后保持暂停。按用户要求，不自动创建源码、数据库或 profile 备份，不保留旧镜像；源码由 Git 管理。
 
 ```sh
 sh deploy/upgrade.sh 新版本号
-sh deploy/rollback.sh
+sh deploy/rollback.sh 已重新构建的版本号
 ```
 
 本期数据库结构为初始版本；未来不兼容迁移必须记录版本并恢复配套旧备份，禁止让旧程序读取不兼容数据。恢复数据库前停止 app，保留当前 forget-ledger.json，再用备份替换数据库并移走对应 WAL/SHM；启动时自动重放遗忘记录。
 
+生产验收后可执行 `sh deploy/cleanup.sh`，回收本项目未使用的旧镜像、历史打包备份和 Docker 未使用构建缓存。运行中的容器镜像会保留。
+
 ## 监控和证书
 
-宿主 systemd 管理容器开机启动、每五分钟健康检查、每日在线备份和每小时证书续期检查。监控写入 `monitor-latest.json` 及 systemd journal，本期没有配置外部邮件或聊天通知。
+宿主 systemd 管理容器开机启动、每五分钟健康检查和每小时证书续期检查。按用户要求停止本项目的自动备份。监控写入 `monitor-latest.json` 及 systemd journal，本期没有配置外部邮件或聊天通知。
 
 IP 证书约六天有效，必须保留 HTTP-01 验证入口及自动续期任务。续期成功后执行 nginx -t 并 reload；续期演练和实际证书有效期单独留证。
 
 ## 测试与构建
 
-构建和测试只在服务器运行。Docker builder 执行类型检查和安全回归；另有 Chromium DOM 样本解析与公网面板/noVNC 端到端验收。公网面板验收（`test/ui-acceptance.mjs`）只在处理暂停时执行：它会接管一次浏览器以确认桌面可用，结束后释放；处理运行中则直接跳过（退出码 2），不做任何操作。
+构建和测试只在服务器运行。Docker builder 执行类型检查和安全回归；另有 Camoufox DOM 样本解析与公网面板/noVNC 端到端验收。公网面板验收（`test/ui-acceptance.mjs`）只在处理暂停时执行：它会接管一次浏览器以确认桌面可用，结束后释放；处理运行中则直接跳过（退出码 2），不做任何操作。
 
 ```sh
 docker build --target runtime -t role-workflow-app:版本号 .

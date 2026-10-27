@@ -4,8 +4,6 @@ import { mergePanel,readPanelSettings,allModelKeys } from './settings.js';
 export function loadConfig(path=process.env.CONFIG_PATH || '/config/config.json'):Config {
  const c=mergePanel(JSON.parse(readFileSync(path,'utf8')) as Config,readPanelSettings());
  if(!['draft','auto'].includes(c.mode)) throw new Error('运行模式必须为 draft 或 auto');
- c.expectedHandle=(c.expectedHandle||'').replace(/^@/,'').toLowerCase();
- if(c.expectedHandle&&!/^[a-z0-9_]{1,15}$/.test(c.expectedHandle)) throw new Error('账号名称无效');
  for(const [key,min,max] of [['pollSeconds',30,3600],['maxAgeHours',1,48],['maxPerRound',1,4],['publicPerHour',1,25],['privatePerHour',1,100],['retentionDays',1,365]] as const) {
   const value=c[key]; if(!Number.isInteger(value)||value<min||value>max) throw new Error('配置范围无效：'+key);
  }

@@ -1,5 +1,6 @@
 # 面板重做与模型配置 · 实施计划
 
+> 2026-10-27 更新：本文保留为最初设计记录。用户已明确不需要预期账号功能；0.1.12 已移除账号设置和对应限制，改用浏览器当前登录账号。当前行为以 README 与前端接口文档为准。
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal：** 把角色工作流的运行面板重做为"概览 / 模型 / 浏览器"三页，模型可在面板上通过 pi 内置服务商或自定义 Base URL 配置、测试和保存，预期账号可在面板上设置。

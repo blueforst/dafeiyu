@@ -13,10 +13,8 @@ k=pathlib.Path('/var/lib/role-workflow/secrets/app/ingress_key').read_text().str
 r=urllib.request.Request('http://127.0.0.1:8080/api/control/pause',method='POST',headers={'X-Ingress-Key':k,'X-Workflow-Control':'1'})
 with urllib.request.urlopen(r,timeout=110) as p:print(p.read().decode())
 PY
-docker compose exec -T app node dist/cli.js backup
 docker compose stop browser
-tar -C /var/lib/role-workflow -czf "/var/lib/role-workflow/releases/browser-before-$version.tgz" browser
-if [ -f .env ]; then cp .env /var/lib/role-workflow/releases/previous.env; fi
+# 用户要求不创建升级备份；源码由 Git 管理。
 ROLE_TARGET_VERSION="$version" python3 - <<'PY'
 import os,pathlib
 p=pathlib.Path('.env');lines=p.read_text().splitlines() if p.exists() else []
@@ -24,6 +22,7 @@ updates={k:os.environ['ROLE_TARGET_VERSION'] for k in ['ROLE_VERSION','APP_VERSI
 seen=set();out=[]
 for line in lines:
  key=line.split('=',1)[0] if '=' in line and not line.startswith('#') else None
+ if key=='BROWSER_ENGINE':continue
  if key in updates:out.append(key+'='+updates[key]);seen.add(key)
  else:out.append(line)
 out += [k+'='+v for k,v in updates.items() if k not in seen]

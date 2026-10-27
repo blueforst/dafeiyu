@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run the staging E2E suite inside the production browser image (chromium + playwright-core).
+# 使用生产 Camoufox 镜像执行独立 staging 界面验收。
 # Panel settings are wiped first so every run starts from a clean staging state.
 set -eu
 ssh dsh 'set -eu

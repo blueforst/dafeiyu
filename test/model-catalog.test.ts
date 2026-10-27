@@ -9,7 +9,7 @@ import { writeModelKey } from '../src/settings.js';
 import type { Config } from '../src/types.js';
 
 const deepseek = (over: Partial<Config['model']> = {}): Config['model'] => ({ provider: 'deepseek', api: '', baseUrl: 'https://api.deepseek.com', id: 'deepseek-flash', reasoning: false, reasoningLevel: 'off', vision: false, maxTokens: 1024, timeoutMs: 10000, source: 'panel', ...over });
-const config = (model: Config['model']): Config => ({ expectedHandle: 'tester', mode: 'draft', pollSeconds: 60, maxAgeHours: 6, maxPerRound: 2, publicPerHour: 10, privatePerHour: 30, retentionDays: 30, persona: '测试 AI', dailyState: '无', model });
+const config = (model: Config['model']): Config => ({ mode: 'draft', pollSeconds: 60, maxAgeHours: 6, maxPerRound: 2, publicPerHour: 10, privatePerHour: 30, retentionDays: 30, persona: '测试 AI', dailyState: '无', model });
 
 type Seen = { url?: string; headers: IncomingHttpHeaders; body: any };
 async function mockSse(fn: (port: number, seen: Seen[]) => Promise<void>) {

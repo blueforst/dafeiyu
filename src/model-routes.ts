@@ -1,14 +1,14 @@
-// Panel routes: model catalog, discovery, connection test, model and account settings.
+// 面板模型目录、模型发现、连接测试和设置接口。
 // Keys are accepted on input only; responses and logs carry at most a 4-char hint.
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Store } from './store.js';
 import { loadConfig, redact } from './config.js';
-import { checkBaseUrl, keyHints, keySlot, readModelKey, readPanelSettings, toConfigModel, validateHandle, writeModelKey, writePanelSettings, type PanelModel, type ReasoningLevel } from './settings.js';
+import { checkBaseUrl, keyHints, keySlot, readModelKey, readPanelSettings, toConfigModel, writeModelKey, writePanelSettings, type PanelModel, type ReasoningLevel } from './settings.js';
 import { discoverModels, findCatalogModel, isCustom, listModels, listProviders, type ModelInfo } from './model-catalog.js';
 import { runCompletion } from './model.js';
 
 export type LastTest = { ok:boolean; at:number; latencyMs:number; provider:string; id:string; input?:number; output?:number; error?:string };
-type Deps = { store:Store; control:()=>string; run?:typeof runCompletion; discover?:typeof discoverModels };
+type Deps = { store:Store; run?:typeof runCompletion; discover?:typeof discoverModels };
 
 class HttpError extends Error { constructor(message:string, public code = 400) { super(message); } }
 const CUSTOM_APIS = ['openai-completions', 'openai-responses', 'anthropic-messages'];
@@ -151,14 +151,4 @@ export function registerModelRoutes(app:FastifyInstance, deps:Deps):void {
     return { ok: true, settings, keys: keyHints() };
   }));
 
-  app.put('/api/account', handle(async (req) => {
-    if (deps.control() === 'running') throw new HttpError('先暂停', 409);
-    let handleName:string;
-    try { handleName = validateHandle(String(req.body?.expectedHandle ?? '')); } catch (e:any) { throw new HttpError(e.message); }
-    const current = readPanelSettings({ tolerant: true });
-    if (handleName) current.expectedHandle = handleName; else delete current.expectedHandle;
-    writePanelSettings(current);
-    deps.store.log('account-save', handleName ? '预期账号：@' + handleName : '预期账号已清除，回退到配置文件');
-    return { ok: true, expectedHandle: handleName };
-  }));
 }

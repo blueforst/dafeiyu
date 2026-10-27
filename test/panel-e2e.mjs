@@ -1,6 +1,6 @@
-// Staging end-to-end checks for the panel. Runs inside the browser image (chromium + playwright-core).
+// 在 Camoufox 镜像内执行独立 staging 界面验收。
 // Every check gets a fresh browser context; results go to /artifacts/panel-e2e.json.
-import { chromium } from 'playwright-core';
+import { observer } from '/opt/role-camoufox/launch.mjs';
 import { writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
@@ -26,25 +26,26 @@ check('overview loads', async page => {
   assert.equal((await page.locator('#primary-action').innerText()).trim(), '恢复处理');
 });
 
-check('resume needs handle', async page => {
+check('resume requires browser login', async page => {
   await openPanel(page);
   await page.click('#primary-action');
-  await page.waitForFunction(() => document.getElementById('notice')?.textContent.includes('预期 X 账号'), null, { timeout: 20000 });
+  await page.waitForFunction(() => { const n = document.getElementById('notice'); return n && !n.hidden && n.dataset.kind === 'error'; }, null, { timeout: 20000 });
+  assert.ok(!(await page.locator('#notice').innerText()).includes('预期'));
   assert.equal((await page.locator('#status-pill').innerText()).trim(), '已暂停');
 });
 
-check('handle save/clear', async page => {
+check('account follows browser login without settings', async (page, { request }) => {
+  await page.route('**/api/status', async route => {
+    const response = await route.fetch();
+    const status = await response.json();
+    status.browser = { loggedIn: true, needsHuman: false, handle: 'Current_User' };
+    await route.fulfill({ json: status });
+  });
   await openPanel(page);
-  await page.fill('#handle-input', '@Role_Demo');
-  await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/account') && r.status() === 200), page.click('#handle-save')]);
-  await page.reload();
-  await page.waitForFunction(() => document.getElementById('handle-input')?.value === 'role_demo', null, { timeout: 15000 });
-  await page.fill('#handle-input', '');
-  await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/account') && r.status() === 200), page.click('#handle-save')]);
-  await page.reload();
-  await openPanel(page);
-  await page.waitForTimeout(500);
-  assert.equal(await page.inputValue('#handle-input'), '');
+  await page.locator('#login-account', { hasText: '@Current_User' }).waitFor();
+  assert.equal(await page.locator('#handle-input, #handle-save, #handle-use-current').count(), 0);
+  assert.ok(!(await page.locator('section:has(#login-account)').innerText()).includes('预期账号'));
+  assert.equal((await request.put(BASE + '/api/account', { data: {}, headers: { 'x-workflow-control': '1' } })).status(), 404);
 });
 
 check('logs render', async page => {
@@ -211,7 +212,7 @@ check('big list', async page => {
 // ---- browser page (staging has no browser container, so takeover always fails; keep these last)
 check('status blip keeps desktop', async page => {
   let fail = false;
-  const fake = () => ({ control: 'manual', busy: false, config: { expectedHandle: '', mode: 'draft', model: {} }, configError: '', browser: { loggedIn: false }, lastTick: 0, cooldown: { public: 0, private: 0 }, stats: { messages: [], usage: {} }, now: Date.now() });
+  const fake = () => ({ control: 'manual', busy: false, config: { mode: 'draft', model: {} }, configError: '', browser: { loggedIn: false }, lastTick: 0, cooldown: { public: 0, private: 0 }, stats: { messages: [], usage: {} }, now: Date.now() });
   await page.route('**/api/status', route => (fail ? route.abort() : route.fulfill({ json: fake() })));
   await page.route('**/desktop/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>stub</title><p>desktop stub</p>' }));
   await page.goto(BASE + '/#/browser');
@@ -227,7 +228,7 @@ check('status blip keeps desktop', async page => {
 
 check('top bar releases connected desktop', async page => {
   let control = 'manual';
-  const fake = () => ({ control, busy: false, config: { expectedHandle: '', mode: 'draft', model: {} }, configError: '', browser: { loggedIn: false }, lastTick: 0, cooldown: { public: 0, private: 0 }, stats: { messages: [], usage: {} }, now: Date.now() });
+  const fake = () => ({ control, busy: false, config: { mode: 'draft', model: {} }, configError: '', browser: { loggedIn: false }, lastTick: 0, cooldown: { public: 0, private: 0 }, stats: { messages: [], usage: {} }, now: Date.now() });
   await page.route('**/api/status', route => route.fulfill({ json: fake() }));
   await page.route('**/desktop/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>stub</title><p>desktop stub</p>' }));
   await page.route('**/api/control/release', route => {
@@ -266,7 +267,7 @@ check('connect failure stays disconnected', async page => {
 // ---------------------------------------------------------------- runner
 
 const results = { checks: [], errors: [] };
-const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, chromiumSandbox: true });
+const browser = await observer();
 try {
   for (const { name, fn } of checks) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

@@ -1,6 +1,5 @@
-// Production read-only acceptance for the panel. Only runs while processing is paused:
-// it takes over the browser once (to prove noVNC works) and always releases afterwards.
-import { chromium } from 'playwright-core';
+// 生产验收：暂停时临时接管并释放；已有人工接管时仅连接观察，不修改控制状态。
+import { observer } from '/opt/role-camoufox/launch.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
@@ -10,7 +9,7 @@ const field = i => (lines[i] || '').split('：')[1]?.trim();
 const httpCredentials = field(2) ? { username: field(1) || 'operator', password: field(2) } : undefined;
 
 const results = { checks: [], errors: [] };
-const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, chromiumSandbox: true });
+const browser = await observer();
 const context = await browser.newContext({ httpCredentials, viewport: { width: 1440, height: 1000 } });
 let tookOver = false;
 let exitCode = 0;
@@ -22,8 +21,11 @@ async function step(name, fn) {
 
 try {
   const status = await (await context.request.get(BASE + '/api/status')).json();
-  if (status.control !== 'paused') {
-    console.log(JSON.stringify({ skipped: 'control=' + status.control + '，只在暂停时验收' }));
+  const existingManual = status.control === 'manual';
+  results.initialControl = status.control;
+  results.existingManualReadOnly = existingManual;
+  if (status.control !== 'paused' && !existingManual) {
+    console.log(JSON.stringify({ skipped: 'control=' + status.control + '，只在暂停或人工接管时验收' }));
     exitCode = 2;
   } else {
     const page = await context.newPage();
@@ -31,23 +33,27 @@ try {
 
     const pagesOk = await step('三个页面加载', async () => {
       await page.goto(BASE + '/#/overview');
-      await page.locator('#status-pill', { hasText: '已暂停' }).waitFor({ timeout: 20000 });
+      await page.locator('#status-pill', { hasText: existingManual ? '人工接管中' : '已暂停' }).waitFor({ timeout: 20000 });
       await page.locator('#logs').waitFor();
+      await page.locator('#login-account').waitFor();
+      assert.equal(await page.locator('#handle-input, #handle-save, #handle-use-current').count(), 0);
+      assert.ok(!(await page.locator('section:has(#login-account)').innerText()).includes('预期账号'));
+      if (status.browser.loggedIn && !status.browser.needsHuman) assert.equal(await page.locator('#login-account').innerText(), '@' + status.browser.handle);
       await page.click('a[href="#/model"]');
       await page.locator('#provider-select').waitFor({ timeout: 20000 });
       await page.click('#provider-select');
       await page.locator('#provider-list [data-provider="deepseek"]').waitFor({ timeout: 30000 });
       await page.click('a[href="#/browser"]');
-      await page.getByText('浏览器未连接').waitFor({ timeout: 10000 });
+      await page.locator('#connect', { hasText: existingManual ? '连接桌面' : '接管并连接' }).waitFor({ timeout: 10000 });
       assert.equal(await page.locator('#desktop-frame').count(), 0);
     });
 
     // Takeover pauses processing, so re-check right before clicking and stop at the first failure.
     const connected = pagesOk && await step('接管后 noVNC 画布连上', async () => {
       const now = await (await context.request.get(BASE + '/api/status')).json();
-      if (now.control !== 'paused') throw new Error('control=' + now.control + '，不再接管');
+      if (now.control !== (existingManual ? 'manual' : 'paused')) throw new Error('control=' + now.control + '，控制状态已变化，停止本次连接');
       await page.click('#connect');
-      tookOver = true;
+      tookOver = !existingManual;
       const failed = page.waitForFunction(() => { const n = document.getElementById('notice'); return n && !n.hidden && n.dataset.kind === 'error' ? n.textContent : false; }, null, { timeout: 120000 }).then(h => h.jsonValue()).catch(() => false);
       const mounted = page.locator('#desktop-frame').waitFor({ timeout: 120000 }).then(() => true).catch(() => false);
       const outcome = await Promise.race([mounted.then(ok => ({ mounted: ok })), failed.then(text => ({ error: text }))]);
@@ -61,7 +67,7 @@ try {
       await page.screenshot({ path: '/artifacts/panel-desktop.png', fullPage: true });
     });
 
-    if (connected) await step('释放后断开并封锁桌面入口', async () => {
+    if (connected && !existingManual) await step('释放后断开并封锁桌面入口', async () => {
       await page.locator('#primary-action', { hasText: '释放接管' }).click();
       await page.locator('#status-pill', { hasText: '已暂停' }).waitFor({ timeout: 120000 });
       tookOver = false;

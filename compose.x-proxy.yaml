@@ -1,7 +1,7 @@
 # 可选的 X 浏览器出口；通过 COMPOSE_FILE=compose.yaml:compose.x-proxy.yaml 启用。
 services:
   browser:
-    image: role-workflow-browser:${BROWSER_VERSION:-0.1.8}
+    image: role-workflow-browser:${BROWSER_VERSION:-0.1.12}
     environment:
       BROWSER_PROXY_SERVER: http://browser-egress:7890
     networks:

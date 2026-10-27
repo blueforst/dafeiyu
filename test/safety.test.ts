@@ -9,7 +9,7 @@ import { PiGenerator,parseDraft,publicLengthOK } from '../src/model.js';
 import { safeEvent,Serial,browserProxy } from '../src/browser.js';
 import type { Config,Event,Receipt } from '../src/types.js';
 import type { Transport } from '../src/transport.js';
-const config:Config={expectedHandle:'tester',mode:'draft',pollSeconds:60,maxAgeHours:6,maxPerRound:2,publicPerHour:10,privatePerHour:30,retentionDays:30,persona:'测试 AI',dailyState:'无',model:{provider:'custom',api:'openai-completions',baseUrl:'',id:'',reasoning:false,reasoningLevel:'low',vision:false,maxTokens:1000,timeoutMs:1000}};
+const config:Config={mode:'draft',pollSeconds:60,maxAgeHours:6,maxPerRound:2,publicPerHour:10,privatePerHour:30,retentionDays:30,persona:'测试 AI',dailyState:'无',model:{provider:'custom',api:'openai-completions',baseUrl:'',id:'',reasoning:false,reasoningLevel:'low',vision:false,maxTokens:1000,timeoutMs:1000}};
 const event:Event={id:'x:123',channel:'public',userId:'x:alice',handle:'alice',text:'你好',url:'https://x.com/alice/status/123',conversationId:'123',timestamp:Date.now()};
 test('代理配置错误时拒绝启动，不静默回退或暴露凭据',()=>{
  assert.equal(browserProxy(),undefined);
@@ -30,7 +30,29 @@ test('服务重启将 sending 转为 unknown，并保持暂停',()=>{const f=fix
 test('公开上下文隔离私信原文和摘要',()=>{const f=fixture();try{f.store.ingest(event);f.store.summary(event.userId,'public','公开爱好',0);f.store.summary(event.userId,'private','秘密工作',0);f.store.ingest({...event,id:'dm:123',channel:'private',text:'私信秘密'});f.store.update('dm:123','confirmed',{draft:{action:'reply',text:'已知',reason:''}});const p=JSON.stringify(f.store.context(event.userId,'public'));assert.ok(!p.includes('秘密'));assert.ok(p.includes('公开爱好'));assert.ok(JSON.stringify(f.store.context(event.userId,'private')).includes('秘密工作'));}finally{f.close();}});
 test('遗忘使后台旧摘要失效并禁止继续记录',()=>{const f=fixture();try{f.store.ingest(event);const epoch=f.store.epoch(event.userId);f.store.forget(event.userId);assert.equal(f.store.summary(event.userId,'public','迟到的摘要',epoch),false);assert.equal(f.store.ingest(event),false);assert.equal(f.store.getMessage(event.id),undefined);f.store.remember(event.userId);assert.equal(f.store.ingest(event),true);}finally{f.close();}});
 test('人工接管中止生成；释放后继续暂停',async()=>{const f=fixture();f.c.mode='auto';let started!:()=>void;const ready=new Promise<void>(r=>started=r);f.generator.complete=async(_c?:any,_s?:any,_u?:any,signal?:AbortSignal)=>{started();await new Promise((resolve,reject)=>signal?.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}));throw Error('unreachable');};try{const tick=f.workflow.tick();await ready;await f.workflow.takeover();await tick;assert.equal(f.sends(),0);assert.equal(f.workflow.control(),'manual');await f.workflow.release();assert.equal(f.workflow.control(),'paused');}finally{f.close();}});
-test('身份变化后停止采集和发送',async()=>{const f=fixture();f.t.identity=async()=>({loggedIn:true,needsHuman:false,handle:'other'});try{await f.workflow.tick();assert.equal(f.workflow.control(),'paused');assert.equal(f.store.stats().messages.length,0);assert.equal(f.sends(),0);}finally{f.close();}});
+test('不配置账号即可恢复，采集、上下文、发送和回查均使用当前登录账号',async()=>{
+ const f=fixture();f.c.mode='auto';const seen:Array<[string,string]>=[];
+ f.t.identity=async()=>({loggedIn:true,needsHuman:false,handle:'Current_User'});
+ f.t.collect=async handle=>{seen.push(['collect',handle]);return {events:[event],warnings:[]};};
+ f.t.context=async(_e,handle)=>{seen.push(['context',handle]);return event.text;};
+ f.t.send=async(_e,_text,handle)=>{seen.push(['send',handle]);return {status:'unknown'};};
+ f.t.lookup=async(_e,_text,handle)=>{seen.push(['lookup',handle]);return {status:'confirmed'};};
+ try{f.store.set('control','paused');await f.workflow.resume();await f.workflow.tick();await f.workflow.tick();assert.deepEqual(seen,[['collect','current_user'],['context','current_user'],['send','current_user'],['lookup','current_user'],['collect','current_user']]);assert.equal(f.workflow.control(),'running');}finally{f.close();}
+});
+test('未登录、需要验证或无法识别账号时不恢复',async()=>{
+ for(const identity of [{loggedIn:false,needsHuman:false,handle:''},{loggedIn:true,needsHuman:true,handle:'tester'},{loggedIn:true,needsHuman:false,handle:''}]){
+  const f=fixture();f.t.identity=async()=>identity;
+  try{f.store.set('control','paused');await assert.rejects(f.workflow.resume(),/请先登录 X/);assert.equal(f.workflow.control(),'paused');f.store.set('control','running');await f.workflow.tick();assert.equal(f.workflow.control(),'paused');assert.equal(f.store.stats().messages.length,0);assert.equal(f.sends(),0);}finally{f.close();}
+ }
+});
+test('恢复后切换账号，在采集前暂停',async()=>{const f=fixture();try{f.store.set('control','paused');await f.workflow.resume();f.t.identity=async()=>({loggedIn:true,needsHuman:false,handle:'other'});await f.workflow.tick();assert.equal(f.workflow.control(),'paused');assert.equal(f.store.stats().messages.length,0);assert.equal(f.sends(),0);}finally{f.close();}});
+test('生成期间退出登录或切换账号，保留草稿并暂停，不触发发送',async()=>{
+ for(const identity of [{loggedIn:false,needsHuman:false,handle:''},{loggedIn:true,needsHuman:false,handle:'other'}]){
+  const f=fixture();f.c.mode='auto';const complete=f.generator.complete;
+  f.generator.complete=async()=>{f.t.identity=async()=>identity;return complete();};
+  try{await f.workflow.tick();assert.equal(f.workflow.control(),'paused');assert.equal(f.store.getMessage(event.id).status,'draft');assert.equal(f.sends(),0);}finally{f.close();}
+ }
+});
 test('无效模型输出和超长公开回复禁止发送',async()=>{assert.throws(()=>parseDraft('这不是JSON'));assert.throws(()=>parseDraft('{"action":"reply","text":"看 https://example.org","reason":""}'));assert.equal(publicLengthOK('中'.repeat(141)),false);const f=fixture();f.c.mode='auto';f.generator.complete=async()=>({text:'坏输出',input:1,output:1,cache:0});try{await f.workflow.tick();assert.equal(f.sends(),0);assert.equal(f.store.getMessage(event.id).status,'failed');}finally{f.close();}});
 test('平台拒绝触发通道四小时退避',async()=>{const f=fixture();f.c.mode='auto';f.setReceipt({status:'rejected',reason:'平台限额'});try{await f.workflow.tick();assert.ok(Number(f.store.get('cooldown:public'))>Date.now()+3.9*3600000);f.setReceived([{...event,id:'x:125'}]);await f.workflow.tick();assert.equal(f.sends(),1);}finally{f.close();}});
 test('浏览器串行互斥和导航白名单',async()=>{const serial=new Serial(),steps:number[]=[];await Promise.all([serial.run(async()=>{steps.push(1);await new Promise(r=>setTimeout(r,10));steps.push(2);}),serial.run(async()=>{steps.push(3);})]);assert.deepEqual(steps,[1,2,3]);assert.throws(()=>safeEvent({...event,url:'http://169.254.169.254/latest/meta-data'}));assert.throws(()=>safeEvent({...event,url:'https://x.com/i/settings'}));});

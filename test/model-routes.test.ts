@@ -13,7 +13,7 @@ const KEY = 'sk-test-123456789';
 const custom = (over: Record<string, unknown> = {}) => ({ provider: 'custom', baseUrl: 'http://mock.local/v1', api: 'openai-completions', id: 'my-model', reasoningLevel: 'off', maxTokens: 1024, timeoutMs: 60000, ...over });
 const okResult = (over: Partial<CompletionResult> = {}): CompletionResult => ({ text: 'MODEL_OK', input: 5, output: 2, cache: 0, stopReason: 'stop', latencyMs: 30, ...over });
 
-function setup(opts: { control?: string; run?: any; discover?: any } = {}) {
+function setup(opts: { run?: any; discover?: any } = {}) {
   const root = mkdtempSync(tmpdir() + '/role-routes-');
   mkdirSync(root + '/data'); mkdirSync(root + '/secrets');
   writeExampleConfig(root + '/config.json');
@@ -21,11 +21,9 @@ function setup(opts: { control?: string; run?: any; discover?: any } = {}) {
   process.env.DATA_DIR = root + '/data'; process.env.SECRETS_DIR = root + '/secrets'; process.env.CONFIG_PATH = root + '/config.json';
   const store = new Store(root + '/data/db.sqlite');
   const app = Fastify();
-  let control = opts.control ?? 'paused';
-  registerModelRoutes(app, { store, control: () => control, run: opts.run ?? (async () => okResult()), discover: opts.discover ?? (async () => ({ models: [], total: 0 })) });
+  registerModelRoutes(app, { store, run: opts.run ?? (async () => okResult()), discover: opts.discover ?? (async () => ({ models: [], total: 0 })) });
   return {
     app, store,
-    setControl: (c: string) => { control = c; },
     req: (method: 'GET' | 'PUT' | 'POST', url: string, payload?: unknown) => app.inject({ method, url, payload: payload as any }),
     async close() {
       await app.close(); store.db.close();
@@ -81,19 +79,11 @@ test('设置文件损坏时，保存一次就能修好', async () => {
   } finally { await t.close(); }
 });
 
-test('预期账号：规范化保存、空值清除、运行中拒绝修改', async () => {
+test('旧账号设置接口已移除', async () => {
   const t = setup();
   try {
-    const r = await t.req('PUT', '/api/account', { expectedHandle: '@Role_Demo' });
-    assert.equal(r.json().expectedHandle, 'role_demo');
-    assert.equal(readPanelSettings().expectedHandle, 'role_demo');
-    await t.req('PUT', '/api/account', { expectedHandle: '' });
-    assert.equal(readPanelSettings().expectedHandle, undefined);
-    assert.equal((await t.req('PUT', '/api/account', { expectedHandle: 'bad name!' })).statusCode, 400);
-    t.setControl('running');
-    const blocked = await t.req('PUT', '/api/account', { expectedHandle: 'role_demo' });
-    assert.equal(blocked.statusCode, 409);
-    assert.match(blocked.json().error, /先暂停/);
+    assert.equal((await t.req('PUT', '/api/account', {})).statusCode, 404);
+    assert.deepEqual(readPanelSettings(), {});
   } finally { await t.close(); }
 });
 

@@ -19,11 +19,22 @@ COPY public ./public
 USER node
 CMD ["node","dist/app.js"]
 
-FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS browser-os
-RUN apt-get update && apt-get install -y --no-install-recommends chromium xvfb openbox x11vnc websockify novnc supervisor fonts-noto-cjk fonts-liberation ca-certificates curl && rm -rf /var/lib/apt/lists/*
+FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS camoufox-assets
+ENV XDG_CACHE_HOME=/opt/role-camoufox/cache
+WORKDIR /opt/role-camoufox
+COPY browser-engines/camoufox/package*.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund \
+    && node_modules/.bin/camoufox fetch \
+    && node --input-type=module -e "import { getModel } from './node_modules/camoufox/dist/fpgen/index.js'; getModel();" \
+    && ln -s /tmp/role-camoufox-fontconfig cache/camoufox/fontconfig
+COPY browser-engines/camoufox/launch.mjs ./launch.mjs
 
-FROM browser-os AS browser
-ENV NODE_ENV=production DISPLAY=:99 CHROMIUM_PATH=/usr/bin/chromium
+FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS browser
+ENV NODE_ENV=production DISPLAY=:99 XDG_CACHE_HOME=/opt/role-camoufox/cache
+COPY --from=camoufox-assets /opt/role-camoufox /opt/role-camoufox
+RUN apt-get update && apt-get install -y --no-install-recommends xvfb openbox x11vnc websockify novnc supervisor fonts-noto-cjk fonts-liberation ca-certificates curl \
+    && /opt/role-camoufox/node_modules/.bin/playwright-core install-deps firefox \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json ./

@@ -26,7 +26,7 @@ export async function startApp(){
  });
  app.get('/healthz',async()=>({ok:true}));
  app.get('/api/status',async()=>{
-  let config:any;let configError='';try{const c=loadConfig();config={expectedHandle:c.expectedHandle,mode:c.mode,model:{provider:c.model.provider,id:c.model.id,api:c.model.api,source:c.model.source,baseUrlHost:(()=>{try{return new URL(c.model.baseUrl).hostname;}catch{return '';}})(),configured:!!c.model.id&&!!c.model.baseUrl&&!!modelKey(c.model)},publicPerHour:c.publicPerHour,privatePerHour:c.privatePerHour};}catch(err){configError=redact(err);}
+  let config:any;let configError='';try{const c=loadConfig();config={mode:c.mode,model:{provider:c.model.provider,id:c.model.id,api:c.model.api,source:c.model.source,baseUrlHost:(()=>{try{return new URL(c.model.baseUrl).hostname;}catch{return '';}})(),configured:!!c.model.id&&!!c.model.baseUrl&&!!modelKey(c.model)},publicPerHour:c.publicPerHour,privatePerHour:c.privatePerHour};}catch(err){configError=redact(err);}
   let browser:any;try{browser=await transport.identity();}catch(err){browser={loggedIn:false,reason:redact(err)};}
   return {control:workflow.control(),busy:workflow.busy,config,configError,browser,lastTick:Number(store.get('lastTick','0')),cooldown:{public:Number(store.get('cooldown:public','0')),private:Number(store.get('cooldown:private','0'))},stats:store.stats(),observationStartedAt:store.get('observationStartedAt'),now:Date.now()};
  });
@@ -40,7 +40,7 @@ export async function startApp(){
  for(const action of ['pause','resume','takeover','release'] as const)app.post('/api/control/'+action,async(req,reply)=>{
   try{await workflow[action]();return {ok:true,control:workflow.control()};}catch(err){return reply.code(409).send({error:redact(err)});}
  });
- registerModelRoutes(app,{store,control:()=>workflow.control()});
+ registerModelRoutes(app,{store});
  await app.register(proxy,{upstream:'http://browser:6080',prefix:'/desktop',rewritePrefix:'/',websocket:true,preHandler:async(req,reply)=>{if(workflow.control()!=='manual')return reply.code(423).send({error:'请先点击人工接管，再打开浏览器桌面'});}});
  await app.register(staticFiles,{root:new URL('../public',import.meta.url).pathname,prefix:'/',index:'index.html'});
  app.setErrorHandler((err,req,reply)=>{store.log('api-error',redact(err instanceof Error?err.message:err),'warn');reply.code(500).send({error:'请求失败，请查看日志'});});

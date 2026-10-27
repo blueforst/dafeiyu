@@ -5,7 +5,7 @@ import type { Config } from './types.js';
 
 export type ReasoningLevel = 'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max';
 export type PanelModel = { provider:string; baseUrl:string; api?:'openai-completions'|'openai-responses'|'anthropic-messages'; id:string; reasoningLevel:ReasoningLevel; maxTokens:number; timeoutMs:number; custom?:{contextWindow:number;reasoning:boolean} };
-export type PanelSettings = { expectedHandle?:string; model?:PanelModel };
+export type PanelSettings = { model?:PanelModel };
 
 export function panelDir():string { return (process.env.DATA_DIR || '/data') + '/panel'; }
 
@@ -61,13 +61,6 @@ export function keyHints():Record<string,string> {
   return out;
 }
 
-export function validateHandle(raw:string):string {
-  const v = String(raw ?? '').trim().replace(/^@/, '').toLowerCase();
-  if (!v) return '';
-  if (!/^[a-z0-9_]{1,15}$/.test(v)) throw new Error('账号名称无效');
-  return v;
-}
-
 const BLOCKED_HOSTS = new Set(['browser', 'app', 'localhost', '0.0.0.0', '::1']);
 export function checkBaseUrl(raw:string):URL {
   let u:URL;
@@ -86,7 +79,6 @@ export function toConfigModel(p:PanelModel):Config['model'] {
 }
 
 export function mergePanel(c:Config, p:PanelSettings):Config {
-  if (p.expectedHandle !== undefined) c.expectedHandle = p.expectedHandle;
   c.model = p.model ? toConfigModel(p.model) : { ...c.model, source: 'config' };
   return c;
 }

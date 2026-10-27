@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
-import { chromium, type BrowserContext, type Page } from 'playwright-core';
+import { type BrowserContext, type Page } from 'playwright-core';
+import { launchBrowser } from './browser-launcher.js';
 import { readFileSync,writeFileSync,renameSync,mkdirSync } from 'node:fs';
 import { createHash,timingSafeEqual } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -78,7 +79,7 @@ export async function startBrowserServer(){
  try{journal=JSON.parse(readFileSync(journalPath,'utf8'));}catch{}
  function saveJournal(){const entries=Object.entries(journal).slice(-2000);journal=Object.fromEntries(entries);writeFileSync(journalPath+'.tmp',JSON.stringify(journal),{mode:0o600});renameSync(journalPath+'.tmp',journalPath);}
  const proxy=browserProxy(process.env.BROWSER_PROXY_SERVER);
- context=await chromium.launchPersistentContext(profile,{executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:false,chromiumSandbox:true,viewport:null,locale:'en-US',proxy,ignoreDefaultArgs:['--enable-unsafe-swiftshader','--use-angle=swiftshader-webgl','--use-gl=angle'],args:['--no-first-run','--no-default-browser-check','--window-size=1440,900','--hide-crash-restore-bubble',...(proxy?['--disable-quic']:[])]});
+ context=await launchBrowser(profile,proxy);
  context.on('close',()=>{if(shuttingDown)return;console.error('浏览器上下文关闭，交由监督器恢复');process.exit(1);});
  let publicPage=context.pages()[0]||await context.newPage();
  await publicPage.goto('https://x.com/home',{waitUntil:'domcontentloaded',timeout:30000}).catch(()=>{});
@@ -110,7 +111,7 @@ export async function startBrowserServer(){
   const value=String(req.headers['x-browser-key']||'');const a=Buffer.from(value),b=Buffer.from(secret);
   if(a.length!==b.length||!timingSafeEqual(a,b))return reply.code(401).send({error:'未授权'});
  });
- app.get('/health',async()=>({ready:!!context&&context.pages().length>0,mode,sandbox:true}));
+ app.get('/health',async()=>({ready:!!context&&context.pages().length>0,mode,engine:'camoufox',version:context.browser()?.version()}));
  app.get('/identity',async()=>{if(publicPage.isClosed()){const replacement=context.pages().find(p=>p.url().startsWith('https://x.com/'));if(replacement)publicPage=replacement;else return {handle:'',loggedIn:false,needsHuman:true,reason:'请人工打开 X 页面'};}return identity(publicPage);});
  app.post('/control',async(req,reply)=>{
   const next=(req.body as any)?.mode;if(!['manual','paused','auto'].includes(next))return reply.code(400).send({error:'控制模式无效'});

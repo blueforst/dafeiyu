@@ -1,7 +1,7 @@
 name: role-workflow
 services:
   app:
-    image: role-workflow-app:${APP_VERSION:-${ROLE_VERSION:-0.1.4}}
+    image: role-workflow-app:${APP_VERSION:-${ROLE_VERSION:-0.1.12}}
     build:
       context: .
       target: runtime
@@ -35,7 +35,7 @@ services:
       options: {max-size: "10m", max-file: "3"}
   browser:
     hostname: role-workflow-browser
-    image: role-workflow-browser:${BROWSER_VERSION:-${ROLE_VERSION:-0.1.4}}
+    image: role-workflow-browser:${BROWSER_VERSION:-${ROLE_VERSION:-0.1.12}}
     build:
       context: .
       target: browser

@@ -1,7 +1,7 @@
-// Overview: run state, expected X account, model summary, live logs.
+// 概览：运行状态、浏览器当前账号、模型摘要和日志。
 import { h, set, fmtTime, fmtDateTime, hostOf } from '../dom.js';
 import { api } from '../api.js';
-import { onStatus, onLogs, refreshStatus, notice } from '../state.js';
+import { onStatus, onLogs, notice } from '../state.js';
 
 const MODE = { draft: '草稿模式 · 只生成草稿，不发送', auto: '自动回复' };
 const STATE_LABEL = { paused: '已暂停', running: '处理中', draining: '等待当前操作结束', manual: '人工接管中' };
@@ -22,20 +22,11 @@ export function mount(root) {
   const runCard = h('section', { class: 'card' }, h('h2', { class: 'card-h' }, '运行'), runState, runMode, runRows, unknown, cooldown, configError);
 
   // ---- account card
-  const handleInput = h('input', { id: 'handle-input', class: 'input', placeholder: '例如 role_demo（不带 @）', autocomplete: 'off', spellcheck: 'false' });
-  const handleSave = h('button', { id: 'handle-save', class: 'btn', type: 'button' }, '保存');
-  const useCurrent = h('button', { id: 'handle-use-current', class: 'linkbtn', type: 'button' }, '用当前登录');
-  const loginLine = h('span');
-  const handleHint = h('div', { class: 'muted small', style: 'margin-top:6px' });
-  const mismatch = h('div', { class: 'callout bad' });
+  const loginLine = h('span', { id: 'login-account' });
   const accountCard = h('section', { class: 'card' },
-    h('h2', { class: 'card-h' }, 'X 账号', useCurrent),
-    h('label', { class: 'field', for: 'handle-input', style: 'margin-top:0' }, '预期账号'),
-    h('div', { class: 'inline' }, handleInput, handleSave),
-    handleHint,
-    h('div', { class: 'row', style: 'margin-top:8px' }, h('span', {}, '浏览器登录'), loginLine),
-    mismatch,
-    h('div', { class: 'muted small', style: 'margin-top:6px' }, '登录或过验证码请去"浏览器"页'));
+    h('h2', { class: 'card-h' }, 'X 账号'),
+    h('div', { class: 'row' }, h('span', {}, '当前登录'), loginLine),
+    h('div', { class: 'muted small', style: 'margin-top:6px' }, '使用浏览器当前登录的账号。登录或过验证码请去"浏览器"页。'));
 
   // ---- model card
   const modelSummary = h('div', { id: 'model-summary' }, h('span', { class: 'muted' }, '读取中…'));
@@ -50,28 +41,6 @@ export function mount(root) {
   set(root, h('div', { class: 'grid3' }, runCard, accountCard, modelCard, logsCard));
 
   // ---- behaviour
-  let dirty = false;
-  let lastStatus = null;
-  handleInput.addEventListener('input', () => { dirty = true; });
-
-  async function saveHandle(value) {
-    handleSave.disabled = true;
-    try {
-      const r = await api('/api/account', { method: 'PUT', body: { expectedHandle: value } });
-      dirty = false;
-      handleInput.value = r.expectedHandle;
-      notice(r.expectedHandle ? '预期账号已保存：@' + r.expectedHandle : '预期账号已清除', 'ok');
-      await refreshStatus();
-    } catch (e) {
-      notice(e.message, 'error');
-    } finally {
-      renderAccount(lastStatus);
-    }
-  }
-  handleSave.addEventListener('click', () => saveHandle(handleInput.value));
-  handleInput.addEventListener('keydown', e => { if (e.key === 'Enter') saveHandle(handleInput.value); });
-  useCurrent.addEventListener('click', () => { const handle = lastStatus?.browser?.handle; if (handle) saveHandle(handle); });
-
   function renderRun(s) {
     if (!s) { runState.textContent = '连接失败'; return; }
     runState.textContent = STATE_LABEL[s.control] ?? s.control;
@@ -90,18 +59,9 @@ export function mount(root) {
   }
 
   function renderAccount(s) {
-    const running = s?.control === 'running';
-    const expected = s?.config?.expectedHandle ?? '';
-    if (!dirty && document.activeElement !== handleInput) handleInput.value = expected;
-    handleInput.disabled = running || !s;
-    handleSave.disabled = running || !s;
-    handleHint.textContent = running ? '先暂停，再修改预期账号' : '';
     const b = s?.browser ?? {};
-    useCurrent.disabled = running || !(b.loggedIn && b.handle);
-    if (b.loggedIn && b.handle) { loginLine.textContent = '@' + b.handle; loginLine.className = expected && b.handle.toLowerCase() !== expected ? 'bad' : 'ok'; }
+    if (b.loggedIn && b.handle && !b.needsHuman) { loginLine.textContent = '@' + b.handle; loginLine.className = 'ok'; }
     else { loginLine.textContent = b.needsHuman ? '需要人工处理' : '未登录'; loginLine.className = 'muted'; }
-    mismatch.textContent = b.loggedIn && b.handle && expected && b.handle.toLowerCase() !== expected
-      ? '浏览器登录的是 @' + b.handle + '，与预期账号 @' + expected + ' 不一致，恢复处理会被拒绝。' : '';
   }
 
   async function loadModel() {
@@ -133,7 +93,7 @@ export function mount(root) {
   }
   more.addEventListener('click', () => { expanded = !expanded; more.textContent = expanded ? '只看最近' : '查看更多'; if (expanded) loadMore(); });
 
-  const offStatus = onStatus(s => { lastStatus = s; renderRun(s); renderAccount(s); });
+  const offStatus = onStatus(s => { renderRun(s); renderAccount(s); });
   const offLogs = onLogs(rows => { if (expanded) loadMore(); else renderLogs(rows); });
   loadModel();
   return () => { offStatus(); offLogs(); };

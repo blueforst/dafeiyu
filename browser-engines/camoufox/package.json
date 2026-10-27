@@ -1,0 +1,9 @@
+{
+  "name": "role-workflow-camoufox",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "camoufox": "0.5.8",
+    "playwright-core": "1.62.0"
+  }
+}

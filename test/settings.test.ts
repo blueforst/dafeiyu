@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { panelDir, readPanelSettings, writePanelSettings, keySlot, readModelKey, writeModelKey, keyHint, validateHandle, checkBaseUrl } from '../src/settings.js';
+import { panelDir, readPanelSettings, writePanelSettings, keySlot, readModelKey, writeModelKey, keyHint, checkBaseUrl } from '../src/settings.js';
 import { loadConfig, redact } from '../src/config.js';
 import { writeExampleConfig } from './config-fixture.js';
 
@@ -40,12 +40,6 @@ test('Key 按槽位保存，文件权限 0600，只提示末四位', () => {
   } finally { s.close(); }
 });
 
-test('预期账号去掉 @、转小写，空值表示清除', () => {
-  assert.equal(validateHandle('@Role_Demo'), 'role_demo');
-  assert.equal(validateHandle(''), '');
-  assert.throws(() => validateHandle('bad name!'), /账号名称无效/);
-});
-
 test('Base URL 拒绝本机、元数据地址、内部服务和带凭据的地址', () => {
   for (const bad of ['http://localhost:1', 'http://127.0.0.2/v1', 'http://169.254.169.254', 'http://browser:3001', 'http://app:8080', 'http://u:p@x.example', 'ftp://x.example']) {
     assert.throws(() => checkBaseUrl(bad), /模型地址无效/, bad);
@@ -54,12 +48,11 @@ test('Base URL 拒绝本机、元数据地址、内部服务和带凭据的地�
   assert.equal(checkBaseUrl('http://192.168.1.10:11434/v1').port, '11434');
 });
 
-test('面板设置覆盖 config.json 的账号和模型，内置服务商不受三种协议限制', () => {
+test('面板设置覆盖 config.json 的模型，内置服务商不受三种协议限制', () => {
   const s = sandbox();
   try {
-    writePanelSettings({ expectedHandle: 'role_demo', model: { provider: 'google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', id: 'x', reasoningLevel: 'high', maxTokens: 1024, timeoutMs: 60000 } });
+    writePanelSettings({ model: { provider: 'google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', id: 'x', reasoningLevel: 'high', maxTokens: 1024, timeoutMs: 60000 } });
     const c = loadConfig(s.configPath);
-    assert.equal(c.expectedHandle, 'role_demo');
     assert.equal(c.model.source, 'panel');
     assert.equal(c.model.provider, 'google');
     assert.equal(c.model.reasoning, true);
