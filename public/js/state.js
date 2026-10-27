@@ -6,6 +6,7 @@ let logs = [];
 let pending = false;
 const statusSubs = new Set();
 const logSubs = new Set();
+const eventSubs = new Map();
 
 function emitStatus() { for (const fn of statusSubs) fn(status); }
 
@@ -22,6 +23,12 @@ export function onLogs(fn) {
   logSubs.add(fn);
   fn(logs);
   return () => logSubs.delete(fn);
+}
+
+export function onEvent(name, fn) {
+  if (!eventSubs.has(name)) eventSubs.set(name, new Set());
+  eventSubs.get(name).add(fn);
+  return () => eventSubs.get(name)?.delete(fn);
 }
 
 function setConn(state, text = '') {
@@ -85,6 +92,10 @@ function startLogs() {
     try { logs = JSON.parse(e.data); } catch { return; }
     if (document.getElementById('conn')?.dataset.state === 'reconnecting') setConn('ok');
     for (const fn of logSubs) fn(logs);
+  });
+  for (const name of ['program', 'tasks', 'feed', 'health']) es.addEventListener(name, e => {
+    let payload; try { payload = JSON.parse(e.data); } catch { return; }
+    for (const fn of eventSubs.get(name) ?? []) fn(payload);
   });
   es.onerror = () => setConn('reconnecting', '日志重连中');
 }

@@ -1,5 +1,7 @@
 # 面板重做与模型配置 · 实施计划
 
+> 当前后续开发计划：[X 自动回复 bot：七页面板与生产功能实施计划](2026-10-27-seven-page-production-bot.md)。已纳入人设、记忆、主程序、定时任务、计费及生产真实互动要求。本文以下为最初三页面板的历史记录，不作为本轮新功能的实施指令；旧工作目录、分工与功能范围应按新计划及实际仓库核对。
+
 > 2026-10-27 更新：本文保留为最初设计记录。用户已明确不需要预期账号功能；0.1.12 已移除账号设置和对应限制，改用浏览器当前登录账号。当前行为以 README 与前端接口文档为准。
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

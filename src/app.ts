@@ -7,14 +7,53 @@ import { Store } from './store.js';
 import { PiGenerator,modelKey } from './model.js';
 import { registerModelRoutes } from './model-routes.js';
 import { BrowserTransport } from './transport.js';
-import { Workflow } from './workflow.js';
+import { Workflow,loggedInHandle } from './workflow.js';
 import { loadConfig,readSecret,redact } from './config.js';
+import { LlmStore,billingTotals } from './llm-store.js';
+import { registerBillingRoutes } from './billing-routes.js';
+import { PersonaService } from './persona.js';
+import { DailyStateService } from './daily-state.js';
+import { registerPersonaRoutes } from './persona-routes.js';
+import { MemoryService } from './memory.js';
+import { registerMemoryRoutes } from './memory-routes.js';
+import { Outbox } from './outbox.js';
+import { Program,registerProgramRoutes } from './program.js';
+import { TaskScheduler } from './scheduler.js';
+import { registerTaskRoutes } from './task-routes.js';
+import { productionTaskHandlers } from './production-tasks.js';
+import { ActivityFeed } from './activity-feed.js';
+import { registerFeedRoutes } from './feed-routes.js';
+import { ReplyTriage,normalizeTriageSettings } from './reply-triage.js';
+import { registerTriageRoutes } from './triage-routes.js';
+import { PostingCapabilitiesService } from './posting-capabilities.js';
+import { registerPostingRoutes } from './posting-routes.js';
+import { RuntimeHealth } from './unattended-health.js';
+import { registerHealthRoutes } from './health-routes.js';
+import { ReplayRunner } from './persona-replay.js';
+import { registerReplayRoutes } from './replay-routes.js';
+import { registerPromptHintsRoutes } from './reply-hints-routes.js';
+import { readPanelSettings,mergePanelSettings } from './settings.js';
 export async function startApp(){
  const app=Fastify({logger:false,bodyLimit:16384});const data=process.env.DATA_DIR||'/data';mkdirSync(data,{recursive:true});
  const store=new Store(data+'/workflow.sqlite');store.boot();
  const ingress=readSecret('ingress_key');if(!ingress)throw new Error('缺少入口凭据');
- const transport=new BrowserTransport(process.env.BROWSER_ENDPOINT||'http://browser:3001',readSecret('browser_key'));
- const workflow=new Workflow(store,transport,new PiGenerator());
+ const transport=new BrowserTransport(process.env.BROWSER_ENDPOINT||'http://browser:3001',readSecret('browser_key'),()=>loadConfig().health??{});
+ const generator=new PiGenerator(store),workflow=new Workflow(store,transport,generator);
+ let observedAccount:string|undefined;
+ const accountId=()=>workflow.control()==='running'?workflow.accountId():(observedAccount??workflow.accountId());
+ const billing=new LlmStore(store);billing.recoverInterrupted();
+ const program=new Program(store);program.recover();
+ const outbox=new Outbox(store);outbox.recover();
+ const persona=new PersonaService(store,generator),memory=new MemoryService(store,generator);
+ let scheduler:TaskScheduler;
+ const daily=new DailyStateService(store,generator,loadConfig,Date.now,()=>workflow.control()==='running'&&(scheduler?.plans()['daily-state'].enabled??true));
+ const posting=new PostingCapabilitiesService(store,accountId),triage=new ReplyTriage(store,()=>normalizeTriageSettings(loadConfig().triage,loadConfig().maxAgeHours)),health=new RuntimeHealth(store);
+ persona.postingPolicy=()=>posting.get();
+ workflow.services={program,outbox,persona,memory,daily,posting,triage,health};
+ scheduler=new TaskScheduler(store,{account:accountId,control:()=>workflow.control(),mode:()=>loadConfig().mode,nextTick:()=>workflow.nextTick,businessBusy:()=>workflow.busy,...productionTaskHandlers(workflow)});
+ workflow.services.scheduler=scheduler;
+ const feed=new ActivityFeed(store,accountId,()=>loadConfig().maxAgeHours,posting,triage);
+ const replay=new ReplayRunner(store,persona,generator,{accountId,config:loadConfig,memory:(userId,channel,account,at)=>memory.context(userId,channel,account,at)});
  app.addHook('onRequest',async(req,reply)=>{
   if(req.url==='/healthz')return;
   const supplied=Buffer.from(String(req.headers['x-ingress-key']||'')),expected=Buffer.from(ingress);
@@ -24,16 +63,17 @@ export async function startApp(){
   delete req.headers.authorization;
   if(req.headers.origin&&req.headers.origin!=='https://'+req.headers.host)return reply.code(403).send({error:'来源不符'});
  });
+ app.setErrorHandler((err:any,req,reply)=>{const code=Number(err.statusCode);if(code>=400&&code<500)return reply.code(code).send({error:code===413?'请求体超过大小限制':'请求参数无效'});store.log('api-error','请求处理失败','warn');reply.code(500).send({error:'请求失败，请查看日志'});});
  app.get('/healthz',async()=>({ok:true}));
  app.get('/api/status',async()=>{
   let config:any;let configError='';try{const c=loadConfig();config={mode:c.mode,model:{provider:c.model.provider,id:c.model.id,api:c.model.api,source:c.model.source,baseUrlHost:(()=>{try{return new URL(c.model.baseUrl).hostname;}catch{return '';}})(),configured:!!c.model.id&&!!c.model.baseUrl&&!!modelKey(c.model)},publicPerHour:c.publicPerHour,privatePerHour:c.privatePerHour};}catch(err){configError=redact(err);}
-  let browser:any;try{browser=await transport.identity();}catch(err){browser={loggedIn:false,reason:redact(err)};}
-  return {control:workflow.control(),busy:workflow.busy,config,configError,browser,lastTick:Number(store.get('lastTick','0')),cooldown:{public:Number(store.get('cooldown:public','0')),private:Number(store.get('cooldown:private','0'))},stats:store.stats(),observationStartedAt:store.get('observationStartedAt'),now:Date.now()};
+  let browser:any;try{browser=await transport.identity();observedAccount=loggedInHandle(browser);}catch(err){browser={loggedIn:false,reason:redact(err)};observedAccount='';}
+  return {control:workflow.control(),busy:workflow.busy,accountId:accountId(),config,configError,browser,lastTick:Number(store.get('lastTick','0')),cooldown:{public:workflow.cooldown('public'),private:workflow.cooldown('private')},stats:{...store.stats(),usage:billingTotals(store.db)},health:health.get(accountId()),postingLimits:posting.get(),observationStartedAt:store.get('observationStartedAt'),now:Date.now()};
  });
  app.get('/api/logs',async()=>store.logs());
  app.get('/api/events',async(req,reply)=>{
   reply.hijack();reply.raw.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive','X-Accel-Buffering':'no'});
-  const send=()=>reply.raw.write('event: logs\ndata: '+JSON.stringify(store.logs(30))+'\n\n');send();
+  const send=()=>{reply.raw.write('event: logs\ndata: '+JSON.stringify(store.logs(30))+'\n\n');reply.raw.write('event: program\ndata: '+JSON.stringify({control:workflow.control(),busy:workflow.busy,stages:program.list(15),nextTick:workflow.nextTick})+'\n\n');reply.raw.write('event: tasks\ndata: '+JSON.stringify(scheduler.list())+'\n\n');reply.raw.write('event: feed\ndata: '+JSON.stringify(feed.summary())+'\n\n');reply.raw.write('event: health\ndata: '+JSON.stringify(health.get(accountId()))+'\n\n');};send();
   const interval=setInterval(()=>{send();reply.raw.write(': heartbeat\n\n');},5000);
   req.raw.on('close',()=>clearInterval(interval));
  });
@@ -41,12 +81,23 @@ export async function startApp(){
   try{await workflow[action]();return {ok:true,control:workflow.control()};}catch(err){return reply.code(409).send({error:redact(err)});}
  });
  registerModelRoutes(app,{store});
+ registerBillingRoutes(app,{store});
+ registerPersonaRoutes(app,{store,persona,daily,accountId});
+ registerMemoryRoutes(app,{memory,account:accountId});
+ registerProgramRoutes(app,{store,program,workflow});
+ registerTaskRoutes(app,{scheduler,workflow});
+ registerFeedRoutes(app,{feed,wake:()=>workflow.wake()});
+ registerPostingRoutes(app,{capabilities:posting,control:()=>workflow.control(),busy:()=>workflow.busy,refresh:()=>transport.capabilities(),operation:fn=>workflow.taskOperation('manual',fn)});
+ registerTriageRoutes(app,{triage,accountId,publicPerDay:()=>loadConfig().publicPerDay??180,maxAgeHours:()=>loadConfig().maxAgeHours,settings:()=>({settings:normalizeTriageSettings(readPanelSettings().triage,loadConfig().maxAgeHours),revision:readPanelSettings().revisions?.triage??0}),saveSettings:(settings,revision)=>{const saved=mergePanelSettings('triage',settings,revision);return {settings,revision:saved.revision};},wake:()=>workflow.wake()});
+ registerHealthRoutes(app,{health,accountId});
+ registerReplayRoutes(app,{store,replay});
+ registerPromptHintsRoutes(app,{store});
  await app.register(proxy,{upstream:'http://browser:6080',prefix:'/desktop',rewritePrefix:'/',websocket:true,preHandler:async(req,reply)=>{if(workflow.control()!=='manual')return reply.code(423).send({error:'请先点击人工接管，再打开浏览器桌面'});}});
  await app.register(staticFiles,{root:new URL('../public',import.meta.url).pathname,prefix:'/',index:'index.html'});
- app.setErrorHandler((err,req,reply)=>{store.log('api-error',redact(err instanceof Error?err.message:err),'warn');reply.code(500).send({error:'请求失败，请查看日志'});});
- const readyLoop=async()=>{try{await transport.control('paused');workflow.start();}catch{setTimeout(readyLoop,3000);}};await readyLoop();
+ let closing=false,readyTimer:ReturnType<typeof setTimeout>|undefined;
+ const readyLoop=async()=>{if(closing)return;try{await transport.control('paused');if(!closing)workflow.start();}catch{if(!closing)readyTimer=setTimeout(readyLoop,3000);}};await readyLoop();
  const statusInterval=setInterval(()=>{store.set('heartbeat',String(Date.now()));},30000);
- app.addHook('onClose',async()=>{clearInterval(statusInterval);workflow.stop();await workflow.waitIdle().catch(()=>{});store.db.close();});
+ app.addHook('onClose',async()=>{closing=true;clearTimeout(readyTimer);clearInterval(statusInterval);workflow.stop();await replay.close();await workflow.waitIdle().catch(()=>{});store.db.close();});
  process.on('SIGTERM',async()=>{await app.close();process.exit(0);});
  await app.listen({port:Number(process.env.PORT||8080),host:'0.0.0.0'});
  return {app,store,workflow};

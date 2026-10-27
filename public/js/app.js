@@ -1,74 +1,15 @@
-// Router and top bar.
-import { start, onStatus, runControl, isPending, notice } from './state.js';
-
-const STATE_LABEL = { paused: '已暂停', running: '处理中', draining: '等待当前操作结束', manual: '人工接管中' };
-const PRIMARY = {
-  paused: { action: 'resume', label: '恢复处理' },
-  running: { action: 'pause', label: '暂停' },
-  draining: { action: null, label: '等待当前操作结束…' },
-  manual: { action: 'release', label: '释放接管' },
-};
-const ROUTES = {
-  overview: () => import('./views/overview.js'),
-  model: () => import('./views/model.js'),
-  browser: () => import('./views/browser.js'),
-};
-
-const pill = document.getElementById('status-pill');
-const primary = document.getElementById('primary-action');
-const view = document.getElementById('view');
-
-onStatus(s => {
-  const control = s?.control;
-  pill.dataset.state = s ? control : 'error';
-  pill.textContent = s ? (STATE_LABEL[control] ?? control) : '连接失败';
-  // "draining" with an idle backend means a pause/takeover failed half-way; offer a retry instead of a dead button.
-  const p = control === 'draining' && !s?.busy && !isPending() ? { action: 'pause', label: '重试暂停' } : PRIMARY[control] ?? { action: null, label: '…' };
-  primary.textContent = p.label;
-  primary.dataset.action = p.action ?? '';
-  primary.disabled = !s || !p.action || isPending();
-});
-
-primary.addEventListener('click', () => {
-  const action = primary.dataset.action;
-  if (action) runControl(action);
-});
-
-let current = { route: '', unmount: null };
-let leaveGuard = null;
-const ctx = { setLeaveGuard(fn) { leaveGuard = fn; } };
-
-function routeFromHash() {
-  const r = location.hash.replace(/^#\/?/, '');
-  return ROUTES[r] ? r : 'overview';
-}
-
-async function show(route) {
-  if (current.route === route) return;
-  current.unmount?.();
-  current = { route, unmount: null };
-  leaveGuard = null;
-  for (const a of document.querySelectorAll('.tabs a')) a.classList.toggle('active', a.dataset.route === route);
-  view.replaceChildren();
-  try {
-    const mod = await ROUTES[route]();
-    if (current.route !== route) return;
-    current.unmount = mod.mount(view, ctx) ?? null;
-  } catch (e) {
-    notice('页面加载失败：' + e.message, 'error');
-  }
-}
-
-window.addEventListener('hashchange', async () => {
-  const target = routeFromHash();
-  if (target === current.route) return;
-  if (leaveGuard && !(await leaveGuard())) {
-    history.replaceState(null, '', '#/' + current.route);
-    return;
-  }
-  show(target);
-});
-
-if (!location.hash) history.replaceState(null, '', '#/overview');
-start();
-show(routeFromHash());
+import { start, onStatus, onEvent, runControl, isPending, notice } from './state.js';
+const LABEL={paused:'已暂停',running:'处理中',draining:'等待当前操作结束',manual:'人工接管中'};
+const PRIMARY={paused:['resume','恢复处理'],running:['pause','暂停'],draining:[null,'等待当前操作结束…'],manual:['release','释放接管']};
+const ROUTES={feed:()=>import('./views/feed.js'),persona:()=>import('./views/persona.js'),memory:()=>import('./views/memory.js'),settings:()=>import('./views/settings.js'),billing:()=>import('./views/billing.js')};
+const OLD={overview:'feed',model:'settings/model',program:'settings/logs',tasks:'settings/tasks',browser:'settings/browser'};
+const pill=document.getElementById('status-pill'),primary=document.getElementById('primary-action'),view=document.getElementById('view');
+onStatus(s=>{pill.dataset.state=s?s.control:'error';pill.textContent=s?(LABEL[s.control]||s.control):'连接失败';const [action,label]=s?.control==='draining'&&!s.busy&&!isPending()?['pause','重试暂停']:PRIMARY[s?.control]||[null,'…'];primary.textContent=label;primary.dataset.action=action||'';primary.disabled=!s||!action||isPending();});
+primary.onclick=()=>{if(primary.dataset.action)runControl(primary.dataset.action);};
+onEvent('feed',p=>{const b=document.getElementById('feed-count');b.textContent=Number(p.pending)>0?String(p.pending):'';b.hidden=!(Number(p.pending)>0);});
+let current={route:'',hash:'',unmount:null},leaveGuard=null,navigation=0;
+const ctx={route:{},setLeaveGuard(fn){leaveGuard=fn;}};
+function parse(){let path=location.hash.replace(/^#\/?/,'')||'feed';const [raw,query='']=path.split('?'),parts=raw.split('/');if(OLD[parts[0]]){path=OLD[parts[0]]+(query?'?'+query:'');history.replaceState(null,'','#/'+path);return parse();}if(!ROUTES[parts[0]]){history.replaceState(null,'','#/feed');return parse();}return {page:parts[0],section:parts[1]||'',params:new URLSearchParams(query),hash:'#/'+path};}
+async function show(target){ctx.route=target;if(current.route===target.page){current.hash=target.hash;window.dispatchEvent(new CustomEvent('panel-route',{detail:target}));return;}current.unmount?.();current={route:target.page,hash:target.hash,unmount:null};leaveGuard=null;for(const a of document.querySelectorAll('.tabs a')){a.classList.toggle('active',a.dataset.route===target.page);if(a.dataset.route===target.page)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');}view.replaceChildren();try{const mod=await ROUTES[target.page]();if(current.route!==target.page)return;current.unmount=mod.mount(view,ctx)||null;}catch(e){notice('页面加载失败：'+e.message,'error');}}
+window.addEventListener('hashchange',async()=>{const sequence=++navigation,target=parse();if(target.page!==current.route&&leaveGuard){const ok=await leaveGuard();if(sequence!==navigation)return;if(!ok){history.replaceState(null,'',current.hash);return;}}show(target);});
+if(!location.hash)history.replaceState(null,'','#/feed');start();show(parse());

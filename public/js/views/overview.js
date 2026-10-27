@@ -1,7 +1,8 @@
-// 概览：运行状态、浏览器当前账号、模型摘要和日志。
+// 主页面：运行状态、浏览器当前账号、模型摘要与按需接管。
 import { h, set, fmtTime, fmtDateTime, hostOf } from '../dom.js';
 import { api } from '../api.js';
-import { onStatus, onLogs, notice } from '../state.js';
+import { onStatus } from '../state.js';
+import { mount as mountBrowser } from './browser.js';
 
 const MODE = { draft: '草稿模式 · 只生成草稿，不发送', auto: '自动回复' };
 const STATE_LABEL = { paused: '已暂停', running: '处理中', draining: '等待当前操作结束', manual: '人工接管中' };
@@ -11,7 +12,7 @@ function count(stats, channel, statuses) {
   return (stats?.messages ?? []).filter(m => (!channel || m.channel === channel) && statuses.includes(m.status)).reduce((n, m) => n + Number(m.count || 0), 0);
 }
 
-export function mount(root) {
+export function mount(root, ctx = {}) {
   // ---- run card
   const runState = h('div', { id: 'run-state', class: 'big' }, '—');
   const runMode = h('div', { class: 'muted' });
@@ -26,19 +27,24 @@ export function mount(root) {
   const accountCard = h('section', { class: 'card' },
     h('h2', { class: 'card-h' }, 'X 账号'),
     h('div', { class: 'row' }, h('span', {}, '当前登录'), loginLine),
-    h('div', { class: 'muted small', style: 'margin-top:6px' }, '使用浏览器当前登录的账号。登录或过验证码请去"浏览器"页。'));
+    h('div', { class: 'muted small', style: 'margin-top:6px' }, '使用浏览器当前登录的账号。登录、验证码和私信解锁可展开下方浏览器接管。'));
 
   // ---- model card
   const modelSummary = h('div', { id: 'model-summary' }, h('span', { class: 'muted' }, '读取中…'));
   const modelCard = h('section', { class: 'card' }, h('h2', { class: 'card-h' }, '模型', h('a', { href: '#/model', class: 'aside' }, '去配置 →')), modelSummary);
 
-  // ---- logs card
-  const logList = h('ul', { id: 'logs', class: 'logs' });
-  const more = h('button', { class: 'linkbtn', type: 'button' }, '查看更多');
-  const logsCard = h('section', { class: 'card span-all' },
-    h('h2', { class: 'card-h' }, h('span', {}, '日志 ', h('span', { class: 'aside' }, '只显示运行事件，不含消息正文')), more), logList);
-
-  set(root, h('div', { class: 'grid3' }, runCard, accountCard, modelCard, logsCard));
+  const browserHost = h('div', { class: 'browser-host' });
+  const browserPanel = h('details', { id: 'browser-panel', class: 'card browser-panel' }, h('summary', {}, '浏览器接管'), browserHost);
+  let browserCleanup = null;
+  function toggleBrowser() {
+    if (browserPanel.open && !browserCleanup) browserCleanup = mountBrowser(browserHost);
+    if (!browserPanel.open && browserCleanup) { browserCleanup(); browserCleanup = null; browserHost.replaceChildren(); }
+  }
+  function openBrowser() { browserPanel.open = true; toggleBrowser(); browserPanel.scrollIntoView({ block: 'nearest' }); }
+  browserPanel.addEventListener('toggle', toggleBrowser);
+  window.addEventListener('open-browser', openBrowser);
+  set(root, h('div', { class: 'stack' }, h('div', { class: 'grid3' }, runCard, accountCard, modelCard), browserPanel));
+  if (ctx.openBrowser) { ctx.openBrowser = false; openBrowser(); }
 
   // ---- behaviour
   function renderRun(s) {
@@ -83,18 +89,7 @@ export function mount(root) {
     }
   }
 
-  let expanded = false;
-  function renderLogs(rows) {
-    set(logList, rows.map(r => h('li', { dataset: { level: r.level } },
-      h('span', { class: 't' }, fmtTime(r.at, true)), h('span', { class: 'e' }, r.event), h('span', { class: 'd' }, r.detail))));
-  }
-  async function loadMore() {
-    try { renderLogs(await api('/api/logs')); } catch (e) { notice(e.message, 'error'); }
-  }
-  more.addEventListener('click', () => { expanded = !expanded; more.textContent = expanded ? '只看最近' : '查看更多'; if (expanded) loadMore(); });
-
   const offStatus = onStatus(s => { renderRun(s); renderAccount(s); });
-  const offLogs = onLogs(rows => { if (expanded) loadMore(); else renderLogs(rows); });
   loadModel();
-  return () => { offStatus(); offLogs(); };
+  return () => { offStatus(); browserCleanup?.(); window.removeEventListener('open-browser', openBrowser); };
 }

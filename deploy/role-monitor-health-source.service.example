@@ -1,0 +1,16 @@
+[Unit]
+Description=角色工作流唯一宿主健康检查来源
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/role-workflow/deploy/maintenance-helper.py --health-source
+User=root
+Group=role-maintenance
+UMask=0027
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/role-workflow
+TimeoutStartSec=120

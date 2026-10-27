@@ -1,0 +1,16 @@
+[Unit]
+Description=七页隔离环境宿主维护验收
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/role-workflow-seven/deploy/maintenance-helper.py --root /var/lib/role-workflow-seven
+User=root
+Group=1000
+UMask=0027
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/role-workflow-seven
+TimeoutStartSec=180

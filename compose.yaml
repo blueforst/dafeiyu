@@ -1,7 +1,7 @@
 name: role-workflow
 services:
   app:
-    image: role-workflow-app:${APP_VERSION:-${ROLE_VERSION:-0.1.14}}
+    image: role-workflow-app:${APP_VERSION:-${ROLE_VERSION:-0.1.16}}
     build:
       context: .
       target: runtime
@@ -13,10 +13,15 @@ services:
       DATA_DIR: /data
       CONFIG_PATH: /config/config.json
       BROWSER_ENDPOINT: http://browser:3001
+      MAINTENANCE_DIR: /maintenance
+    group_add:
+      - "${MAINTENANCE_GID:?请先设置宿主 role-maintenance 组的 GID}"
     volumes:
       - /var/lib/role-workflow/app:/data
       - /var/lib/role-workflow/config:/config:ro
       - /var/lib/role-workflow/secrets/app:/run/role-secrets:ro
+      - /var/lib/role-workflow/maintenance/requests:/maintenance/requests
+      - /var/lib/role-workflow/maintenance/results:/maintenance/results:ro
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
@@ -35,7 +40,7 @@ services:
       options: {max-size: "10m", max-file: "3"}
   browser:
     hostname: role-workflow-browser
-    image: role-workflow-browser:${BROWSER_VERSION:-${ROLE_VERSION:-0.1.12}}
+    image: role-workflow-browser:${BROWSER_VERSION:-${ROLE_VERSION:-0.1.15}}
     build:
       context: .
       target: browser

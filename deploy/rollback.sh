@@ -3,6 +3,14 @@ set -eu
 cd /srv/role-workflow
 version="${1:?用法：rollback.sh 已重新构建的版本号}"
 case "$version" in *[!A-Za-z0-9._-]*|'') echo '版本号无效' >&2; exit 2;; esac
+# 新数据库必须先完成版本兼容检查，不能沿用旧版的单纯镜像切换。
+python3 - <<'PY'
+import sqlite3,sys
+with sqlite3.connect('file:/var/lib/role-workflow/app/workflow.sqlite?mode=ro',uri=True) as connection:
+ if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").fetchone():
+  print('数据库已使用版本迁移，已拒绝通用镜像回退。请按 docs/迁移与恢复.md 验证并使用受限逆迁移或配套数据恢复；不要删除有效数据绕过门禁。',file=sys.stderr)
+  sys.exit(2)
+PY
 docker image inspect "role-workflow-app:$version" "role-workflow-browser:$version" >/dev/null 2>&1 || {
  echo '目标镜像不存在，请从对应 Git 提交重新构建后再切换。' >&2; exit 1;
 }

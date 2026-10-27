@@ -1,0 +1,4 @@
+# 仅更新原生前端资源，保持已经验收的后端与运行依赖逐层不变。
+ARG APP_BASE_IMAGE=role-workflow-app:0.1.15
+FROM ${APP_BASE_IMAGE}
+COPY public /app/public

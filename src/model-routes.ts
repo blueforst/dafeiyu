@@ -3,11 +3,13 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Store } from './store.js';
 import { loadConfig, redact } from './config.js';
-import { checkBaseUrl, keyHints, keySlot, readModelKey, readPanelSettings, toConfigModel, writeModelKey, writePanelSettings, type PanelModel, type ReasoningLevel } from './settings.js';
+import { checkBaseUrl, keyHints, keySlot, readModelKey, readPanelSettings, toConfigModel, type PanelModel, type ReasoningLevel } from './settings.js';
 import { discoverModels, findCatalogModel, isCustom, listModels, listProviders, type ModelInfo } from './model-catalog.js';
-import { runCompletion } from './model.js';
+import { ModelService,runCompletion } from './model.js';
+import { ModelLibraryError,ModelLibraryService } from './model-library.js';
+import { registerModelLibraryRoutes } from './model-library-routes.js';
 
-export type LastTest = { ok:boolean; at:number; latencyMs:number; provider:string; id:string; input?:number; output?:number; error?:string };
+export type LastTest = { ok:boolean; at:number; latencyMs:number; provider:string; id:string; input?:number; output?:number; error?:string; callId?:string; usage?:unknown; cost?:unknown; pricingStatus?:string };
 type Deps = { store:Store; run?:typeof runCompletion; discover?:typeof discoverModels };
 
 class HttpError extends Error { constructor(message:string, public code = 400) { super(message); } }
@@ -25,7 +27,7 @@ function scrub(text:string, key?:string):string {
 }
 
 async function infoFor(provider:string, id:string, isCustomModel:boolean):Promise<ModelInfo|undefined> {
-  if (isCustomModel) return findCatalogModel(id);
+  if (isCustomModel) {const info=await findCatalogModel(id);return info?{...info,cost:{input:0,output:0},costKnown:false}:undefined;}
   return (await listModels(provider)).find(m => m.id === id);
 }
 
@@ -65,13 +67,15 @@ function keyFor(provider:string, baseUrl:string, typed:unknown):string {
 }
 
 export function registerModelRoutes(app:FastifyInstance, deps:Deps):void {
-  const run = deps.run ?? runCompletion;
+  const service=new ModelService(deps.store,deps.run??runCompletion);
+  const library=new ModelLibraryService(deps);
+  registerModelLibraryRoutes(app,library);
   const discover = deps.discover ?? discoverModels;
   let busy = false;
 
   const handle = (fn:(req:any, reply:FastifyReply) => Promise<unknown>) => async (req:any, reply:FastifyReply) => {
     try { return await fn(req, reply); }
-    catch (e) { if (e instanceof HttpError) return reply.code(e.code).send({ error: e.message }); throw e; }
+    catch (e) { if (e instanceof HttpError) return reply.code(e.code).send({ error: e.message }); if(e instanceof ModelLibraryError)return reply.code(e.statusCode).send({error:e.message,...e.extra});throw e; }
   };
   const exclusive = (fn:(req:any, reply:FastifyReply) => Promise<unknown>) => handle(async (req, reply) => {
     if (busy) throw new HttpError('已有请求进行中', 409);
@@ -93,7 +97,9 @@ export function registerModelRoutes(app:FastifyInstance, deps:Deps):void {
     } catch (e) { configError = redact(e instanceof Error ? e.message : e); }
     let lastTest:LastTest|null = null;
     try { lastTest = JSON.parse(deps.store.get('model:lastTest', 'null')); } catch {}
-    return { source, settings, effective, info, keys: keyHints(), lastTest, configError };
+    let modelLibrary:Awaited<ReturnType<ModelLibraryService['view']>>|null=null;
+    try{modelLibrary=await library.view();}catch(error){configError=configError||scrub(error instanceof Error?error.message:String(error));}
+    return { source, settings, revision:readPanelSettings({tolerant:true}).revisions?.model??0,effective, info, keys: keyHints(), lastTest, configError,library:modelLibrary };
   }));
 
   app.get('/api/model/providers', handle(async () => listProviders()));
@@ -128,11 +134,11 @@ export function registerModelRoutes(app:FastifyInstance, deps:Deps):void {
     const started = Date.now();
     let result:LastTest;
     try {
-      const r = await run(toConfigModel(settings), apiKey, '你是接口验收助手。只输出 MODEL_OK。', '请验证当前配置。', { maxTokens: level === 'off' ? 16 : 2048, reasoning: level });
+      const r = await service.request(toConfigModel(settings), apiKey, '你是接口验收助手。只输出 MODEL_OK。', '请验证当前配置。', { maxTokens: level === 'off' ? 16 : 2048, reasoning: level },{purpose:'model-test',source:'panel'});
       const ok = !['error', 'aborted'].includes(r.stopReason);
-      result = { ok, at: Date.now(), latencyMs: r.latencyMs, provider: settings.provider, id: settings.id, input: r.input, output: r.output, ...(ok ? {} : { error: scrub(r.errorMessage || '模型返回 ' + r.stopReason, apiKey) }) };
+      result = { ok, at: Date.now(), latencyMs: r.latencyMs, provider: settings.provider, id: settings.id, input: r.input, output: r.output,callId:r.callId,usage:r.usage,cost:r.cost,pricingStatus:r.pricingStatus,...(ok ? {} : { error: scrub(r.errorMessage || '模型返回 ' + r.stopReason, apiKey) }) };
     } catch (e:any) {
-      result = { ok: false, at: Date.now(), latencyMs: Date.now() - started, provider: settings.provider, id: settings.id, error: scrub(e?.message ?? String(e), apiKey) };
+      result = { ok: false, at: Date.now(), latencyMs: Date.now() - started, provider: settings.provider, id: settings.id,callId:e?.callId,error: scrub(e?.message ?? String(e), apiKey) };
     }
     deps.store.set('model:lastTest', JSON.stringify(result));
     deps.store.log('model-test', settings.provider + '/' + settings.id + (result.ok ? ' 通过 ' : ' 失败 ') + result.latencyMs + 'ms' + (result.error ? '：' + result.error : ''), result.ok ? 'info' : 'warn');
@@ -144,11 +150,10 @@ export function registerModelRoutes(app:FastifyInstance, deps:Deps):void {
     const { settings } = await validateModel(b.settings);
     const typed = typeof b.apiKey === 'string' ? b.apiKey.trim() : '';
     const key = keyFor(settings.provider, settings.baseUrl, typed);
-    if (typed) writeModelKey(keySlot(settings.provider, settings.baseUrl), key);
-    const current = readPanelSettings({ tolerant: true });
-    writePanelSettings({ ...current, model: settings });
+    let revision:number;
+    try{const saved=library.saveLegacy(settings,b.revision,key,!!typed);revision=saved.settings.revisions?.model??0;}catch(e:any){if(e?.code==='REVISION_CONFLICT'||e?.statusCode===409)throw new HttpError('模型设置已被修改，请重新读取后保存',409);throw e;}
     deps.store.log('model-save', '模型已保存：' + settings.provider + '/' + settings.id + '，下一轮处理生效');
-    return { ok: true, settings, keys: keyHints() };
+    return { ok: true, settings,revision,keys: keyHints() };
   }));
 
 }

@@ -1,0 +1,39 @@
+{
+  "at": "2026-10-28T02:25:58.343081+08:00",
+  "scope": "独立staging，仅/var/lib/role-workflow-seven",
+  "defaultBackupEnabled": false,
+  "backupCountBefore": 0,
+  "backupCountAfter": 1,
+  "sameInstance": true,
+  "backupIntegrity": "ok",
+  "invalidCommandStatus": "rejected",
+  "healthStatus": "completed",
+  "targetedTests": {
+    "date": "2026-10-28",
+    "environment": "服务器 role-workflow-seven-builder:dev",
+    "files": ["test/scheduler.test.ts", "test/scheduler-host-helper.test.ts"],
+    "tests": 19,
+    "passed": 19,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 3205.773179,
+    "realProductionSystemctlExecuted": false
+  },
+  "healthResult": {
+    "appReachable": false,
+    "issues": [
+      "面板服务不可达",
+      "证书检查结果暂无"
+    ],
+    "containers": [],
+    "certificateHoursRemaining": null,
+    "certificateRenewal": "沿用独立 role-cert-renew.timer",
+    "monitorAt": null
+  },
+  "requestIds": [
+    "1375a62a-d922-47d1-9d4d-9f0f76a72a67",
+    "7a1f8603-4397-4c3b-8aae-fcf2f778f050",
+    "50303596-ce48-467a-87ce-afa20cbf1cfd",
+    "a8e0408d-23c9-43da-a36c-640265f9467b"
+  ]
+}

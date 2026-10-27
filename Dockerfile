@@ -1,10 +1,15 @@
 FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS builder
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
 COPY test ./test
+COPY deploy/maintenance-helper.py ./deploy/maintenance-helper.py
+COPY deploy/rollback-schema.py ./deploy/rollback-schema.py
+COPY deploy/prepare-proposals-rollback.py ./deploy/prepare-proposals-rollback.py
+COPY deploy/monitor.py ./deploy/monitor.py
 RUN npm run check && npm test && npm run build
 
 FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS dependencies

@@ -1,0 +1,18 @@
+[Unit]
+Description=角色工作流受限宿主维护桥接
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/role-workflow/deploy/maintenance-helper.py
+User=root
+Group=role-maintenance
+UMask=0027
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/role-workflow
+ReadWritePaths=/etc/systemd/system/timers.target.wants
+TimeoutStartSec=180
+

@@ -1,0 +1,72 @@
+// 仅由服务器隔离 Camoufox 镜像执行；全新临时 profile，不读取生产凭据，不访问 X。
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {spawn} from 'node:child_process';
+import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,existsSync,rmSync} from 'node:fs';
+import {createHash,randomUUID} from 'node:crypto';
+import {tmpdir} from 'node:os';
+import {once} from 'node:events';
+import {launch} from '/opt/role-camoufox/launch.mjs';
+import {BrowserResourceGuard,assessCompliance,readBrowserMemory} from '../dist/unattended-health.js';
+import {readCompliance,identity as browserIdentity,collectPublicWithBudget,collectPrivateWithBudget} from '../dist/browser.js';
+import {Store} from '../dist/store.js';
+import {Workflow} from '../dist/workflow.js';
+
+const artifactDir=process.env.ARTIFACT_DIR||'/artifacts';mkdirSync(artifactDir,{recursive:true});
+const temporary=mkdtempSync(tmpdir()+'/role-browser-health-'),profile=temporary+'/profile';
+const output={evidence:'真实隔离 Camoufox 持久 profile／localhost cookie；账号与合规为合成 DOM，不代表 X 真实登录或合规验收',checks:[],errors:[],engine:'camoufox',productionProfileUsed:false,platformVisited:false};
+const checks=(name,detail={})=>output.checks.push({name,passed:true,...detail});
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const sha=value=>createHash('sha256').update(value).digest('hex');
+let xvfb,context,page,origin,restarts=0,now=Date.now(),memoryRatio=.2;
+const requests=[],blocked=[];
+const server=createServer((request,response)=>{requests.push(request.url);response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});response.end('<!doctype html><html><body><main data-fixture="local-profile">隔离持久 profile 检查</main></body></html>');});
+async function routeLocalOnly(current){await current.route('**/*',async route=>{const url=new URL(route.request().url());if(url.origin===origin)return route.continue();blocked.push(url.origin);return route.abort();});}
+async function openContext(){const next=await launch(profile);await routeLocalOnly(next);context=next;page=next.pages()[0]||await next.newPage();await page.goto(origin+'/profile-fixture',{waitUntil:'domcontentloaded',timeout:30000});return next;}
+const marker=randomUUID();
+async function localIdentity(){const cookies=await context.cookies(origin);const visible=await page.locator('main[data-fixture="local-profile"]').count();return {handle:'fixture_worker',loggedIn:!!visible&&cookies.some(cookie=>cookie.name==='health_profile_marker'&&cookie.value===marker),needsHuman:false};}
+async function fingerprint(){return page.evaluate(()=>({userAgent:navigator.userAgent,platform:navigator.platform,language:navigator.language,screenWidth:screen.width,screenHeight:screen.height}));}
+try{
+ const suppliedDisplay=/^:(\d+)(?:\.\d+)?$/.exec(process.env.DISPLAY||'');const displayAvailable=!!(suppliedDisplay&&existsSync('/tmp/.X11-unix/X'+suppliedDisplay[1]));
+ if(!displayAvailable&&process.env.HEALTH_USE_EXISTING_DISPLAY!=='1'){
+  const number=200+process.pid%10000,display=':'+number;process.env.DISPLAY=display;
+  xvfb=spawn('Xvfb',[display,'-screen','0','1440x900x24','-nolisten','tcp'],{stdio:'ignore'});let launchError;xvfb.once('error',error=>{launchError=error;});
+  const deadline=Date.now()+10000;while(!existsSync('/tmp/.X11-unix/X'+number)){if(launchError)throw launchError;if(xvfb.exitCode!==null)throw Error('隔离 Xvfb 退出');if(Date.now()>deadline)throw Error('隔离 Xvfb 启动超时');await delay(50);}
+ }
+ server.listen(0,'127.0.0.1');await once(server,'listening');origin='http://127.0.0.1:'+server.address().port;
+ const actualMemory=readBrowserMemory();assert.ok(['cgroup','process-rss','unavailable'].includes(actualMemory.source));checks('真实容器只读内存采样或明确无法确认', {memory:actualMemory});
+ await openContext();await context.addCookies([{name:'health_profile_marker',value:marker,url:origin,httpOnly:true,sameSite:'Lax',expires:Math.floor(Date.now()/1000)+86400}]);
+ const presetPath=profile+'/device-preset.json',presetBefore=sha(readFileSync(presetPath)),fingerprintBefore=await fingerprint();assert.equal((await localIdentity()).loggedIn,true);checks('全新临时profile与localhost持久cookie', {devicePresetHash:presetBefore});
+ const guard=new BrowserResourceGuard({clock:()=>now,settings:()=>({memoryRatio:.75,browserMaxAgeHours:24}),readMemory:()=>({bytes:memoryRatio*2147483648,limitBytes:2147483648,ratio:memoryRatio,source:'cgroup'}),identity:localIdentity,restart:async()=>{const previous=context;await previous.close();assert.equal(previous.pages().length,0);await openContext();restarts++;return localIdentity();}});
+ memoryRatio=.9;await guard.before('collect/public','auto','fixture_worker');assert.equal(restarts,1);assert.equal((await localIdentity()).loggedIn,true);assert.equal(sha(readFileSync(presetPath)),presetBefore);assert.deepEqual(await fingerprint(),fingerprintBefore);assert.equal(guard.snapshot().lastRestartReason,'memory-threshold');checks('高内存触发真实close与launch，cookie及设备预设保持', {restarts});
+ for(const operation of ['send','post','lookup','lookupPost'])await guard.before(operation,'auto','fixture_worker');await guard.before('collect/public','manual','fixture_worker');await guard.before('collect/private','draining','fixture_worker');assert.equal(restarts,1);checks('send／post／lookup／manual／draining不重启', {restarts});
+ memoryRatio=.2;now+=25*3600000;await guard.before('collect/private','auto','fixture_worker');assert.equal(restarts,2);assert.equal(guard.snapshot().lastRestartReason,'runtime-threshold');assert.equal((await localIdentity()).loggedIn,true);assert.equal(sha(readFileSync(presetPath)),presetBefore);checks('运行时长触发真实上下文恢复，持久标记保持', {restarts});
+ let mode='auto';const failedGuard=new BrowserResourceGuard({identity:localIdentity,readMemory:()=>({bytes:200,limitBytes:200,ratio:1,source:'cgroup'}),restart:async()=>{throw Error('合成重启故障');}});
+ try{await failedGuard.before('collect/public',mode,'fixture_worker');assert.fail('故障应中止操作');}catch(error){if(error.code==='browser-recovery-failed')mode='paused';else throw error;}assert.equal(mode,'paused');assert.ok(failedGuard.snapshot().restartError);checks('资源恢复故障经浏览器适配器进入暂停', {injectedFailure:true});
+ const navigations=[];let writes=0;
+ const syntheticNavigate=async(p,url)=>{navigations.push(url);if(url==='https://x.com/fixture_worker')await p.setContent('<main><div data-testid="UserName">AI 测试角色</div><div data-testid="UserDescription">AI 非官方。仅用于合成 DOM 解析。</div><span>Automated by @fixture_owner</span></main>');else if(url==='https://x.com/settings/notifications')await p.setContent('<main><a href="/settings/notifications/filters">Filters</a></main>');else if(url==='https://x.com/settings/notifications/filters')await p.setContent('<main><label for="quality">Quality filter</label><input id="quality" type="checkbox" checked onclick="window.__healthWrites++"></main>');else throw Error('出现非预期只读路径');await p.evaluate(()=>{window.__healthWrites=0;document.querySelectorAll('button,input').forEach(node=>node.addEventListener('click',()=>window.__healthWrites++));});};
+ const observation=await readCompliance(page,'fixture_worker',syntheticNavigate),compliance=assessCompliance(observation,['AI','非官方']);writes+=await page.evaluate(()=>window.__healthWrites);
+ assert.equal(observation.profileReliable,true);assert.equal(compliance.disclosure,'confirmed');assert.equal(compliance.automatedLabel,'confirmed');assert.equal(compliance.qualityFilter,'on');assert.deepEqual(navigations,['https://x.com/fixture_worker','https://x.com/settings/notifications','https://x.com/settings/notifications/filters']);assert.equal(writes,0);checks('合规合成DOM：披露、自动化标签、质量过滤开启，零写入', {syntheticDOM:true,navigationCount:navigations.length});
+ const unknown=await readCompliance(page,'fixture_worker',async p=>{await p.setContent('<main>无法识别的合成页面</main>');});const unknownResult=assessCompliance(unknown);assert.equal(unknownResult.disclosure,'unknown');assert.equal(unknownResult.automatedLabel,'unknown');assert.equal(unknownResult.qualityFilter,'unknown');checks('合规合成DOM：无法可靠解析时保持unknown', {syntheticDOM:true});
+ const missing=await readCompliance(page,'fixture_worker',async(p,url)=>{await p.setContent(url.includes('/settings/')?'<main><label for="quality">Quality filter</label><input id="quality" type="checkbox"></main>':'<main><div data-testid="UserName">普通测试角色</div><div data-testid="UserDescription">缺少披露说明</div></main>');});const missingResult=assessCompliance(missing);assert.equal(missingResult.disclosure,'missing');assert.equal(missingResult.automatedLabel,'missing');assert.equal(missingResult.qualityFilter,'off');checks('合规合成DOM：缺披露、缺标签与过滤关闭分别呈现', {syntheticDOM:true});
+ for(const [message,restriction] of [['Your account is suspended','suspended'],['Your account is locked','locked'],['Your account is read-only','read_only'],['Your account is restricted','limited']]){await page.setContent('<a data-testid="AppTabBar_Profile_Link" href="/fixture_worker"></a><main><div role="alert">'+message+'</div></main>');assert.equal((await browserIdentity(page)).restricted,restriction);}
+ await page.setContent('<a data-testid="AppTabBar_Profile_Link" href="/fixture_worker"></a><main><article data-testid="tweet">Your account is suspended</article><div data-testid="UserDescription">Your account is restricted</div></main>');assert.equal((await browserIdentity(page)).restricted,undefined);checks('受限合成DOM：四类自身提示与引用／简介误判保护', {syntheticDOM:true});
+ const stamp=new Date().toISOString(),article=(handle,id,text)=>'<article data-testid="tweet"><a href="/'+handle+'/status/'+id+'"><time datetime="'+stamp+'"></time></a><div data-testid="tweetText">'+text+'</div></article>';
+ let publicClock=0;const publicNavigations=[];
+ const partialPublic=await collectPublicWithBudget({page,handle:'fixture_worker',source:2,deadline:10,now:()=>publicClock,navigate:async(p,url)=>{publicNavigations.push(url);if(url==='https://x.com/fixture_worker')await p.setContent('<main>'+article('fixture_worker','101','合成原帖一')+article('fixture_worker','102','合成原帖二')+'</main>');else if(url==='https://x.com/fixture_worker/status/101'){await p.setContent('<main>'+article('alice','201','已读到的公开回复')+'</main>');publicClock=11;}else throw Error('超预算后不得开始第二个帖文读取');}});
+ assert.equal(partialPublic.events.length,1);assert.equal(partialPublic.events[0].platformId,'201');assert.ok(partialPublic.warnings.some(w=>w.includes('时间预算')));assert.equal(publicNavigations.length,2);
+ const store=new Store(temporary+'/partial-workflow.sqlite');let generated=0;const config={mode:'draft',pollSeconds:60,maxAgeHours:6,maxPerRound:2,publicPerHour:10,privatePerHour:30,retentionDays:30,persona:'明确为AI的隔离测试角色',dailyState:'合成测试',model:{provider:'custom',api:'openai-completions',baseUrl:'',id:'',reasoning:false,reasoningLevel:'off',vision:false,maxTokens:4096,timeoutMs:60000}};
+ const workflow=new Workflow(store,{identity:async()=>({handle:'fixture_worker',loggedIn:true,needsHuman:false}),control:async()=>{},collect:async()=>partialPublic,context:async()=>'',send:async()=>{throw Error('草稿模式不得发送');},lookup:async()=>({status:'unknown'})},{complete:async()=>{generated++;return {text:JSON.stringify({action:'reply',text:'保留部分采集后的测试草稿',reason:''}),input:0,output:0,cache:0};}},()=>config);
+ try{await workflow.resume();await workflow.tick();assert.equal(store.getMessage('x:201','fixture_worker')?.status,'draft');assert.equal(generated,1);assert.ok(store.logs().some(log=>log.event==='collection-warning'));}finally{workflow.stop();store.db.close();}
+ checks('公开采集真实循环：超预算保留已读回复并进入实际工作流生成草稿', {syntheticDOM:true,events:partialPublic.events.length,navigations:publicNavigations.length});
+ let privateClock=0;const privateNavigations=[];
+ const partialPrivate=await collectPrivateWithBudget({page,handle:'fixture_worker',deadline:10,now:()=>privateClock,navigate:async(p,url)=>{privateNavigations.push(url);if(url==='https://x.com/messages'||url==='https://x.com/messages/requests')await p.setContent('<main><a href="/messages/1-2">合成会话一</a><a href="/messages/1-3">合成会话二</a></main>');else if(url==='https://x.com/messages/1-2'){await p.setContent('<main><div data-testid="messageEntry" data-direction="in" data-message-id="dm201"><time datetime="'+stamp+'"></time><div data-testid="messageEntryContent">已读到的私信</div></div></main>');privateClock=11;}else throw Error('超预算后不得开始第二个私信读取');}});
+ assert.equal(partialPrivate.events.length,1);assert.equal(partialPrivate.events[0].platformId,'dm201');assert.ok(partialPrivate.warnings.some(w=>w.includes('时间预算')));assert.equal(privateNavigations.length,3);checks('私信采集真实循环：超预算保留已读消息，不开始下一会话', {syntheticDOM:true,events:partialPrivate.events.length,navigations:privateNavigations.length});
+ assert.ok(requests.length>=3);assert.ok(requests.every(url=>url==='/profile-fixture'||url==='/favicon.ico'));checks('网络只访问隔离localhost；所有外部页面请求被拒绝', {localRequests:requests.length,blockedExternalRequests:blocked.length});
+}catch(error){output.errors.push(String(error?.stack||error));process.exitCode=1;}
+finally{
+ if(context)await context.close().catch(()=>{});await new Promise(resolve=>server.close(()=>resolve()));
+ if(xvfb){xvfb.kill('SIGTERM');await Promise.race([once(xvfb,'exit').catch(()=>{}),delay(2000)]);if(xvfb.exitCode===null)xvfb.kill('SIGKILL');}
+ rmSync(temporary,{recursive:true,force:true});output.temporaryProfileRemoved=!existsSync(temporary);output.passed=output.checks.length;output.failed=output.errors.length;
+ writeFileSync(artifactDir+'/browser-health-acceptance.json',JSON.stringify(output,null,2));console.log(JSON.stringify(output));
+}
