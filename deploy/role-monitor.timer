@@ -1,0 +1,8 @@
+[Unit]
+Description=每五分钟检查服务
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Persistent=true
+[Install]
+WantedBy=timers.target

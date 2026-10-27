@@ -1,0 +1,30 @@
+{
+  "name": "role-workflow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --import tsx --test test/*.test.ts",
+    "start": "node dist/app.js",
+    "browser": "node dist/browser.js",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastify": "5.12.7",
+    "@fastify/http-proxy": "11.6.5",
+    "@fastify/static": "10.1.7",
+    "@earendil-works/pi-ai": "1.4.0",
+    "playwright-core": "1.64.1",
+    "twitter-text": "3.1.0"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "@types/node": "26.6.5",
+    "tsx": "4.20.6",
+    "@types/twitter-text": "3.1.10"
+  }
+}

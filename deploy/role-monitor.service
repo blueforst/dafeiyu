@@ -1,0 +1,5 @@
+[Unit]
+Description=独立检查角色工作流和证书
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/role-workflow/deploy/monitor.py

@@ -1,0 +1,5 @@
+[Unit]
+Description=角色工作流一致性数据库备份
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/role-workflow/deploy/backup.py

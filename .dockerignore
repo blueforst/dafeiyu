@@ -1,0 +1,14 @@
+.git
+node_modules
+dist
+data
+secrets
+artifacts
+config.json
+.env
+.env.*
+!.env.example
+交付资料
+部署记录
+.superpowers
+.DS_Store

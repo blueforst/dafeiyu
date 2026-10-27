@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>浏览器环境检查</title>
+<style>body{font:16px system-ui;margin:32px;line-height:1.5}pre{white-space:pre-wrap;background:#f3f5f7;padding:20px}button{padding:10px 16px}</style>
+<h1>浏览器环境检查</h1>
+<p>仅检查当前浏览器能力，不访问外部网络，不读取账号、Cookie 或密码。</p>
+<button id="save" disabled>保存检查结果</button><pre id="result">正在检查…</pre>
+<script type="module">
+const result={时间:new Date().toISOString(),浏览器:navigator.userAgent,平台:navigator.platform,自动化标志:navigator.webdriver,语言:navigator.languages,时区:Intl.DateTimeFormat().resolvedOptions().timeZone,逻辑处理器:navigator.hardwareConcurrency,设备内存GB:navigator.deviceMemory,屏幕:{宽:screen.width,高:screen.height,色深:screen.colorDepth,缩放:devicePixelRatio},Canvas2D:!!document.createElement('canvas').getContext('2d'),WebAssembly:typeof WebAssembly==='object'};
+for(const type of ['webgl','webgl2']){
+ try{const gl=document.createElement('canvas').getContext(type);result[type]={可用:!!gl};if(gl){const ext=gl.getExtension('WEBGL_debug_renderer_info');result[type].渲染器=ext?gl.getParameter(ext.UNMASKED_RENDERER_WEBGL):'未公开';gl.clearColor(.25,.5,.75,1);gl.clear(gl.COLOR_BUFFER_BIT);const rgba=new Uint8Array(4);gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,rgba);result[type].像素读回=Array.from(rgba);result[type].错误码=gl.getError();}}
+ catch(e){result[type]={可用:false,错误:e.name};}
+}
+result.Worker=await new Promise(resolve=>{let worker;const url=URL.createObjectURL(new Blob(["postMessage('ok')"],{type:'text/javascript'}));const done=value=>{clearTimeout(timer);worker?.terminate();URL.revokeObjectURL(url);resolve(value)};const timer=setTimeout(()=>done('超时'),3000);try{worker=new Worker(url);worker.onmessage=()=>done('正常');worker.onerror=()=>done('启动失败')}catch(e){done(e.name)}});
+document.querySelector('#result').textContent=JSON.stringify(result,null,2);
+const save=document.querySelector('#save');save.disabled=false;save.onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='browser-environment-'+Date.now()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+</script>

@@ -1,0 +1,47 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync,mkdirSync,writeFileSync,rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
+import { Store } from '../src/store.js';
+import { Workflow } from '../src/workflow.js';
+import { PiGenerator,parseDraft,publicLengthOK } from '../src/model.js';
+import { safeEvent,Serial,browserProxy } from '../src/browser.js';
+import type { Config,Event,Receipt } from '../src/types.js';
+import type { Transport } from '../src/transport.js';
+const config:Config={expectedHandle:'tester',mode:'draft',pollSeconds:60,maxAgeHours:6,maxPerRound:2,publicPerHour:10,privatePerHour:30,retentionDays:30,persona:'测试 AI',dailyState:'无',model:{provider:'custom',api:'openai-completions',baseUrl:'',id:'',reasoning:false,reasoningLevel:'low',vision:false,maxTokens:1000,timeoutMs:1000}};
+const event:Event={id:'x:123',channel:'public',userId:'x:alice',handle:'alice',text:'你好',url:'https://x.com/alice/status/123',conversationId:'123',timestamp:Date.now()};
+test('代理配置错误时拒绝启动，不静默回退或暴露凭据',()=>{
+ assert.equal(browserProxy(),undefined);
+ assert.deepEqual(browserProxy('http://x-egress:7890'),{server:'http://x-egress:7890'});
+ for(const value of ['invalid','file:///etc/passwd','http://user:secret@proxy:7890','http://proxy:7890/path'])assert.throws(()=>browserProxy(value),/浏览器代理地址无效/);
+});
+function fixture(c:Config=structuredClone(config)){
+ const path=mkdtempSync(tmpdir()+'/role-test-'),store=new Store(path+'/db.sqlite');
+ let sends=0;let received:Event[]=[event];let receipt:Receipt={status:'confirmed',id:'x:124'};
+ const t:Transport={identity:async()=>({loggedIn:true,needsHuman:false,handle:'tester'}),collect:async()=>({events:received,warnings:[]}),context:async()=>event.text,send:async()=>{sends++;return receipt;},lookup:async()=>({status:'unknown'}),control:async()=>{}};
+ const generator={complete:async()=>({text:'{"action":"reply","text":"你好呀","reason":""}',input:10,output:10,cache:0})};
+ const workflow=new Workflow(store,t,generator,()=>c);store.set('control','running');
+ return {store,t,generator,workflow,c,sends:()=>sends,setReceipt:(r:Receipt)=>receipt=r,setReceived:(r:Event[])=>received=r,close:()=>{store.db.close();rmSync(path,{recursive:true,force:true});}};
+}
+test('草稿流程去重，绝不触发发送',async()=>{const f=fixture();try{await f.workflow.tick();await f.workflow.tick();assert.equal(f.sends(),0);assert.equal(f.store.getMessage(event.id).status,'draft');assert.equal(f.store.stats().messages.length,1);}finally{f.close();}});
+test('发送回执未知后保持回查，不重复发送',async()=>{const f=fixture();f.c.mode='auto';f.setReceipt({status:'unknown'});try{await f.workflow.tick();await f.workflow.tick();assert.equal(f.sends(),1);assert.equal(f.store.getMessage(event.id).status,'unknown');}finally{f.close();}});
+test('服务重启将 sending 转为 unknown，并保持暂停',()=>{const f=fixture();try{f.store.ingest(event);f.store.update(event.id,'sending');f.store.boot();assert.equal(f.store.getMessage(event.id).status,'unknown');assert.equal(f.workflow.control(),'paused');}finally{f.close();}});
+test('公开上下文隔离私信原文和摘要',()=>{const f=fixture();try{f.store.ingest(event);f.store.summary(event.userId,'public','公开爱好',0);f.store.summary(event.userId,'private','秘密工作',0);f.store.ingest({...event,id:'dm:123',channel:'private',text:'私信秘密'});f.store.update('dm:123','confirmed',{draft:{action:'reply',text:'已知',reason:''}});const p=JSON.stringify(f.store.context(event.userId,'public'));assert.ok(!p.includes('秘密'));assert.ok(p.includes('公开爱好'));assert.ok(JSON.stringify(f.store.context(event.userId,'private')).includes('秘密工作'));}finally{f.close();}});
+test('遗忘使后台旧摘要失效并禁止继续记录',()=>{const f=fixture();try{f.store.ingest(event);const epoch=f.store.epoch(event.userId);f.store.forget(event.userId);assert.equal(f.store.summary(event.userId,'public','迟到的摘要',epoch),false);assert.equal(f.store.ingest(event),false);assert.equal(f.store.getMessage(event.id),undefined);f.store.remember(event.userId);assert.equal(f.store.ingest(event),true);}finally{f.close();}});
+test('人工接管中止生成；释放后继续暂停',async()=>{const f=fixture();f.c.mode='auto';let started!:()=>void;const ready=new Promise<void>(r=>started=r);f.generator.complete=async(_c?:any,_s?:any,_u?:any,signal?:AbortSignal)=>{started();await new Promise((resolve,reject)=>signal?.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}));throw Error('unreachable');};try{const tick=f.workflow.tick();await ready;await f.workflow.takeover();await tick;assert.equal(f.sends(),0);assert.equal(f.workflow.control(),'manual');await f.workflow.release();assert.equal(f.workflow.control(),'paused');}finally{f.close();}});
+test('身份变化后停止采集和发送',async()=>{const f=fixture();f.t.identity=async()=>({loggedIn:true,needsHuman:false,handle:'other'});try{await f.workflow.tick();assert.equal(f.workflow.control(),'paused');assert.equal(f.store.stats().messages.length,0);assert.equal(f.sends(),0);}finally{f.close();}});
+test('无效模型输出和超长公开回复禁止发送',async()=>{assert.throws(()=>parseDraft('这不是JSON'));assert.throws(()=>parseDraft('{"action":"reply","text":"看 https://example.org","reason":""}'));assert.equal(publicLengthOK('中'.repeat(141)),false);const f=fixture();f.c.mode='auto';f.generator.complete=async()=>({text:'坏输出',input:1,output:1,cache:0});try{await f.workflow.tick();assert.equal(f.sends(),0);assert.equal(f.store.getMessage(event.id).status,'failed');}finally{f.close();}});
+test('平台拒绝触发通道四小时退避',async()=>{const f=fixture();f.c.mode='auto';f.setReceipt({status:'rejected',reason:'平台限额'});try{await f.workflow.tick();assert.ok(Number(f.store.get('cooldown:public'))>Date.now()+3.9*3600000);f.setReceived([{...event,id:'x:125'}]);await f.workflow.tick();assert.equal(f.sends(),1);}finally{f.close();}});
+test('浏览器串行互斥和导航白名单',async()=>{const serial=new Serial(),steps:number[]=[];await Promise.all([serial.run(async()=>{steps.push(1);await new Promise(r=>setTimeout(r,10));steps.push(2);}),serial.run(async()=>{steps.push(3);})]);assert.deepEqual(steps,[1,2,3]);assert.throws(()=>safeEvent({...event,url:'http://169.254.169.254/latest/meta-data'}));assert.throws(()=>safeEvent({...event,url:'https://x.com/i/settings'}));});
+test('Pi 适配器经过真实本地兼容接口完成请求与用量解析',async()=>{
+ const path=mkdtempSync(tmpdir()+'/role-pi-');mkdirSync(path+'/secrets');writeFileSync(path+'/secrets/model_api_key','unit-test-key');const previous=process.env.SECRETS_DIR;process.env.SECRETS_DIR=path+'/secrets';
+ let authorized=false;
+ const server=createServer((req,res)=>{authorized=req.headers.authorization==='Bearer unit-test-key';req.resume();req.on('end',()=>{res.writeHead(200,{'Content-Type':'text/event-stream'});const chunk={id:'chatcmpl-test',object:'chat.completion.chunk',created:1,model:'unit-model',choices:[{index:0,delta:{role:'assistant',content:'{"action":"reply","text":"测试通过","reason":""}'},finish_reason:null}]};res.write('data: '+JSON.stringify(chunk)+'\n\n');res.write('data: '+JSON.stringify({...chunk,choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:12,completion_tokens:8,total_tokens:20}})+'\n\n');res.end('data: [DONE]\n\n');});});
+ await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address() as any;const c=structuredClone(config);c.model.baseUrl='http://127.0.0.1:'+address.port+'/v1';c.model.id='unit-model';c.model.timeoutMs=10000;
+ try{const result=await new PiGenerator().complete(c,'系统规则','测试消息');assert.equal(parseDraft(result.text).text,'测试通过');assert.ok(authorized);assert.equal(result.input,12);assert.equal(result.output,8);}finally{await new Promise<void>(r=>server.close(()=>r()));if(previous===undefined)delete process.env.SECRETS_DIR;else process.env.SECRETS_DIR=previous;rmSync(path,{recursive:true,force:true});}
+});
+
+test('从旧数据库恢复后重放独立遗忘记录',()=>{const f=fixture();try{f.store.ingest(event);f.store.forget(event.userId);assert.equal(f.store.forgotten(event.userId),true);f.store.db.prepare("UPDATE users SET forgot=0 WHERE id=?").run(event.userId);f.store.db.close();const restored=new Store(f.store.ledgerPath.replace('/forget-ledger.json','/db.sqlite'));assert.equal(restored.forgotten(event.userId),true);assert.equal(restored.ingest(event),false);restored.db.close();}finally{rmSync(f.store.ledgerPath.replace('/forget-ledger.json',''),{recursive:true,force:true});}});
+
+test('私信时间戳不可靠时只保留草稿',async()=>{const f=fixture();f.c.mode='auto';f.setReceived([{...event,id:'dm:unknown-time',channel:'private',timestampReliable:false}]);try{await f.workflow.tick();assert.equal(f.sends(),0);assert.equal(f.store.getMessage('dm:unknown-time').status,'draft');}finally{f.close();}});

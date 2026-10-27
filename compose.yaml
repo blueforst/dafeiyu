@@ -1,0 +1,70 @@
+name: role-workflow
+services:
+  app:
+    image: role-workflow-app:${APP_VERSION:-${ROLE_VERSION:-0.1.4}}
+    build:
+      context: .
+      target: runtime
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DATA_DIR: /data
+      CONFIG_PATH: /config/config.json
+      BROWSER_ENDPOINT: http://browser:3001
+    volumes:
+      - /var/lib/role-workflow/app:/data
+      - /var/lib/role-workflow/config:/config:ro
+      - /var/lib/role-workflow/secrets/app:/run/role-secrets:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD","node","-e","fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  browser:
+    hostname: role-workflow-browser
+    image: role-workflow-browser:${BROWSER_VERSION:-${ROLE_VERSION:-0.1.4}}
+    build:
+      context: .
+      target: browser
+    init: true
+    restart: unless-stopped
+    environment:
+      PROFILE_DIR: /profile
+      HOME: /profile
+      DISPLAY: ":99"
+      XDG_RUNTIME_DIR: /tmp/runtime-node
+    volumes:
+      - /var/lib/role-workflow/browser:/profile
+      - /var/lib/role-workflow/secrets/browser:/run/role-secrets:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
+    shm_size: 512m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./seccomp_profile.json
+    mem_limit: 2g
+    pids_limit: 768
+    healthcheck:
+      test: ["CMD","node","-e","const fs=require('fs');fetch('http://127.0.0.1:3001/health',{headers:{'x-browser-key':fs.readFileSync('/run/role-secrets/browser_key','utf8').trim()}}).then(async r=>process.exit(r.ok&&(await r.json()).ready?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}

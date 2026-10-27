@@ -1,0 +1,7 @@
+[Unit]
+Description=每日数据库备份
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Shanghai
+Persistent=true
+[Install]
+WantedBy=timers.target

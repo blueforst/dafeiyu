@@ -1,0 +1,132 @@
+// pi model catalog for the panel, and the runtime model each request uses.
+import type { Api, Model } from '@earendil-works/pi-ai';
+import { createModels, createProvider, getSupportedThinkingLevels, type Models } from '@earendil-works/pi-ai/models';
+import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
+import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
+import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
+import type { Config } from './types.js';
+
+export type ProviderInfo = { id:string; name:string; group:'cn'|'intl'; baseUrl:string; apis:string[]; modelCount:number };
+export type ModelInfo = { id:string; name:string; api:string; baseUrl:string; contextWindow:number; maxTokens:number; reasoning:boolean; levels:string[]; vision:boolean; cost:{input:number;output:number} };
+
+const EXCLUDED = new Set(['amazon-bedrock', 'openai-codex', 'github-copilot', 'typesafe']);
+const CN = new Set(['deepseek', 'moonshotai-cn', 'zai-coding-cn', 'qwen-token-plan-cn', 'minimax-cn', 'xiaomi', 'xiaomi-token-plan-cn', 'ant-ling']);
+const UNKNOWN_DEFAULTS = { contextWindow: 128000, maxTokens: 8192 };
+
+let catalogPromise:Promise<Models>|undefined;
+function catalog():Promise<Models> {
+  return catalogPromise ??= import('@earendil-works/pi-ai/providers/all').then(m => m.builtinModels());
+}
+
+function toInfo(m:Model<Api>):ModelInfo {
+  return {
+    id: m.id, name: m.name, api: m.api, baseUrl: m.baseUrl,
+    contextWindow: m.contextWindow, maxTokens: m.maxTokens, reasoning: !!m.reasoning,
+    levels: m.reasoning ? getSupportedThinkingLevels(m) : ['off'],
+    vision: m.input.includes('image'),
+    cost: { input: m.cost?.input ?? 0, output: m.cost?.output ?? 0 },
+  };
+}
+
+export async function listProviders():Promise<ProviderInfo[]> {
+  const models = await catalog();
+  const out:ProviderInfo[] = [];
+  for (const p of models.getProviders()) {
+    const list = models.getModels(p.id);
+    if (EXCLUDED.has(p.id) || !p.baseUrl || p.baseUrl.includes('{') || !p.auth?.apiKey || !list.length) continue;
+    out.push({ id: p.id, name: p.name ?? p.id, group: CN.has(p.id) ? 'cn' : 'intl', baseUrl: p.baseUrl, apis: [...new Set(list.map(m => m.api))], modelCount: list.length });
+  }
+  return out;
+}
+
+async function allowed(providerId:string):Promise<Models> {
+  const models = await catalog();
+  if (!(await listProviders()).some(p => p.id === providerId)) throw new Error('未知服务商');
+  return models;
+}
+
+export async function listModels(providerId:string):Promise<ModelInfo[]> {
+  return (await allowed(providerId)).getModels(providerId).map(toInfo);
+}
+
+export async function findCatalogModel(id:string):Promise<ModelInfo|undefined> {
+  const m = (await catalog()).getModels().find(x => x.id === id);
+  return m ? toInfo(m) : undefined;
+}
+
+export async function primaryApi(providerId:string):Promise<string> {
+  const counts = new Map<string, number>();
+  for (const m of (await allowed(providerId)).getModels(providerId)) counts.set(m.api, (counts.get(m.api) ?? 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+const CUSTOM_APIS:Record<string, () => any> = {
+  'openai-completions': openAICompletionsApi,
+  'openai-responses': openAIResponsesApi,
+  'anthropic-messages': anthropicMessagesApi,
+};
+
+// Legacy config.json models keep their old meaning: provider is only a label, api comes from config.
+export function isCustom(m:Config['model']):boolean { return m.provider === 'custom' || m.source !== 'panel'; }
+
+export async function resolveRuntimeModel(m:Config['model']):Promise<{model:Model<Api>; models:Models}> {
+  if (!isCustom(m)) {
+    const models = await allowed(m.provider);
+    let model = models.getModel(m.provider, m.id);
+    if (!model) {
+      const api = await primaryApi(m.provider);
+      const template = models.getModels(m.provider).find(x => x.api === api)!;
+      model = { ...template, id: m.id, name: m.id, reasoning: false, thinkingLevelMap: undefined, ...UNKNOWN_DEFAULTS };
+    }
+    if (m.baseUrl && model.baseUrl !== m.baseUrl) model = { ...model, baseUrl: m.baseUrl };
+    return { model, models };
+  }
+  const impl = CUSTOM_APIS[m.api];
+  if (!impl) throw new Error('模型协议无效');
+  const match = m.id ? await findCatalogModel(m.id) : undefined;
+  const meta = match
+    ? { contextWindow: match.contextWindow, maxTokens: match.maxTokens, reasoning: match.reasoning, input: (match.vision ? ['text', 'image'] : ['text']) as ('text'|'image')[] }
+    : { contextWindow: m.custom?.contextWindow ?? UNKNOWN_DEFAULTS.contextWindow, maxTokens: UNKNOWN_DEFAULTS.maxTokens, reasoning: m.custom?.reasoning ?? (m.source !== 'panel' && m.reasoning), input: ['text'] as ('text'|'image')[] };
+  const providerId = m.provider || 'custom';
+  const model:Model<Api> = { id: m.id, name: m.id, api: m.api as Api, provider: providerId, baseUrl: m.baseUrl, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, compat: { supportsDeveloperRole: false }, ...meta } as Model<Api>;
+  const models = createModels();
+  models.setProvider(createProvider({ id: providerId, name: providerId, models: [model], auth: { apiKey: { name: '面板 Key', resolve: async () => ({ auth: {} }) } }, api: impl() }));
+  return { model, models };
+}
+
+export type DiscoverInput = { provider:string; baseUrl:string; api?:string; apiKey:string };
+export type DiscoveredModel = { id:string; known:boolean; info?:ModelInfo };
+const DISCOVER_TIMEOUT_MS = 15000;
+const DISCOVER_LIMIT = 1000;
+
+function discoveryRequest(api:string, baseUrl:string, key:string):{url:string; headers:Record<string,string>} {
+  const base = baseUrl.replace(/\/+$/, '');
+  if (api === 'anthropic-messages') return { url: (/\/v1$/.test(base) ? base : base + '/v1') + '/models', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } };
+  if (api === 'google-generative-ai') return { url: base + '/models?key=' + encodeURIComponent(key), headers: {} };
+  return { url: base + '/models', headers: { authorization: 'Bearer ' + key } };
+}
+
+function idsFrom(body:any):string[] {
+  const list = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : Array.isArray(body?.models) ? body.models : [];
+  return list.map((x:any) => typeof x === 'string' ? x : String(x?.id ?? x?.name ?? '')).map((id:string) => id.replace(/^models\//, '')).filter(Boolean);
+}
+
+export async function discoverModels(input:DiscoverInput, fetchImpl:typeof fetch = fetch):Promise<{models:DiscoveredModel[]; total:number}> {
+  const builtin = input.provider !== 'custom';
+  const api = builtin ? await primaryApi(input.provider) : String(input.api ?? '');
+  const { url, headers } = discoveryRequest(api, input.baseUrl, input.apiKey);
+  let response:Response;
+  try { response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(DISCOVER_TIMEOUT_MS) }); }
+  catch (e:any) { throw new Error(e?.name === 'TimeoutError' ? '拉取失败：超时' : '拉取失败：无法连接'); }
+  if (!response.ok) throw new Error('拉取失败：HTTP ' + response.status);
+  let body:any;
+  try { body = await response.json(); } catch { throw new Error('拉取失败：返回的不是 JSON'); }
+  const ids = [...new Set(idsFrom(body))];
+  const own = builtin ? new Map((await listModels(input.provider)).map(m => [m.id, m])) : undefined;
+  const models:DiscoveredModel[] = [];
+  for (const id of ids.slice(0, DISCOVER_LIMIT)) {
+    const info = own ? own.get(id) : await findCatalogModel(id);
+    models.push(info ? { id, known: true, info } : { id, known: false });
+  }
+  return { models, total: ids.length };
+}

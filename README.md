@@ -1,0 +1,131 @@
+# 单账号角色互动工作流
+
+运行在服务器上的确定性消息工作流。仅处理 X 公开回复和私信，不主动发帖，不接入 Buffer。
+
+## 代码仓库与当前版本
+
+代码仓库：[blueforst/dafeiyu](https://github.com/blueforst/dafeiyu)。本次首次提交对应 2026-10-27 已验收上线的 **0.1.10**，包含 Claude 面板及配套模型配置接口。服务保持暂停、草稿模式。详细结果见 [0.1.10 发布记录](docs/发布记录/2026-10-27-0.1.10.md)。
+
+仓库包含源码、配置示例、部署文件及 `dev/` 下的开发验收脚本。实际 `.env`、入口密码、模型 Key、浏览器 profile、数据库和本机交付资料保留在运行环境中。
+
+`dev/sync.sh` 把本机源码同步到服务器开发副本；`dev/t.sh`、`dev/e2e.sh` 在该副本运行测试，`dev/staging-up.sh` 在服务器启动独立 staging，`dev/prod-accept.sh` 执行暂停状态下的生产验收。脚本使用本机 SSH 别名 `dsh`，服务器目录沿用下文约定；staging 的配置、凭据与数据需独立准备。
+
+## 当前交付边界
+
+代码、模拟接口测试和浏览器桌面可先独立验收。真实账号登录、模型凭据、当前 X 私信 DOM 适配、指定会话收发及 12 小时业务草稿观察必须分别记录。页面能访问、容器 healthy 或模拟测试通过，不代表真实收发验收完成。
+
+## 架构
+
+宿主 Nginx 提供 HTTPS 与密码认证。业务容器为 TypeScript / Fastify / SQLite；浏览器容器为 Playwright / Chromium / Xvfb / Openbox / x11vnc / noVNC。Pi AI 负责模型协议适配。
+
+- 仅 `127.0.0.1:8080` 发布宿主端口；浏览器内部 API、VNC、CDP 不暴露公网。
+- Chromium 使用非 root 用户和用户命名空间沙箱。seccomp 基于 Playwright 官方配置，仅增加沙箱需要的 chroot；不使用 privileged，不挂载 Docker socket。
+- 浏览器 profile 由文件锁保护，崩溃遗留的 Singleton 锁只能在拿到独占锁后清理。
+- 程序启动保持暂停；人工接管前排空当前操作，释放时关闭 VNC 客户端并继续暂停。
+- 可选的 [X 浏览器专用出口](docs/X浏览器代理.md) 通过内部 Mihomo 服务接入固定节点，独立于宿主网络设置。
+- 当前生产浏览器使用服务器直连；Bitz 节点已按用户要求移除。
+
+## 目录
+
+服务器代码：`/srv/role-workflow`。持久数据：`/var/lib/role-workflow`。
+
+- `config/config.json`：角色、限速、运行模式，以及面板未设置时使用的预期账号和模型。
+- `app/panel/settings.json`：面板保存的预期账号和模型设置，优先于 `config.json` 的对应字段。
+- `app/panel/model-keys.json`：面板保存的模型 Key，按"服务商@接口主机"分别存放，权限 0600；面板和日志只显示末 4 位。
+- `secrets/app/model_api_key`：旧方式的模型密钥，只在面板从未保存过模型时使用。
+- `app/workflow.sqlite`：队列、记忆、回执和日志。
+- `app/forget-ledger.json`：独立遗忘记录，恢复旧数据库后自动重放，不能随旧备份覆盖。
+- `browser/`：登录状态和浏览器发送日志。
+- `admin-access.txt`：管理入口及密码，仅管理员可读。
+
+代码库和镜像均不包含真实配置、密钥或账号数据。
+
+## 首次配置
+
+1. 打开 HTTPS 面板，用交付资料中的凭据登录。面板分"概览 / 模型 / 浏览器"三页，右上角是运行状态和"恢复处理 / 暂停"。
+2. 在"浏览器"页点"接管并连接"，由账号所有者完成 X 登录、验证码及私信解锁，然后点右上角"释放接管"。浏览器页平时不连接。
+3. 在"概览"页填写预期账号（不带 @），或点"用当前登录"。处理运行中不能修改，需要先暂停。运行模式仍在 `config.json` 里设置，保持 `mode: "draft"`。
+4. 在"模型"页选择服务商：pi 内置服务商会自动带出 Base URL、协议、上下文长度和推理档位；中转站或自建服务选"自定义"，填 Base URL 并选择协议。填写 API Key，可以"用 Key 拉取"接口上的模型列表，然后"测试连接"（会产生少量费用），最后"保存"。
+5. 点右上角"恢复处理"。账号身份必须与预期账号一致。
+
+面板保存的设置和配置文件都在每轮重新读取，不用重启或重建镜像。Pi 上游包为 `@earendil-works/pi-ai@1.4.0`。只支持 API Key 方式，不支持订阅账号登录；需要额外参数的服务商（Bedrock、Azure、Cloudflare、Vertex）不在面板列表里。Base URL 不能指向本机、内部服务或云元数据地址。
+
+面板设置和 Key 存在 `app/panel/`，**不进入**数据库备份；从备份恢复后需要在面板上重新填写 Key。
+
+视觉输入尚未接入：图片会显式标记为不可见，禁止模型猜测。配置中的 vision 目前保持 false。
+
+## 日常命令
+
+所有命令在服务器执行：
+
+```sh
+cd /srv/role-workflow
+docker compose ps
+docker compose logs --tail 100 app browser
+docker compose exec -T app node dist/cli.js status
+docker compose exec -T app node dist/cli.js drafts
+docker compose exec -T app node dist/cli.js model-check
+docker compose exec -T app node dist/cli.js retry '消息ID'
+docker compose exec -T app node dist/cli.js forget '用户ID'
+docker compose exec -T app node dist/cli.js remember '用户ID'
+docker compose exec -T app node dist/cli.js backup
+```
+
+`model-check` 会发起一次真实模型请求，可能计费。`drafts` 包含消息正文，只在管理员终端查看，不应复制到公开日志。
+
+## 消息与记忆
+
+- 采集来源轮换：提及、搜索、自己帖子下面的回复；每轮最多查看三个私信会话。
+- 私信按会话独立记忆，公开记忆不会读取私信。当前没有自动跨渠道用户身份合并。
+- 最近三次原文作为短期上下文；每累计五条新记录，按公开/私信分别整理摘要。
+- 忘记指令会清理消息和摘要、增加记忆代次，并停止后续记录。正在生成的旧摘要不能重新写回。
+- 默认保留原始消息 30 天。数据库备份保留最近七份；遗忘元数据独立保存，恢复时继续生效。
+- 模型输出只接受 reply/skip 结构，发送前校验链接、额外 @ 和公开回复的加权字符长度。
+
+## 发送与恢复
+
+发送状态：queued → generating → draft → sending → confirmed / unknown / failed。
+
+初次运行仅生成草稿。开启自动模式不会自动发送旧草稿；确需重处理时使用 retry。发送超时或无唯一消息 ID 时进入 unknown，只回查，不重发。存在 unknown 的通道暂停新发送，需要管理员核对。
+
+每小时默认公开回复 10 条、私信 30 条，每轮最多两条。平台拒绝后对应通道退避四小时。以上是内部额度，不是平台许可。
+
+X 页面可能变化；遇到不识别的输入框、聊天方向或回执时停止该项操作并记录异常。新版加密 Chat 需要使用真实账号验证后按实际 DOM 适配，不能把模拟解析测试当作真实私信验收。
+
+## 自动回复启用条件
+
+真实账号身份、模型请求、公开消息及私信读取分别通过验收；完成至少 12 小时业务草稿观察；用户指定测试会话，确认真实回复和回执；之后由管理员把运行模式改为 auto。
+
+业务草稿观察时间从第一条真实生成的草稿开始记录。基础设施空载运行不计入业务观察。当前业务观察是否开始，以面板和验收记录为准。
+
+## 升级和回滚
+
+先在服务器构建和测试新镜像。升级脚本暂停业务、在线备份数据库、停止浏览器并冷备 profile，再切换版本。升级后保持暂停。
+
+```sh
+sh deploy/upgrade.sh 新版本号
+sh deploy/rollback.sh
+```
+
+本期数据库结构为初始版本；未来不兼容迁移必须记录版本并恢复配套旧备份，禁止让旧程序读取不兼容数据。恢复数据库前停止 app，保留当前 forget-ledger.json，再用备份替换数据库并移走对应 WAL/SHM；启动时自动重放遗忘记录。
+
+## 监控和证书
+
+宿主 systemd 管理容器开机启动、每五分钟健康检查、每日在线备份和每小时证书续期检查。监控写入 `monitor-latest.json` 及 systemd journal，本期没有配置外部邮件或聊天通知。
+
+IP 证书约六天有效，必须保留 HTTP-01 验证入口及自动续期任务。续期成功后执行 nginx -t 并 reload；续期演练和实际证书有效期单独留证。
+
+## 测试与构建
+
+构建和测试只在服务器运行。Docker builder 执行类型检查和安全回归；另有 Chromium DOM 样本解析与公网面板/noVNC 端到端验收。公网面板验收（`test/ui-acceptance.mjs`）只在处理暂停时执行：它会接管一次浏览器以确认桌面可用，结束后释放；处理运行中则直接跳过（退出码 2），不做任何操作。
+
+```sh
+docker build --target runtime -t role-workflow-app:版本号 .
+docker build --target browser -t role-workflow-browser:版本号 .
+```
+
+## 来源与限制
+
+浏览器桌面分层参考 runzhliu/deepseek-harness-docker 的提交 833d60e772635a13c799c296730428c984312e58，自行实现生命周期和应用接口，不安装 DSH。seccomp 配置参考 microsoft/playwright v1.64.1；Pi AI 来源 badlogic/pi-mono。第三方软件许可证保留在对应包和镜像中。
+
+X 当前规则禁止网页脚本自动化，并要求 AI 自动回复事先取得平台明确书面批准；技术运行成功不构成平台许可。

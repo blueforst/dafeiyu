@@ -1,0 +1,5 @@
+[Unit]
+Description=角色面板 IP 证书续期
+[Service]
+Type=oneshot
+ExecStart=/opt/role-certbot/bin/certbot renew --quiet --deploy-hook "/usr/sbin/nginx -t && /usr/bin/systemctl reload nginx"

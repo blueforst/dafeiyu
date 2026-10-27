@@ -1,0 +1,9 @@
+[Unit]
+Description=检查短期 IP 证书续期
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+[Install]
+WantedBy=timers.target
