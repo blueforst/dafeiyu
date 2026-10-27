@@ -45,6 +45,9 @@ export function mount(root, ctx) {
   const modelPop = h('div', { id: 'model-list', class: 'popover', hidden: true }, h('div', { class: 'pop-search' }, modelSearch, modelHead), modelItems);
 
   const modelInfo = h('div', { id: 'model-info', class: 'info' });
+  const commandCodeNote = h('div', { id: 'commandcode-note', class: 'muted small', hidden: true },
+    '支持 GOAT 等含 API 权限的套餐。这里显示全量模型目录，可用模型和额度以账号套餐为准。价格暂未映射。 ',
+    h('a', { href: 'https://commandcode.ai/docs/plans/goat', target: '_blank', rel: 'noopener' }, '查看 GOAT 官方说明'));
   const reasoningGroup = h('div', { id: 'reasoning-group', class: 'radios' });
   const reasoningField = h('div', {}, h('div', { class: 'field' }, '推理强度 ', h('span', { class: 'faint' }, '（档位来自 pi）')), reasoningGroup);
 
@@ -77,7 +80,7 @@ export function mount(root, ctx) {
     h('label', { class: 'field', for: 'api-key' }, 'API Key'), apiKey, keyState,
     h('label', { class: 'field', for: 'model-input' }, '模型'),
     h('div', { class: 'dropdown' }, h('div', { class: 'inline' }, modelInput, discoverBtn), modelPop),
-    modelInfo, reasoningField, advanced,
+    modelInfo, commandCodeNote, reasoningField, advanced,
     h('div', { class: 'form-foot' }, testBtn, saveBtn, testResult),
     h('div', { class: 'faint small' }, '测试连接会真实请求一次模型，会产生少量费用。'),
     confirmSave);
@@ -114,8 +117,8 @@ export function mount(root, ctx) {
     const customMatch = !q || '自定义 custom 中转站'.includes(q);
     set(providerItems,
       groups.map(([label, list]) => [h('div', { class: 'grp' }, label),
-        list.map(p => h('button', { class: 'opt' + (p.id === form.provider ? ' on' : ''), type: 'button', dataset: { provider: p.id }, onclick: () => selectProvider(p.id) },
-          h('span', {}, p.name), h('span', { class: 'chip' }, p.modelCount + ' 个模型')))]),
+        list.map(p => h('button', { class: 'opt' + (p.id === form.provider ? ' on' : ''), type: 'button', disabled: p.available === false, title: p.reason || '', dataset: { provider: p.id }, onclick: () => selectProvider(p.id) },
+          h('span', {}, p.name, p.reason ? h('small', {}, p.reason) : null), h('span', { class: 'chip' }, p.available === false ? '尚未接入' : p.modelCount + ' 个模型')))]),
       customMatch ? [h('div', { class: 'grp' }, '其他'),
         h('button', { class: 'opt' + (isCustom() ? ' on' : ''), type: 'button', dataset: { provider: 'custom' }, onclick: () => selectProvider('custom') },
           h('span', {}, h('b', {}, '自定义'), h('span', { class: 'faint' }, '　中转站、自建服务')), h('span', { class: 'chip' }, '手填地址'))] : null,
@@ -137,7 +140,7 @@ export function mount(root, ctx) {
     if (discovered) {
       const head = isCustom() ? '接口返回 ' + discovered.total + ' 个' : 'Key 可用 ' + rows.filter(r => r.tag?.[0] === '可用').length + ' / ' + catalog.length;
       modelHead.textContent = head + (discovered.total > discovered.models.length ? '（只显示前 ' + discovered.models.length + ' 个）' : '');
-    } else modelHead.textContent = isCustom() ? '先填地址和 Key，再点"用 Key 拉取"' : 'pi 目录 · ' + catalog.length + ' 个模型';
+    } else modelHead.textContent = isCustom() ? '先填地址和 Key，再点"用 Key 拉取"' : (providerById(form.provider)?.source === 'preset' ? '服务商目录 · ' : 'pi 目录 · ') + catalog.length + ' 个模型';
     set(modelItems, shown.length ? shown.map(r => h('button', { class: 'opt model' + (r.id === form.id ? ' on' : '') + (r.tag?.[1] === 'dim' ? ' dim' : ''), type: 'button', dataset: { model: r.id }, onclick: () => selectModel(r.id) },
       h('span', { class: 'opt-name' }, r.info?.name && r.info.name !== r.id ? [r.info.name, h('small', {}, r.id)] : r.id),
       h('span', { class: 'chips' },
@@ -157,12 +160,12 @@ export function mount(root, ctx) {
     if (!form.id.trim()) { set(modelInfo, h('div', { class: 'faint' }, '选择或填写模型后显示模型信息')); return; }
     if (info) {
       set(modelInfo,
-        h('div', { class: 'info-h' }, h('span', {}, '模型信息'), h('span', { class: 'ok small' }, isCustom() ? 'pi 已识别 · 自动带出' : 'pi 提供 · 只读')),
+        h('div', { class: 'info-h' }, h('span', {}, '模型信息'), h('span', { class: 'ok small' }, isCustom() ? 'pi 已识别 · 自动带出' : providerById(form.provider)?.source === 'preset' ? '服务商目录 · 自动带出' : 'pi 提供 · 只读')),
         h('div', { class: 'info-grid' },
           h('div', {}, h('span', {}, '协议'), h('b', {}, F.API_LABEL[isCustom() ? form.api : info.api] ?? info.api)),
           h('div', {}, h('span', {}, '上下文'), h('b', {}, F.fmtTokens(info.contextWindow))),
           h('div', {}, h('span', {}, '最大输出'), h('b', {}, F.fmtTokens(info.maxTokens))),
-          h('div', {}, h('span', {}, '价格 / 百万 token'), h('b', {}, F.fmtPrice(info.cost)))),
+          h('div', {}, h('span', {}, '价格 / 百万 token'), h('b', {}, info.costKnown === false ? '未提供' : F.fmtPrice(info.cost)))),
         h('div', { class: 'chips', style: 'margin-top:8px' }, h('span', { class: 'chip' + (info.reasoning ? ' b' : '') }, info.reasoning ? '支持推理' : '不支持推理'), h('span', { class: 'chip' }, info.vision ? '能看图（本期不用）' : '不能看图')));
       return;
     }
@@ -206,8 +209,9 @@ export function mount(root, ctx) {
     const p = providerById(form.provider);
     set(providerSelect, h('span', {}, isCustom() ? '自定义 · 中转站、自建服务' : p?.name ?? (form.provider || '请选择服务商')), h('span', { class: 'chev', 'aria-hidden': 'true' }));
     formBody.hidden = !form.provider;
+    commandCodeNote.hidden = form.provider !== 'commandcode';
     if (baseUrl.value !== form.baseUrl) baseUrl.value = form.baseUrl;
-    baseUrlChip.textContent = isCustom() || !form.provider ? '' : baseUrlEdited ? '已修改' : 'pi 预设 · 可改';
+    baseUrlChip.textContent = isCustom() || !form.provider ? '' : baseUrlEdited ? '已修改' : p?.source === 'preset' ? '服务商预设 · 可改' : 'pi 预设 · 可改';
     baseUrlChip.hidden = !baseUrlChip.textContent;
     apiField.hidden = !isCustom();
     for (const r of apiGroup.querySelectorAll('input')) r.checked = r.value === form.api;
@@ -333,7 +337,13 @@ export function mount(root, ctx) {
   const openModels = e => { e.stopPropagation(); providerPop.hidden = true; if (modelPop.hidden) { modelSearch.value = ''; modelPop.hidden = false; renderModels(); } };
   modelInput.addEventListener('click', openModels);
   modelInput.addEventListener('focus', openModels);
-  modelInput.addEventListener('input', () => { form.id = modelInput.value; if (!levels().includes(form.reasoningLevel)) form.reasoningLevel = F.defaultLevel(levels()); update(); });
+  modelInput.addEventListener('input', () => {
+    form.id = modelInput.value;
+    const info = currentInfo();
+    if (!isCustom() && !baseUrlEdited && info?.baseUrl) setBaseUrl(info.baseUrl, false);
+    if (!levels().includes(form.reasoningLevel)) form.reasoningLevel = F.defaultLevel(levels());
+    update();
+  });
   modelSearch.addEventListener('input', renderModels);
   for (const pop of [providerPop, modelPop]) pop.addEventListener('click', e => e.stopPropagation());
   const onDocClick = () => closePops();

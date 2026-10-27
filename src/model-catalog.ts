@@ -5,17 +5,21 @@ import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
 import type { Config } from './types.js';
+import { commandCodeProvider, commandCodeApi, COMMANDCODE_BASE } from './commandcode.js';
 
-export type ProviderInfo = { id:string; name:string; group:'cn'|'intl'; baseUrl:string; apis:string[]; modelCount:number };
-export type ModelInfo = { id:string; name:string; api:string; baseUrl:string; contextWindow:number; maxTokens:number; reasoning:boolean; levels:string[]; vision:boolean; cost:{input:number;output:number} };
+export type ProviderInfo = { id:string; name:string; group:'cn'|'intl'; baseUrl:string; apis:string[]; modelCount:number; available:boolean; reason:string; source:'pi'|'preset' };
+export type ModelInfo = { id:string; name:string; api:string; baseUrl:string; contextWindow:number; maxTokens:number; reasoning:boolean; levels:string[]; vision:boolean; cost:{input:number;output:number}; costKnown:boolean };
 
-const EXCLUDED = new Set(['amazon-bedrock', 'openai-codex', 'github-copilot', 'typesafe']);
 const CN = new Set(['deepseek', 'moonshotai-cn', 'zai-coding-cn', 'qwen-token-plan-cn', 'minimax-cn', 'xiaomi', 'xiaomi-token-plan-cn', 'ant-ling']);
 const UNKNOWN_DEFAULTS = { contextWindow: 128000, maxTokens: 8192 };
 
 let catalogPromise:Promise<Models>|undefined;
 function catalog():Promise<Models> {
-  return catalogPromise ??= import('@earendil-works/pi-ai/providers/all').then(m => m.builtinModels());
+  return catalogPromise ??= import('@earendil-works/pi-ai/providers/all').then(m => {
+    const models = m.builtinModels();
+    models.setProvider(commandCodeProvider(models.getModels()));
+    return models;
+  });
 }
 
 function toInfo(m:Model<Api>):ModelInfo {
@@ -25,6 +29,7 @@ function toInfo(m:Model<Api>):ModelInfo {
     levels: m.reasoning ? getSupportedThinkingLevels(m) : ['off'],
     vision: m.input.includes('image'),
     cost: { input: m.cost?.input ?? 0, output: m.cost?.output ?? 0 },
+    costKnown: m.provider !== 'commandcode',
   };
 }
 
@@ -33,15 +38,18 @@ export async function listProviders():Promise<ProviderInfo[]> {
   const out:ProviderInfo[] = [];
   for (const p of models.getProviders()) {
     const list = models.getModels(p.id);
-    if (EXCLUDED.has(p.id) || !p.baseUrl || p.baseUrl.includes('{') || !p.auth?.apiKey || !list.length) continue;
-    out.push({ id: p.id, name: p.name ?? p.id, group: CN.has(p.id) ? 'cn' : 'intl', baseUrl: p.baseUrl, apis: [...new Set(list.map(m => m.api))], modelCount: list.length });
+    const baseUrl = p.baseUrl || list.find(m => m.baseUrl && !m.baseUrl.includes('{'))?.baseUrl || '';
+    const reason = !list.length ? '没有可用于回复的聊天模型' : !p.auth?.apiKey ? '需要订阅账号登录，尚未接入' : p.id === 'amazon-bedrock' ? '需要 AWS 认证及区域，尚未接入' : !baseUrl || baseUrl.includes('{') ? '需要云服务专用参数，尚未接入' : '';
+    out.push({ id: p.id, name: p.name ?? p.id, group: CN.has(p.id) ? 'cn' : 'intl', baseUrl, apis: [...new Set(list.map(m => m.api))], modelCount: list.length, available: !reason, reason, source: p.id === 'commandcode' ? 'preset' : 'pi' });
   }
   return out;
 }
 
 async function allowed(providerId:string):Promise<Models> {
   const models = await catalog();
-  if (!(await listProviders()).some(p => p.id === providerId)) throw new Error('未知服务商');
+  const provider = (await listProviders()).find(p => p.id === providerId);
+  if (!provider) throw new Error('未知服务商');
+  if (!provider.available) throw new Error(provider.reason);
   return models;
 }
 
@@ -74,11 +82,14 @@ export async function resolveRuntimeModel(m:Config['model']):Promise<{model:Mode
     const models = await allowed(m.provider);
     let model = models.getModel(m.provider, m.id);
     if (!model) {
-      const api = await primaryApi(m.provider);
+      const api = m.provider === 'commandcode' ? commandCodeApi(m.id) : await primaryApi(m.provider);
       const template = models.getModels(m.provider).find(x => x.api === api)!;
       model = { ...template, id: m.id, name: m.id, reasoning: false, thinkingLevelMap: undefined, ...UNKNOWN_DEFAULTS };
     }
-    if (m.baseUrl && model.baseUrl !== m.baseUrl) model = { ...model, baseUrl: m.baseUrl };
+    const defaults = new Set(models.getModels(m.provider).map(item => item.baseUrl));
+    if (m.provider === 'commandcode') defaults.add(COMMANDCODE_BASE);
+    if (m.baseUrl && model.baseUrl !== m.baseUrl && !defaults.has(m.baseUrl)) model = { ...model, baseUrl: m.baseUrl };
+    if (m.provider === 'commandcode') model = { ...model, baseUrl: model.api === 'anthropic-messages' ? model.baseUrl.replace(/\/v1\/?$/, '') : model.baseUrl };
     return { model, models };
   }
   const impl = CUSTOM_APIS[m.api];
@@ -114,7 +125,12 @@ function idsFrom(body:any):string[] {
 export async function discoverModels(input:DiscoverInput, fetchImpl:typeof fetch = fetch):Promise<{models:DiscoveredModel[]; total:number}> {
   const builtin = input.provider !== 'custom';
   const api = builtin ? await primaryApi(input.provider) : String(input.api ?? '');
-  const { url, headers } = discoveryRequest(api, input.baseUrl, input.apiKey);
+  const mixedGateway = ['opencode', 'opencode-go', 'commandcode'].includes(input.provider);
+  const { url, headers } = input.provider === 'radius'
+    ? { url: new URL('/v1/config', input.baseUrl).href, headers: { authorization: 'Bearer ' + input.apiKey } }
+    : mixedGateway
+    ? { url: input.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') + '/v1/models', headers: { authorization: 'Bearer ' + input.apiKey } }
+    : discoveryRequest(api, input.baseUrl, input.apiKey);
   let response:Response;
   try { response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(DISCOVER_TIMEOUT_MS) }); }
   catch (e:any) { throw new Error(e?.name === 'TimeoutError' ? '拉取失败：超时' : '拉取失败：无法连接'); }

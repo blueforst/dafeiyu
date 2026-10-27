@@ -7,6 +7,7 @@ import { listProviders, listModels, resolveRuntimeModel } from '../src/model-cat
 import { requestMaxTokens, runCompletion, PiGenerator } from '../src/model.js';
 import { writeModelKey } from '../src/settings.js';
 import type { Config } from '../src/types.js';
+import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
 
 const deepseek = (over: Partial<Config['model']> = {}): Config['model'] => ({ provider: 'deepseek', api: '', baseUrl: 'https://api.deepseek.com', id: 'deepseek-flash', reasoning: false, reasoningLevel: 'off', vision: false, maxTokens: 1024, timeoutMs: 10000, source: 'panel', ...over });
 const config = (model: Config['model']): Config => ({ mode: 'draft', pollSeconds: 60, maxAgeHours: 6, maxPerRound: 2, publicPerHour: 10, privatePerHour: 30, retentionDays: 30, persona: '测试 AI', dailyState: '无', model });
@@ -29,15 +30,88 @@ async function mockSse(fn: (port: number, seen: Seen[]) => Promise<void>) {
   try { await fn((server.address() as any).port, seen); } finally { await new Promise<void>(r => server.close(() => r())); }
 }
 
-test('服务商列表排除需要额外参数或只能 OAuth 的服务商，并按国内/海外分组', async () => {
+test('完整列出 pi 服务商，需要额外配置的说明原因，其余按国内/海外分组', async () => {
   const providers = await listProviders();
   const ids = providers.map(p => p.id);
-  for (const banned of ['amazon-bedrock', 'azure', 'cloudflare-ai-gateway', 'cloudflare-workers-ai', 'google-vertex', 'openai-codex', 'github-copilot', 'typesafe']) assert.ok(!ids.includes(banned), banned);
+  assert.deepEqual(new Set(ids), new Set([...builtinProviders().map(p => p.id), 'commandcode']));
+  for (const unavailable of ['amazon-bedrock', 'azure', 'cloudflare-ai-gateway', 'cloudflare-workers-ai', 'google-vertex', 'openai-codex', 'typesafe']) {
+    const p = providers.find(p => p.id === unavailable)!;
+    assert.equal(p.available, false, unavailable);
+    assert.ok(p.reason, unavailable);
+  }
+  for (const id of ['opencode', 'opencode-go', 'radius', 'github-copilot', 'commandcode']) {
+    const p = providers.find(p => p.id === id)!;
+    assert.ok(p.available && p.modelCount && p.baseUrl, id);
+  }
   const ds = providers.find(p => p.id === 'deepseek')!;
   assert.equal(ds.group, 'cn');
   assert.equal(ds.baseUrl, 'https://api.deepseek.com');
   assert.deepEqual(ds.apis, ['openai-completions']);
   assert.equal(providers.find(p => p.id === 'anthropic')!.group, 'intl');
+});
+
+test('混合协议供应商使用各模型自己的地址，并保留用户手工改过的地址', async () => {
+  for (const provider of ['opencode', 'opencode-go', 'commandcode']) {
+    const list = await listModels(provider);
+    const baseUrl = (await listProviders()).find(p => p.id === provider)!.baseUrl;
+    for (const api of ['anthropic-messages', 'openai-completions']) {
+      const item = list.find(m => m.api === api)!;
+      const resolved = await resolveRuntimeModel(deepseek({ provider, baseUrl, id: item.id }));
+      assert.equal(resolved.model.baseUrl, item.baseUrl);
+      assert.equal(resolved.model.api, item.api);
+    }
+    const item = list.find(m => m.api === 'openai-completions')!;
+    assert.equal((await resolveRuntimeModel(deepseek({ provider, baseUrl: 'https://relay.example/custom', id: item.id }))).model.baseUrl, 'https://relay.example/custom');
+  }
+});
+
+test('Command Code 使用官方目录及上下文，缺失价格不显示成免费', async () => {
+  const provider = (await listProviders()).find(p => p.id === 'commandcode')!;
+  assert.equal(provider.source, 'preset');
+  const list = await listModels('commandcode');
+  const claude = list.find(m => m.id === 'claude-sonnet-4-6')!;
+  assert.equal(claude.contextWindow, 1000000);
+  assert.equal(claude.api, 'anthropic-messages');
+  assert.equal(claude.baseUrl, 'https://api.commandcode.ai/provider');
+  assert.equal(claude.costKnown, false);
+  assert.equal((await resolveRuntimeModel(deepseek({ provider: 'commandcode', id: 'claude-new', baseUrl: provider.baseUrl }))).model.api, 'anthropic-messages');
+});
+
+test('Command Code 的 OpenAI 模型请求携带 Bearer Key 并使用 Chat Completions', async () => {
+  await mockSse(async (port, seen) => {
+    const r = await runCompletion(deepseek({ provider: 'commandcode', id: 'gpt-6.1-sol', baseUrl: 'http://127.0.0.1:' + port + '/provider/v1', reasoning: false }), 'cmd-test-key', '系统', '你好');
+    assert.equal(seen[0].url, '/provider/v1/chat/completions');
+    assert.equal(seen[0].headers.authorization, 'Bearer cmd-test-key');
+    assert.equal(seen[0].body.model, 'gpt-6.1-sol');
+    assert.equal(r.text, 'MODEL_OK');
+  });
+});
+
+test('Command Code 的 Claude 请求使用 Messages 与 Bearer Key，地址不重复 /v1', async () => {
+  let seen:any;
+  const server = createServer((req, res) => {
+    let body = ''; req.on('data', d => body += d); req.on('end', () => {
+      seen = { url: req.url, headers: req.headers, body: JSON.parse(body) };
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      for (const event of [
+        { type: 'message_start', message: { id: 'msg-test', type: 'message', role: 'assistant', model: 'claude-sonnet-4-6', content: [], usage: { input_tokens: 5, output_tokens: 0 } } },
+        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'MODEL_OK' } },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } },
+        { type: 'message_stop' },
+      ]) res.write('event: ' + event.type + '\ndata: ' + JSON.stringify(event) + '\n\n');
+      res.end();
+    });
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  try {
+    const r = await runCompletion(deepseek({ provider: 'commandcode', id: 'claude-sonnet-4-6', baseUrl: 'http://127.0.0.1:' + (server.address() as any).port + '/provider/v1', reasoning: false }), 'cmd-test-key', '系统', '你好');
+    assert.equal(seen.url.split('?')[0], '/provider/v1/messages');
+    assert.equal(seen.headers.authorization, 'Bearer cmd-test-key');
+    assert.equal(r.text, 'MODEL_OK');
+    assert.equal(r.input, 5);
+  } finally { await new Promise<void>(r => server.close(() => r())); }
 });
 
 test('模型信息来自 pi 目录：上下文、推理档位、看图', async () => {

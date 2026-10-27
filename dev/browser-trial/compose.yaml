@@ -1,7 +1,7 @@
 name: role-workflow-browser-trial
 services:
   app:
-    image: ${BROWSER_TRIAL_APP_IMAGE:-role-workflow-app:0.1.12}
+    image: ${BROWSER_TRIAL_APP_IMAGE:-role-workflow-app:0.1.13}
     init: true
     environment:
       DATA_DIR: /data

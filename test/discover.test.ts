@@ -54,6 +54,25 @@ test('内置服务商用自己的主协议拉取，并在自家目录里识别',
   });
 });
 
+test('混合协议网关统一从 /v1/models 拉取并使用 Bearer，不重复 /v1', async () => {
+  await mock(200, { data: [{ id: 'claude-sonnet-4-6' }] }, async (base, seen) => {
+    for (const provider of ['opencode', 'opencode-go', 'commandcode']) {
+      for (const suffix of ['/gateway', '/gateway/v1']) await discoverModels({ provider, baseUrl: base + suffix, apiKey: 'gateway-key' });
+    }
+    assert.ok(seen.every(r => r.url === '/gateway/v1/models' && r.headers.authorization === 'Bearer gateway-key'));
+  });
+});
+
+test('Radius 从原生 /v1/config 获取目录，不请求不存在的 /models', async () => {
+  await mock(200, { models: [{ id: 'balanced' }] }, async (base, seen) => {
+    const r = await discoverModels({ provider: 'radius', baseUrl: base + '/v1', apiKey: 'radius-key' });
+    assert.equal(seen[0].url, '/v1/config');
+    assert.equal(seen[0].headers.authorization, 'Bearer radius-key');
+    assert.equal(r.models[0].id, 'balanced');
+    assert.equal(r.models[0].known, true);
+  });
+});
+
 test('返回 1500 个模型时只保留 1000 个，total 记录去重后的总数', async () => {
   const data = Array.from({ length: 1500 }, (_, i) => ({ id: 'm-' + String(i).padStart(4, '0') }));
   await mock(200, { data }, async base => {

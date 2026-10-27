@@ -99,7 +99,38 @@ check('provider list', async page => {
   await page.click('#provider-select');
   assert.equal(await page.locator('#provider-list [data-provider="deepseek"]').count(), 1);
   assert.equal(await page.locator('#provider-list [data-provider="custom"]').count(), 1);
-  assert.equal(await page.locator('#provider-list [data-provider="amazon-bedrock"]').count(), 0);
+  assert.equal(await page.locator('#provider-list [data-provider="amazon-bedrock"]').isDisabled(), true);
+  for (const id of ['opencode', 'opencode-go', 'radius', 'github-copilot', 'commandcode']) assert.equal(await page.locator('#provider-list [data-provider="' + id + '"]').isEnabled(), true);
+  await page.fill('#provider-search', 'code');
+  await page.screenshot({ path: '/artifacts/provider-catalog.png', fullPage: true });
+});
+
+check('opencode models switch endpoints and preserve edited URL', async (page, { request }) => {
+  await openModel(page);
+  await pickProvider(page, 'opencode');
+  const models = await (await request.get(BASE + '/api/model/providers/opencode/models')).json();
+  const claude = models.find(m => m.api === 'anthropic-messages');
+  const other = models.find(m => m.api === 'openai-completions');
+  await pickModel(page, claude.id);
+  assert.equal(await page.inputValue('#base-url'), claude.baseUrl);
+  await pickModel(page, other.id);
+  assert.equal(await page.inputValue('#base-url'), other.baseUrl);
+  await page.fill('#base-url', 'https://edited.example/v1');
+  await pickModel(page, claude.id);
+  assert.equal(await page.inputValue('#base-url'), 'https://edited.example/v1');
+});
+
+check('commandcode models and protocol shown without credentials', async page => {
+  await openModel(page);
+  await pickProvider(page, 'commandcode');
+  assert.equal(await page.locator('#commandcode-note').isVisible(), true);
+  assert.match(await page.locator('#commandcode-note').innerText(), /GOAT.*全量模型目录/);
+  await pickModel(page, 'claude-sonnet-4-6');
+  assert.equal(await page.inputValue('#base-url'), 'https://api.commandcode.ai/provider');
+  assert.ok((await page.locator('#model-info').innerText()).includes('未提供'));
+  await pickModel(page, 'gpt-6.1-sol');
+  assert.equal(await page.inputValue('#base-url'), 'https://api.commandcode.ai/provider/v1');
+  await page.screenshot({ path: '/artifacts/model-commandcode.png', fullPage: true });
 });
 
 check('builtin provider', async page => {

@@ -32,7 +32,7 @@ export async function runCompletion(m:Config['model'], key:string, system:string
  const timeout = AbortSignal.timeout(m.timeoutMs);
  const context:Context = { systemPrompt: system, messages: [{ role: 'user', content: user, timestamp: Date.now() }] };
  const started = Date.now();
- const r = await models.completeSimple(model, context, { apiKey: key, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout });
+ const r = await models.completeSimple(model, context, { apiKey: key, headers: m.provider === 'commandcode' ? { Authorization: 'Bearer ' + key } : undefined, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout });
  return { text: r.content.filter(x => x.type === 'text').map(x => (x as any).text).join(''), input: r.usage.input, output: r.usage.output, cache: r.usage.cacheRead, stopReason: r.stopReason, errorMessage: r.errorMessage, latencyMs: Date.now() - started };
 }
 

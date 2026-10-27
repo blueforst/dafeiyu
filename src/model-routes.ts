@@ -46,7 +46,7 @@ async function validateModel(raw:any):Promise<{settings:PanelModel; info?:ModelI
   if (provider === 'custom') {
     if (!CUSTOM_APIS.includes(raw.api)) throw new HttpError('请选择接口协议');
     settings.api = raw.api;
-  } else if (!(await listProviders()).some(p => p.id === provider)) throw new HttpError('未知服务商');
+  } else if (!(await listProviders()).some(p => p.id === provider && p.available)) throw new HttpError('服务商尚未接入或不存在');
   const info = await infoFor(provider, id, provider === 'custom');
   if (provider === 'custom' && !info) {
     settings.custom = { contextWindow: raw.custom?.contextWindow === undefined ? 128000 : int(raw.custom.contextWindow, 1000, 10000000, '上下文长度'), reasoning: raw.custom?.reasoning === true };
@@ -106,7 +106,7 @@ export function registerModelRoutes(app:FastifyInstance, deps:Deps):void {
     const b = req.body ?? {};
     const provider = String(b.provider ?? '');
     try { checkBaseUrl(b.baseUrl); } catch (e:any) { throw new HttpError(e.message); }
-    if (provider === 'custom' ? !CUSTOM_APIS.includes(b.api) : !(await listProviders()).some(p => p.id === provider)) throw new HttpError(provider === 'custom' ? '请选择接口协议' : '未知服务商');
+    if (provider === 'custom' ? !CUSTOM_APIS.includes(b.api) : !(await listProviders()).some(p => p.id === provider && p.available)) throw new HttpError(provider === 'custom' ? '请选择接口协议' : '服务商尚未接入或不存在');
     const apiKey = keyFor(provider, String(b.baseUrl), b.apiKey);
     try {
       const r = await discover({ provider, baseUrl: String(b.baseUrl).trim(), api: provider === 'custom' ? b.api : undefined, apiKey });
