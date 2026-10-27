@@ -42,7 +42,7 @@ export function defaultLevel(levels) {
 }
 
 export function emptyForm() {
-  return { provider: '', baseUrl: '', api: 'openai-completions', id: '', reasoningLevel: 'off', maxTokens: 1024, timeoutSec: 60, custom: { contextWindow: 128000, reasoning: false } };
+  return { provider: '', baseUrl: '', api: 'openai-completions', id: '', reasoningLevel: 'off', maxTokens: 4096, timeoutSec: 60, custom: { contextWindow: 128000, reasoning: false } };
 }
 
 export function formFrom(settings) {

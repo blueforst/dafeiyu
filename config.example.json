@@ -15,7 +15,7 @@
     "reasoning": false,
     "reasoningLevel": "low",
     "vision": false,
-    "maxTokens": 1024,
+    "maxTokens": 4096,
     "timeoutMs": 60000
   },
   "retentionDays": 30

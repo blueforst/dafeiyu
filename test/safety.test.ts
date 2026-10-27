@@ -25,6 +25,26 @@ function fixture(c:Config=structuredClone(config)){
  return {store,t,generator,workflow,c,sends:()=>sends,setReceipt:(r:Receipt)=>receipt=r,setReceived:(r:Event[])=>received=r,close:()=>{store.db.close();rmSync(path,{recursive:true,force:true});}};
 }
 test('草稿流程去重，绝不触发发送',async()=>{const f=fixture();try{await f.workflow.tick();await f.workflow.tick();assert.equal(f.sends(),0);assert.equal(f.store.getMessage(event.id).status,'draft');assert.equal(f.store.stats().messages.length,1);}finally{f.close();}});
+test('模型会话跨轮次及工作流实例保持稳定，隔离账号、用户、通道及遗忘前后',async()=>{
+ const f=fixture(),sessions:Array<string|undefined>=[];
+ f.generator.complete=async(_c?:any,_s?:any,_u?:any,_signal?:AbortSignal,sessionId?:string)=>{sessions.push(sessionId);return {text:'{"action":"reply","text":"你好呀","reason":""}',input:1,output:1,cache:0};};
+ const next=async(id:string,over:Partial<Event>={},workflow=f.workflow)=>{f.setReceived([{...event,id,...over}]);await workflow.tick();};
+ try{
+  await next('x:session-1');await next('x:session-2');
+  await f.workflow.summarize(event.userId,'public');
+  assert.match(sessions[0]??'',/^role-workflow-[a-f0-9]{64}$/);
+  assert.equal(sessions[1],sessions[0]);assert.equal(sessions[2],sessions[0]);
+  await next('dm:session-1',{channel:'private'});assert.notEqual(sessions[3],sessions[0]);
+  await next('x:session-bob',{userId:'x:bob',handle:'bob'});assert.notEqual(sessions[4],sessions[0]);
+  const restarted=new Workflow(f.store,f.t,f.generator,()=>f.c);
+  await next('x:session-3',{},restarted);assert.equal(sessions[5],sessions[0]);
+  f.store.forget(event.userId);f.store.remember(event.userId);
+  await next('x:session-4',{},restarted);assert.notEqual(sessions[6],sessions[0]);
+  f.t.identity=async()=>({loggedIn:true,needsHuman:false,handle:'another_account'});
+  await next('x:session-5',{},new Workflow(f.store,f.t,f.generator,()=>f.c));assert.notEqual(sessions[7],sessions[6]);
+  assert.equal(sessions.length,8);assert.equal(f.sends(),0);
+ }finally{f.close();}
+});
 test('发送回执未知后保持回查，不重复发送',async()=>{const f=fixture();f.c.mode='auto';f.setReceipt({status:'unknown'});try{await f.workflow.tick();await f.workflow.tick();assert.equal(f.sends(),1);assert.equal(f.store.getMessage(event.id).status,'unknown');}finally{f.close();}});
 test('服务重启将 sending 转为 unknown，并保持暂停',()=>{const f=fixture();try{f.store.ingest(event);f.store.update(event.id,'sending');f.store.boot();assert.equal(f.store.getMessage(event.id).status,'unknown');assert.equal(f.workflow.control(),'paused');}finally{f.close();}});
 test('公开上下文隔离私信原文和摘要',()=>{const f=fixture();try{f.store.ingest(event);f.store.summary(event.userId,'public','公开爱好',0);f.store.summary(event.userId,'private','秘密工作',0);f.store.ingest({...event,id:'dm:123',channel:'private',text:'私信秘密'});f.store.update('dm:123','confirmed',{draft:{action:'reply',text:'已知',reason:''}});const p=JSON.stringify(f.store.context(event.userId,'public'));assert.ok(!p.includes('秘密'));assert.ok(p.includes('公开爱好'));assert.ok(JSON.stringify(f.store.context(event.userId,'private')).includes('秘密工作'));}finally{f.close();}});

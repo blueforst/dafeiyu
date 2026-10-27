@@ -1,4 +1,5 @@
 import type { Api, Model, Context } from '@earendil-works/pi-ai';
+import { randomUUID } from 'node:crypto';
 import { readSecret } from './config.js';
 import { keySlot, readModelKey } from './settings.js';
 import { resolveRuntimeModel } from './model-catalog.js';
@@ -12,7 +13,7 @@ export function parseDraft(raw:string):Draft {
  return {action:x.action,text:x.text.trim(),reason:x.reason.slice(0,300)};
 }
 export function publicLengthOK(text:string){return twitterText.parseTweet(text).valid;}
-export interface Generator { complete(c:Config,system:string,user:string,signal?:AbortSignal):Promise<{text:string;input:number;output:number;cache:number}>; }
+export interface Generator { complete(c:Config,system:string,user:string,signal?:AbortSignal,sessionId?:string):Promise<{text:string;input:number;output:number;cache:number}>; }
 
 // Thinking budget added on top of the visible-reply cap. Budget-based APIs get it from pi itself.
 export const THINKING_BUDGET:Record<string,number> = { minimal: 1024, low: 2048, medium: 4096, high: 8192, xhigh: 16384, max: 16384 };
@@ -25,14 +26,15 @@ export function requestMaxTokens(cap:number, model:Model<Api>, level:string):num
 
 export type CompletionResult = { text:string; input:number; output:number; cache:number; stopReason:string; errorMessage?:string; latencyMs:number };
 
-export async function runCompletion(m:Config['model'], key:string, system:string, user:string, opts:{signal?:AbortSignal; maxTokens?:number; reasoning?:string} = {}):Promise<CompletionResult> {
+export async function runCompletion(m:Config['model'], key:string, system:string, user:string, opts:{signal?:AbortSignal; maxTokens?:number; reasoning?:string; sessionId?:string} = {}):Promise<CompletionResult> {
  const { model, models } = await resolveRuntimeModel(m);
  const level = opts.reasoning ?? (m.reasoning ? m.reasoningLevel : 'off');
  const maxTokens = requestMaxTokens(opts.maxTokens ?? m.maxTokens, model, level);
  const timeout = AbortSignal.timeout(m.timeoutMs);
  const context:Context = { systemPrompt: system, messages: [{ role: 'user', content: user, timestamp: Date.now() }] };
  const started = Date.now();
- const r = await models.completeSimple(model, context, { apiKey: key, headers: m.provider === 'commandcode' ? { Authorization: 'Bearer ' + key } : undefined, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout });
+ // 工作流传入稳定会话；独立连接测试使用新会话。pi 按服务商和地址添加对应会话头。
+ const r = await models.completeSimple(model, context, { apiKey: key, sessionId: opts.sessionId || 'role-workflow-' + randomUUID(), identity: { userAgent: { custom: 'role-workflow/0.1' } }, headers: m.provider === 'commandcode' ? { Authorization: 'Bearer ' + key } : undefined, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout });
  return { text: r.content.filter(x => x.type === 'text').map(x => (x as any).text).join(''), input: r.usage.input, output: r.usage.output, cache: r.usage.cacheRead, stopReason: r.stopReason, errorMessage: r.errorMessage, latencyMs: Date.now() - started };
 }
 
@@ -42,10 +44,10 @@ export function modelKey(m:Config['model']):string {
 }
 
 export class PiGenerator implements Generator {
- async complete(c:Config,system:string,user:string,signal?:AbortSignal){
+ async complete(c:Config,system:string,user:string,signal?:AbortSignal,sessionId?:string){
   const key = modelKey(c.model);
   if(!key||!c.model.id||!c.model.baseUrl)throw new Error('模型未配置：请在面板的模型页填写服务商、模型和 API Key');
-  const r = await runCompletion(c.model, key, system, user, { signal });
+  const r = await runCompletion(c.model, key, system, user, { signal, sessionId });
   if(['error','aborted','length','toolUse'].includes(r.stopReason))throw new Error(r.errorMessage||'模型返回不完整或不支持的响应：'+r.stopReason);
   return { text: r.text, input: r.input, output: r.output, cache: r.cache };
  }

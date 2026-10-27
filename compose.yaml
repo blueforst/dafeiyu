@@ -1,7 +1,7 @@
 name: role-workflow
 services:
   app:
-    image: role-workflow-app:${APP_VERSION:-${ROLE_VERSION:-0.1.13}}
+    image: role-workflow-app:${APP_VERSION:-${ROLE_VERSION:-0.1.14}}
     build:
       context: .
       target: runtime
