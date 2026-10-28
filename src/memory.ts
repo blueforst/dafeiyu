@@ -8,6 +8,7 @@ import type { Store } from './store.js';
 import type { Generator } from './model.js';
 import type { Channel, Config, Receipt } from './types.js';
 import { invalidateReplayMemory } from './persona-replay.js';
+import { IdentityLinks } from './identity-links.js';
 import { recallRoleExperiences } from './role-experiences.js';
 
 export type MemoryPolicy = { recentCount:number; recentDays:number; retentionDays:number };
@@ -36,7 +37,8 @@ export function validateMemoryPolicy(raw:any):MemoryPolicy {
 export class MemoryService {
  private running = new Map<string,Promise<any>>();
  private mutationPath:string;
- constructor(public store:Store, public generator:Generator, public config:()=>Config=loadConfig, public now:()=>number=Date.now) {
+ public readonly links:IdentityLinks;
+ constructor(public store:Store, public generator:Generator, public config:()=>Config=loadConfig, public now:()=>number=Date.now,identityMode:'production'|'chat-test'='production') {
   applyMigration(store.db,3,'可追溯记忆与整理进度',`
    CREATE TABLE memory_items(id TEXT PRIMARY KEY,account_id TEXT NOT NULL,user_id TEXT NOT NULL,channel TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,source_status TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
    CREATE INDEX memory_items_scope ON memory_items(account_id,user_id,channel,updated_at);
@@ -47,6 +49,7 @@ export class MemoryService {
    CREATE TABLE memory_legacy_imports(account_id TEXT NOT NULL,user_id TEXT NOT NULL,channel TEXT NOT NULL,PRIMARY KEY(account_id,user_id,channel));
    CREATE TABLE role_experiences(id TEXT PRIMARY KEY,account_id TEXT NOT NULL,user_id TEXT NOT NULL,channel TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,source_key TEXT NOT NULL,source_message_id TEXT,receipt TEXT,created_at INTEGER NOT NULL,UNIQUE(account_id,source_key));
   `);
+  this.links=new IdentityLinks(store,now,identityMode==='chat-test');
   this.mutationPath=join(dirname(store.ledgerPath),'memory-mutations.json');
   store.registerForgetHandler((userId,accountId,before)=>this.purge(userId,accountId,before));
   store.replayForgetLedger();
@@ -62,6 +65,7 @@ export class MemoryService {
  private bump(scope:MemoryScope){this.store.db.prepare('INSERT INTO memory_progress(account_id,user_id,channel,revision) VALUES(?,?,?,1) ON CONFLICT(account_id,user_id,channel) DO UPDATE SET revision=revision+1').run(scope.accountId,scope.userId,scope.channel);}
  private transaction<T>(fn:()=>T):T {this.store.db.exec('BEGIN IMMEDIATE');try{const result=fn();this.store.db.exec('COMMIT');return result;}catch(e){this.store.db.exec('ROLLBACK');throw e;}}
  private purge(userId:string,accountId:string,before?:number){
+  invalidateReplayMemory(this.store,accountId,userId);
   const args=before===undefined?[accountId,userId]:[accountId,userId,before];
   const ids=this.store.db.prepare('SELECT id FROM memory_items WHERE account_id=? AND user_id=?'+(before===undefined?'':' AND created_at<=?')).all(...args) as any[];
   for(const row of ids)this.store.db.prepare('DELETE FROM memory_sources WHERE item_id=?').run(row.id);
@@ -106,8 +110,12 @@ export class MemoryService {
  context(userId:string,channel:Channel,accountId:string,at=this.now(),policyOverride?:MemoryPolicy){
   if(this.store.forgotten(userId,accountId))return {memories:[],recent:[],experiences:[]};
   const policy=policyOverride?validateMemoryPolicy(policyOverride):this.policy().policy;
+  const linked=this.links.detail(accountId,userId).links;
+  const usable=linked.filter(link=>!this.store.forgotten(channel==='private'?link.publicUserId:link.privateUserId,accountId));
   const channels=channel==='private'?['public','private']:['public'];
-  const availableMemories=channels.flatMap(visible=>this.items(userId,visible as Channel,accountId)).sort((a,b)=>b.updatedAt-a.updatedAt);
+  const availableMemories=(channel==='private'&&usable.length
+   ?[...this.items(userId,'private',accountId),...usable.flatMap(link=>this.items(link.publicUserId,'public',accountId))]
+   :channels.flatMap(visible=>this.items(userId,visible as Channel,accountId))).sort((a,b)=>b.updatedAt-a.updatedAt);
   // 原文只在近期上下文出现一次；来源详情按管理接口单独展开。持久保留的旧事实不因召回预算被删除。
   const memories:ReturnType<MemoryService['items']>=[];let recallSize=0;
   for(const item of availableMemories){
@@ -116,26 +124,34 @@ export class MemoryService {
    if(memories.length>=30||recallSize+size>8000)continue;
    memories.push(compact);recallSize+=size;
   }
-  const rows=this.store.db.prepare(`SELECT id,body,draft,status,created_at,channel FROM messages WHERE account_id=? AND user_id=? AND (?='private' OR channel='public') AND status IN (${PROCESSED}) AND created_at>=? ORDER BY processed_seq DESC LIMIT ?`).all(accountId,userId,channel,at-policy.recentDays*86400000,policy.recentCount) as any[];
+  const cross=channel==='private'&&usable.length?usable[0].publicUserId:null;
+  const rows=this.store.db.prepare(`SELECT id,body,draft,status,created_at,channel FROM messages WHERE account_id=? AND ((user_id=? AND (?='private' OR channel='public')) OR (?<>'' AND user_id=? AND channel='public')) AND status IN (${PROCESSED}) AND created_at>=? ORDER BY processed_seq DESC LIMIT ?`).all(accountId,userId,channel,cross??'',cross??'',at-policy.recentDays*86400000,policy.recentCount) as any[];
   const recent=rows.reverse().map(r=>({id:r.id,channel:r.channel,message:json(r.body).text??'',timestamp:r.created_at,...(r.status==='confirmed'?{reply:json(r.draft).text??''}:{})}));
   const experiences=recallRoleExperiences(this.store,accountId);
-  return {memories,recent,experiences,...(availableMemories.length>memories.length?{recallOmitted:availableMemories.length-memories.length}: {})};
+  const privateBackground:Array<{type:MemoryKind;text:string}>=[];let backgroundSize=0;
+  if(channel==='public')for(const item of usable.flatMap(link=>this.items(link.privateUserId,'private',accountId)).sort((a,b)=>b.updatedAt-a.updatedAt)){
+   if(privateBackground.length>=10||backgroundSize+item.text.length>2000)continue;
+   privateBackground.push({type:item.type,text:item.text});backgroundSize+=item.text.length;
+  }
+  return {memories,recent,experiences,...(linked.length?{linked}:{}),...(privateBackground.length?{privateBackground}:{}),...(availableMemories.length>memories.length?{recallOmitted:availableMemories.length-memories.length}: {})};
  }
  listUsers(opts:{accountId:string;channel?:Channel;q?:string;cursor?:number;limit?:number}){
   const cursor=Math.max(0,Math.floor(opts.cursor??0)),limit=Math.max(1,Math.min(100,Math.floor(opts.limit??30)));
   const rows=this.store.db.prepare(`WITH scopes AS (
-   SELECT account_id,user_id,channel FROM messages UNION SELECT account_id,user_id,channel FROM memory_items UNION SELECT account_id,user_id,channel FROM memory_progress
+   SELECT account_id,user_id,channel FROM messages UNION SELECT account_id,user_id,channel FROM memory_items UNION SELECT account_id,user_id,channel FROM memory_progress UNION SELECT account_id,private_user_id AS user_id,'private' AS channel FROM identity_links UNION SELECT account_id,public_user_id AS user_id,'public' AS channel FROM identity_links
    UNION SELECT account_id,id AS user_id,CASE WHEN id LIKE 'dm:%' OR id LIKE 'conversation:%' THEN 'private' ELSE 'public' END AS channel FROM account_users WHERE forgot=1 UNION SELECT '' AS account_id,id AS user_id,CASE WHEN id LIKE 'dm:%' OR id LIKE 'conversation:%' THEN 'private' ELSE 'public' END AS channel FROM users WHERE forgot=1)
    SELECT s.account_id,s.user_id,s.channel,(SELECT MAX(created_at) FROM messages m WHERE m.account_id=s.account_id AND m.user_id=s.user_id AND m.channel=s.channel) AS last_at,
    (SELECT count(*) FROM memory_items i WHERE i.account_id=s.account_id AND i.user_id=s.user_id AND i.channel=s.channel) AS item_count,
    (SELECT last_summary_at FROM memory_progress p WHERE p.account_id=s.account_id AND p.user_id=s.user_id AND p.channel=s.channel) AS summary_at
    FROM scopes s WHERE s.account_id=? AND (?='' OR s.channel=?) AND (?='' OR s.user_id LIKE ? ESCAPE '\\') ORDER BY COALESCE(last_at,0) DESC,s.user_id,s.channel LIMIT ? OFFSET ?`).all(opts.accountId,opts.channel??'',opts.channel??'',opts.q??'', '%'+(opts.q??'').replace(/[\\%_]/g,'\\$&')+'%',limit+1,cursor) as any[];
-  return {users:rows.slice(0,limit).map(r=>({userId:r.user_id,accountId:r.account_id,channel:r.channel,label:r.user_id,identityConfirmed:!/^dm:|^conversation:/.test(r.user_id),forgotten:this.store.forgotten(r.user_id,r.account_id),lastInteractionAt:r.last_at,itemCount:r.item_count,lastSummaryAt:r.summary_at})),nextCursor:rows.length>limit?cursor+limit:null};
+  return {users:rows.slice(0,limit).map(r=>({userId:r.user_id,accountId:r.account_id,channel:r.channel,label:r.user_id,identityConfirmed:!/^dm:|^conversation:/.test(r.user_id),forgotten:this.store.forgotten(r.user_id,r.account_id),lastInteractionAt:r.last_at,itemCount:r.item_count,lastSummaryAt:r.summary_at,linkedTo:this.links.detail(r.account_id,r.user_id).links})),nextCursor:rows.length>limit?cursor+limit:null};
  }
  detail(userId:string,channel:Channel,accountId:string){
   const forgotten=this.store.forgotten(userId,accountId),context=this.context(userId,channel,accountId),progress=this.state({userId,channel,accountId});
   const interactions=forgotten?[]:(this.store.db.prepare("SELECT * FROM role_experiences WHERE account_id=? AND user_id=? AND kind='interaction' AND (?='private' OR channel='public') ORDER BY created_at DESC,id DESC LIMIT 10").all(accountId,userId,channel) as any[]).map(r=>({id:r.id,type:r.kind,text:r.text,sourceMessageId:r.source_message_id,receipt:json(r.receipt,null),createdAt:r.created_at,channel:r.channel}));
-  return {userId,channel,accountId,forgotten,epoch:this.store.epoch(userId,accountId),...progress,items:forgotten?[]:this.items(userId,channel,accountId),recent:context.recent,experiences:interactions,progress};
+  const links=this.links.detail(accountId,userId);
+  const linkedItems=forgotten?[]:links.links.flatMap(link=>{const other=channel==='private'?link.publicUserId:link.privateUserId,visible=channel==='private'?'public':'private';return this.store.forgotten(other,accountId)?[]:this.items(other,visible,accountId).map(item=>({...item,readonly:true,linkSource:link.source}));});
+  return {links,linkedItems,userId,channel,accountId,forgotten,epoch:this.store.epoch(userId,accountId),...progress,items:forgotten?[]:this.items(userId,channel,accountId),recent:context.recent,experiences:interactions,progress};
  }
  edit(itemId:string,accountId:string,text:string,revision:number){
   if(typeof text!=='string'||!text.trim()||text.length>1200||!Number.isInteger(revision))throw new MemoryError('记忆内容或修订无效');

@@ -31,6 +31,9 @@ function fixture(){
  const root=mkdtempSync(tmpdir()+'/role-proposals-rollback-'),path=root+'/workflow.sqlite',profile=root+'/profile';mkdirSync(profile);mkdirSync(root+'/panel');
  const store=new Store(path);store.boot();const outbox=new Outbox(store),ledger=new LlmStore(store),config=()=>exampleConfig as Config;
  new MemoryService(store,generator,config);new DailyStateService(store,generator,config);new TaskScheduler(store,{account:()=> 'worker',control:()=>store.get('control'),execute:async()=>{throw new Error('不执行任务');}});new Program(store);new ReplyTriage(store);new RuntimeHealth(store);new ReplayRunner(store,new PersonaService(store,generator,config),generator,{accountId:()=> 'worker',config});new ActivityFeed(store,()=> 'worker',()=>6);
+ // 固定历史 schema 演练；新版新增空关联表不属于历史降级工具的授权范围。
+ assert.equal(store.db.prepare('SELECT count(*) n FROM identity_links').get()!.n,0);
+ store.db.exec('DROP TABLE identity_links; DROP TABLE identity_link_blocks; DELETE FROM schema_migrations WHERE version=14');
  const settings={model,modelLibrary:{version:1,providers:[{key:'custom-legacy',provider:'custom',name:'演练接口',baseUrl:model.baseUrl,api:model.api,models:[{id:model.id,source:'manual',params:{reasoningLevel:model.reasoningLevel,maxTokens:model.maxTokens,timeoutMs:model.timeoutMs}}]}],active:{default:{key:'custom-legacy',modelId:model.id}}},promptHints:{late:true},triage:{greetings:['你好']},health:{requiredPhrases:['AI']},revisions:{model:2,modelLibrary:3,promptHints:1,triage:1,health:1}};
  writeFileSync(root+'/panel/settings.json',JSON.stringify(settings));writeFileSync(root+'/panel/model-keys.json','{"custom@rollback-fixture.invalid":"fixture-only-key"}');
  const externals=['forget-ledger.json','forget-history.json','forgotten-sources.json','memory-mutations.json'];for(const name of externals)writeFileSync(root+'/'+name,name==='memory-mutations.json'?'[]':'{}');

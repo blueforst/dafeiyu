@@ -351,9 +351,35 @@ export async function collectPrivateWithDiagnostics(input:PrivateCollectionInput
  }
  for(const link of conversations.values()){
   if(timedOut())break;
-  try{await navigate(page,link.url,deadline);const read=await inspectPrivateConversation(page,link.conversationId,{...input.readiness,deadline,now});if(read.ui)pageStates.push({source:'conversation',...read.ui});const freshEvents=now()<deadline?read.events:[];if(freshEvents!==read.events&&read.events.length)diagnostics.push(diagnostic('partial','private-collection-deadline','conversation'));events.push(...freshEvents);diagnostics.push(...read.diagnostics);addProtection(read.chatProtection);observations.push({conversationId:link.conversationId,source:link.source,contract:read.contract,messageCount:read.all.length,outgoing:read.all.filter(x=>x.direction==='out').length,unknownDirection:read.all.filter(x=>x.direction==='unknown').length,queueable:freshEvents.length,blockedCodes:[...new Set(read.all.flatMap(x=>x.blockedCodes))]});}
+  try{await navigate(page,link.url,deadline);const read=await inspectPrivateConversation(page,link.conversationId,{...input.readiness,deadline,now});if(read.ui?.state==='ready'&&now()<deadline){const peer=await readPrivatePeer(page,link.conversationId,handle);read.diagnostics.push(diagnostic(peer.peerHandle?'ok':'unknown',peer.code,'conversation'));if(peer.peerHandle)for(const event of read.events)event.peerHandle=peer.peerHandle;}if(read.ui)pageStates.push({source:'conversation',...read.ui});const freshEvents=now()<deadline?read.events:[];if(freshEvents!==read.events&&read.events.length)diagnostics.push(diagnostic('partial','private-collection-deadline','conversation'));events.push(...freshEvents);diagnostics.push(...read.diagnostics);addProtection(read.chatProtection);observations.push({conversationId:link.conversationId,source:link.source,contract:read.contract,messageCount:read.all.length,outgoing:read.all.filter(x=>x.direction==='out').length,unknownDirection:read.all.filter(x=>x.direction==='unknown').length,queueable:freshEvents.length,blockedCodes:[...new Set(read.all.flatMap(x=>x.blockedCodes))]});}
   catch(error){if((error as any)?.restricted)throw error;diagnostics.push(diagnostic('failed','private-navigation-failed','conversation'));}
  }
  warnings.push(...diagnostics.filter(d=>!['ok','empty'].includes(d.status)).map(d=>chatDiagnosticMessage(d.code)));
  return {events:[...new Map(events.map(e=>[e.platformId+':'+e.conversationId,{...e,accountId:handle.toLowerCase()}])).values()],warnings:[...new Set(warnings)],diagnostics,observations,pageStates,chatProtection:protection};
+}
+
+/** 只读取当前会话头部；候选读取不改变既有消息方向、时间及回执契约。 */
+export async function readPrivatePeer(page:Page,conversationId:string,selfHandle:string):Promise<{peerHandle?:string;code:string}>{
+ let matching=false;try{const url=new URL(page.url());matching=url.origin==='https://x.com'&&['/messages/'+conversationId,'/i/chat/'+conversationId].includes(url.pathname);}catch{}
+ if(!matching||!selfHandle)return {code:'private-peer-unverified'};
+ const read=await page.evaluate(({conversationId})=>{
+  const native=document.querySelector('[data-testid="xchatEmbedRoute"]');
+  const root=native?.shadowRoot??(native?null:document);if(!root)return {direct:false,handles:[] as string[]};
+  const direct=/^\d+-\d+$/.test(conversationId)||!!root.querySelector('[data-conversation-type="direct"],[data-chat-type="direct"],[data-participant-count="2"]');
+  if(!direct)return {direct:false,handles:[] as string[]};
+  const headers=Array.from(root.querySelectorAll('[data-testid="dm-conversation-header"],[data-testid="conversation-header"],[data-testid="DMConversationHeader"],header'));
+  const handles:string[]=[];let visited=0,truncated=false;
+  const scan=(node:Element,depth:number)=>{if(++visited>500||depth>20){truncated=true;return;}if(node.closest('[data-dm-message-row],[data-testid="messageEntry"],article,[role="log"],[hidden],[aria-hidden="true"]'))return;const style=getComputedStyle(node);if(style.display==='none'||style.visibility==='hidden')return;
+   if(node.tagName==='A'){try{const url=new URL(node.getAttribute('href')??'',location.href),m=url.pathname.match(/^\/([a-zA-Z0-9_]{1,15})\/?$/);if(url.origin==='https://x.com'&&m&&!/^(home|explore|notifications|messages|settings|search|compose|i)$/i.test(m[1]))handles.push(m[1]);}catch{}}
+   if(node.children.length===0)for(const m of (node.textContent??'').matchAll(/(?:^|\s)@([a-zA-Z0-9_]{1,15})(?=$|\s)/g))handles.push(m[1]);
+   for(const child of Array.from(node.children))scan(child,depth+1);if(node.shadowRoot)for(const child of Array.from(node.shadowRoot.children))scan(child,depth+1);
+  };
+  for(const header of headers)scan(header,0);return {direct,handles,truncated};
+ },{conversationId});
+ return privatePeerCandidate(read,selfHandle);
+}
+export function privatePeerCandidate(read:{direct:boolean;handles:string[];truncated?:boolean},selfHandle:string):{peerHandle?:string;code:string}{
+ if(!read.direct||read.truncated||!/^@?[a-zA-Z0-9_]{1,15}$/.test(selfHandle))return {code:'private-peer-unverified'};
+ const handles=[...new Set(read.handles.filter(value=>/^[a-zA-Z0-9_]{1,15}$/.test(value)).map(value=>value.toLowerCase()))].filter(value=>value!==selfHandle.replace(/^@/,'').toLowerCase());
+ return handles.length===1?{peerHandle:handles[0],code:'private-peer-verified'}:{code:handles.length?'private-peer-ambiguous':'private-peer-unverified'};
 }

@@ -41,7 +41,7 @@ export class ChatTestService {
   let store:Store|undefined;
   try{
    store=new Store(join(this.deps.dataDir,'chat-test','workflow.sqlite'));
-   const memory=new MemoryService(store,this.deps.generator,this.config,this.now),persona=new PersonaService(store,this.deps.generator,this.config),triage=new ReplyTriage(store,()=>normalizeTriageSettings(this.config().triage,this.config().maxAgeHours),this.now);
+   const memory=new MemoryService(store,this.deps.generator,this.config,this.now,'chat-test'),persona=new PersonaService(store,this.deps.generator,this.config),triage=new ReplyTriage(store,()=>normalizeTriageSettings(this.config().triage,this.config().maxAgeHours),this.now);
    store.db.exec(`CREATE TABLE IF NOT EXISTS chat_test_users(id TEXT PRIMARY KEY,name TEXT NOT NULL,handle TEXT NOT NULL UNIQUE,public_identity TEXT NOT NULL UNIQUE,conversation_id TEXT NOT NULL,color TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,last_active_at INTEGER NOT NULL,generation INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS chat_test_turns(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,status TEXT NOT NULL,channel TEXT NOT NULL,persona_json TEXT NOT NULL,message_ids_json TEXT NOT NULL,result_json TEXT,diagnostics_json TEXT,segments_json TEXT,call_ids_json TEXT NOT NULL DEFAULT '[]',started_at INTEGER NOT NULL,finished_at INTEGER,error TEXT);
     CREATE INDEX IF NOT EXISTS chat_test_turns_user ON chat_test_turns(user_id,started_at,id);
@@ -49,6 +49,7 @@ export class ChatTestService {
     CREATE INDEX IF NOT EXISTS chat_test_messages_user ON chat_test_messages(user_id,created_at,id);
     CREATE TABLE IF NOT EXISTS chat_test_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);`);
    store.db.exec("UPDATE messages SET status='queued' WHERE status='generating';UPDATE chat_test_turns SET status='failed',error='试聊服务重启，请重试' WHERE status='running'");
+   for(const user of store.db.prepare('SELECT * FROM chat_test_users').all() as UserRow[])memory.links.link(ACCOUNT,this.identity(user,'private'),this.identity(user,'public'),'chat-test');
    this.state={store,memory,persona,triage};return this.state;
   }catch(error){try{store?.db.close();}catch{}throw new ChatTestError('试聊数据无法读取，请保留 chat-test 目录并检查',503);}
  }
@@ -66,7 +67,7 @@ export class ChatTestService {
   const id=randomUUID(),name=text(raw?.name,'显示名',30),handle=this.handle(raw?.handle??'test_'+id.replaceAll('-','').slice(0,10)),at=this.now();
   if(store.db.prepare('SELECT 1 FROM chat_test_users WHERE handle=?').get(handle))throw new ChatTestError('测试 handle 已存在',409);
   const colors=['#4176e6','#7c5ac8','#33866a','#bf7942','#ba527c'],color=colors[parseInt(createHash('sha256').update(id).digest('hex').slice(0,8),16)%colors.length];
-  store.db.prepare('INSERT INTO chat_test_users(id,name,handle,public_identity,conversation_id,color,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id,name,handle,'x:ct_'+id.replaceAll('-','').slice(0,12),'ct_'+randomUUID().replaceAll('-',''),color,at,at,at);return {user:this.presentUser(this.user(id))};
+  store.db.prepare('INSERT INTO chat_test_users(id,name,handle,public_identity,conversation_id,color,created_at,updated_at,last_active_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id,name,handle,'x:ct_'+id.replaceAll('-','').slice(0,12),'ct_'+randomUUID().replaceAll('-',''),color,at,at,at);const user=this.user(id);this.db().memory.links.link(ACCOUNT,this.identity(user,'private'),this.identity(user,'public'),'chat-test');return {user:this.presentUser(this.user(id))};
  }
  private handle(value:unknown){if(typeof value!=='string'||!/^[a-z0-9_]{1,15}$/.test(value))throw new ChatTestError('测试 handle 需要一至十五位小写字母、数字或下划线');return value;}
  updateUser(id:string,raw:Json){raw=body(raw);const user=this.user(id),{store}=this.db();if(this.running.has(id))throw new ChatTestError('该用户正在处理，请先取消',409);
@@ -78,7 +79,7 @@ export class ChatTestService {
  reset(id:string,remove=false){const user=this.user(id),{store}=this.db();this.running.get(id)?.controller.abort();store.db.prepare('UPDATE chat_test_users SET generation=generation+1 WHERE id=?').run(id);
   for(const c of ['public','private'] as Channel[]){const identity=this.identity(user,c);store.forget(identity,ACCOUNT);store.remember(identity,ACCOUNT);for(const table of ['memory_ignored','memory_deleted','memory_legacy_imports','triage_ignores','triage_text_hits'])store.db.prepare('DELETE FROM '+table+' WHERE account_id=? AND user_id=?').run(ACCOUNT,identity);}
   store.db.prepare('DELETE FROM chat_test_messages WHERE user_id=?').run(id);store.db.prepare('DELETE FROM chat_test_turns WHERE user_id=?').run(id);
-  if(remove)store.db.prepare('DELETE FROM chat_test_users WHERE id=?').run(id);else this.touch(user);return {ok:true,...(!remove?{user:this.presentUser(this.user(id))}:{})};
+  if(remove){store.db.prepare('DELETE FROM identity_links WHERE account_id=? AND private_user_id=?').run(ACCOUNT,this.identity(user,'private'));store.db.prepare('DELETE FROM identity_link_blocks WHERE account_id=? AND private_user_id=?').run(ACCOUNT,this.identity(user,'private'));store.db.prepare('DELETE FROM chat_test_users WHERE id=?').run(id);}else this.touch(user);return {ok:true,...(!remove?{user:this.presentUser(this.user(id))}:{})};
  }
  private event(user:UserRow,c:Channel,message:string):Event{const {store}=this.db(),sequence=store.db.prepare('INSERT INTO chat_test_seq DEFAULT VALUES').run().lastInsertRowid.toString(),platformId=c==='public'?sequence:'ct-'+randomUUID(),timestamp=store.nextTimestamp(Math.max(this.now(),store.recordingAfter(this.identity(user,c),ACCOUNT)+1));
   return {id:c==='public'?'x:'+platformId:'dm:'+platformId,platformId,targetId:c==='public'?platformId:user.conversation_id,accountId:ACCOUNT,channel:c,userId:this.identity(user,c),handle:c==='public'?user.handle:'',text:message,url:c==='public'?'https://x.com/'+user.handle+'/status/'+platformId:'https://x.com/messages/'+user.conversation_id,conversationId:c==='public'?platformId:user.conversation_id,timestamp,timestampReliable:true};
@@ -118,7 +119,7 @@ export class ChatTestService {
    if(row.status==='queued'){
     store.update(row.id,'generating');triage.consumed(row.id);
     const daily=accountId?this.deps.daily?.describe(accountId):null,dailyState=daily?.state?.content??'暂无当日日程';
-    const pipeline=await generateReply({config,accountId,persona:selected.persona,personaService:persona,generator:this.deps.generator,conversation:()=>this.context(user,chosenChannel,latest.id),memory:()=>({...memory.context(event.userId,chosenChannel,ACCOUNT),experiences:accountId?recallRoleExperiences(this.deps.store,accountId):[]}),recentReplies:()=>this.recent(user,chosenChannel,accountId,event.conversationId),dailyState,posting:()=>accountId?this.deps.posting?.get().reply:undefined,signal:controller.signal,sessionId:'chat-test-'+id+'-'+chosenChannel,personaIdentity:()=>personaIdentity,metadata:step=>({purpose:'chat-test',source:'chat-test:'+step,accountId,channel:chosenChannel,interactionId:turnId}),snapshot:(_event,snapshot)=>{diagnostics.snapshot=snapshot;}},event,{merged,sampleSource:'chat-test',experiences:accountId?recallRoleExperiences(this.deps.store,accountId):[]});
+    const pipeline=await generateReply({config,accountId,persona:selected.persona,personaService:persona,generator:this.deps.generator,conversation:()=>this.context(user,chosenChannel,latest.id),memory:()=>({...memory.context(event.userId,chosenChannel,ACCOUNT),experiences:accountId?recallRoleExperiences(this.deps.store,accountId):[]}),recentReplies:()=>this.recent(user,chosenChannel,accountId,event.conversationId),dailyState,posting:()=>accountId?this.deps.posting?.get().reply:undefined,signal:controller.signal,sessionId:'chat-test-'+id+'-'+chosenChannel,personaIdentity:()=>personaIdentity,metadata:step=>({purpose:'chat-test',source:'chat-test:'+step,accountId,channel:chosenChannel,interactionId:turnId}),snapshot:(_event,snapshot)=>{diagnostics.snapshot=snapshot;}},event,{merged,now:this.now(),sampleSource:'chat-test',experiences:accountId?recallRoleExperiences(this.deps.store,accountId):[]});
     if(!live())throw new ChatTestError('试聊已取消或测试用户已重置',409);
     const {draft,validation,assembled}=pipeline;segments=assembled.segments;diagnostics={...diagnostics,dailySlot:dailyState,hits:assembled.hits??[],hints:assembled.hints??[],meta:assembled.meta,memory:pipeline.memory,validation,format:draft.format,warning:assembled.warning};
     if(draft.action==='skip'){store.update(row.id,'skipped',{draft});result={draft};}

@@ -23,6 +23,9 @@ const externalNames=['forget-ledger.json','forget-history.json','forgotten-sourc
 function migrate(path:string){
  const store=new Store(path);store.boot();new LlmStore(store);new MemoryService(store,generator,()=>exampleConfig as Config);new DailyStateService(store,generator,()=>exampleConfig as Config);
  new TaskScheduler(store,{account:()=>'',control:()=>store.get('control'),execute:async()=>{throw new Error('逆迁移测试不得执行任务');}});new Outbox(store);new Program(store);
+ // 固定历史 schema 演练；新版新增空关联表不属于历史降级工具的授权范围。
+ assert.equal(store.db.prepare('SELECT count(*) n FROM identity_links').get()!.n,0);
+ store.db.exec('DROP TABLE identity_links; DROP TABLE identity_link_blocks; DELETE FROM schema_migrations WHERE version=14');
  // 本组验证已发布七页 v7 的历史窗口，不能随当前 Outbox 的 v8 自动扩大原工具范围。
  store.db.exec('ALTER TABLE outbox DROP COLUMN validation_json; DELETE FROM schema_migrations WHERE version=8');
  return store;

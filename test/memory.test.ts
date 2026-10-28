@@ -155,3 +155,46 @@ test('管理接口分页与只读预览不写回，策略修订冲突不改变�
   assert.equal((await app.inject({url:'/api/memory/users?limit=999'})).statusCode,400);
  }finally{await app.close();f.close();}
 });
+
+// 在改动前的服务器副本先验证这些场景失败，再验证实现。
+function identityPair(f:ReturnType<typeof fixture>){
+ f.store.db.exec(`CREATE TABLE IF NOT EXISTS identity_links(account_id TEXT NOT NULL,private_user_id TEXT NOT NULL,public_user_id TEXT NOT NULL,source TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(account_id,private_user_id));`);
+ f.store.db.prepare('INSERT INTO identity_links VALUES(?,?,?,?,?,?)').run('work','dm:thread','x:alice','admin',1,1);
+}
+test('关联召回：私信读公开往来，公开只读私信长期背景而非原文',async()=>{
+ const f=fixture();try{
+  identityPair(f);f.add(701,{text:'你好呀'});const source=f.add(702,{channel:'private',userId:'dm:thread',text:'私信原文不能进入公开提示词'});
+  f.setProduce(()=>({items:[{type:'fact',text:'对方养了一只叫团子的猫',sourceIds:[source]}]}));await f.memory.summarize('dm:thread','private','work');
+  const privateContext=f.memory.context('dm:thread','private','work') as any;
+  assert.ok(privateContext.recent.some((r:any)=>r.channel==='public'&&r.message==='你好呀'));
+  const publicContext=f.memory.context('x:alice','public','work') as any;
+  assert.deepEqual(publicContext.privateBackground,[{type:'fact',text:'对方养了一只叫团子的猫'}]);
+  assert.ok(!JSON.stringify(publicContext).includes('私信原文'));assert.ok(!JSON.stringify(publicContext.privateBackground).includes(source));
+  assert.ok(!publicContext.recent.some((r:any)=>r.channel==='private'));
+  assert.deepEqual(f.memory.context('dm:thread','private','another').recent,[]);
+  f.memory.forget('dm:thread','work');assert.equal((f.memory.context('x:alice','public','work') as any).privateBackground,undefined);
+ }finally{f.close();}
+});
+test('关联召回：私信背景独立限额，遗忘的公开身份不进入私信',()=>{
+ const f=fixture();try{
+  identityPair(f);f.add(703,{text:'公开历史'});
+  for(let i=0;i<14;i++)f.store.db.prepare('INSERT INTO memory_items(id,account_id,user_id,channel,kind,text,source_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run('bg'+i,'work','dm:thread','private','fact','长'.repeat(210),'complete',i,i);
+  const context=f.memory.context('x:alice','public','work') as any;
+  assert.ok(context.privateBackground.length<=10);assert.ok(context.privateBackground.reduce((n:number,x:any)=>n+x.text.length,0)<=2000);
+  f.memory.forget('x:alice','work');assert.ok(!f.memory.context('dm:thread','private','work').recent.some((r:any)=>r.channel==='public'));
+ }finally{f.close();}
+});
+
+test('关联管理接口校验与解除范围、列表及只读关联详情',async()=>{
+ const f=fixture(),app=Fastify();registerMemoryRoutes(app,{memory:f.memory,account:()=> 'work'});try{
+  f.add(801);f.add(802,{userId:'dm:thread',channel:'private'});
+  for(const publicHandle of ['bad handle','@toolonghandle012345','',null])assert.equal((await app.inject({method:'PUT',url:'/api/memory/links',payload:{privateUserId:'dm:thread',publicHandle}})).statusCode,400);
+  assert.equal((await app.inject({method:'PUT',url:'/api/memory/links',payload:{privateUserId:'dm:thread',publicHandle:'@Alice'}})).statusCode,200);
+  const read=(await app.inject({url:'/api/memory/links?userId=dm%3Athread'})).json();assert.equal(read.links[0].publicUserId,'x:alice');
+  assert.ok((await app.inject({url:'/api/memory/users'})).json().users.every((u:any)=>u.linkedTo.length===1));
+  assert.equal((await app.inject({method:'DELETE',url:'/api/memory/links',payload:{privateUserId:'dm:thread'}})).statusCode,200);
+  const after=(await app.inject({url:'/api/memory/links?userId=dm%3Athread'})).json();assert.equal(after.links.length,0);assert.equal(after.blocks.length,1);assert.ok(!f.memory.context('dm:thread','private','work').recent.some((r:any)=>r.channel==='public'));
+ }finally{await app.close();f.close();}
+});
+
+test('手动关联尚无往来的身份也在记忆列表互相可见',()=>{const f=fixture();try{f.memory.links.link('work','dm:new','x:new_person','admin');const users=f.memory.listUsers({accountId:'work'}).users;assert.deepEqual(users.map(u=>u.userId).sort(),['dm:new','x:new_person']);assert.ok(users.every(u=>u.linkedTo.length===1));assert.equal(f.memory.listUsers({accountId:'another'}).users.length,0);}finally{f.close();}});

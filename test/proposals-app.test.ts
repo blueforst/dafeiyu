@@ -24,12 +24,13 @@ test('剩余提案整体 API：注册、管理鉴权、只读缓存与暂停保�
   running=await startApp();const {app,store,workflow}=running;workflow.stop();store.set('activeAccount','proposalsbot');
   const auth={host:'panel.test','x-ingress-key':ingress},write={...auth,'x-workflow-control':'1',origin:'https://panel.test'};
   const reads=[
-   '/api/feed','/api/feed?filter=pending','/api/feed/conversations','/api/feed/conversations/posts/items','/api/personas','/api/personas/current','/api/chat-test/status','/api/chat-test/users','/api/health','/api/health/alerts','/api/health/reports',
+   '/api/memory/links?userId=x%3Aalice','/api/feed','/api/feed?filter=pending','/api/feed/conversations','/api/feed/conversations/posts/items','/api/personas','/api/personas/current','/api/personas/current/export','/api/chat-test/status','/api/chat-test/users','/api/health','/api/health/alerts','/api/health/reports',
    '/api/persona/replay/samples','/api/persona/replay/runs','/api/persona/quality',
    '/api/persona/prompt-hints','/api/triage/summary','/api/triage/ignores','/api/triage/settings',
    '/api/account/posting-limits','/api/billing/activity?weeks=52','/api/model',
   ];
   const writes:Array<{method:'POST'|'PUT'|'PATCH'|'DELETE';url:string;pattern?:string}>=[
+   {method:'POST',url:'/api/personas/import'},{method:'PUT',url:'/api/memory/links'},{method:'DELETE',url:'/api/memory/links'},
    {method:'POST',url:'/api/personas'},
    ...(['PUT','DELETE'] as const).map(method=>({method,url:'/api/personas/missing',pattern:'/api/personas/:id'})),
    {method:'POST',url:'/api/personas/missing/activate',pattern:'/api/personas/:id/activate'},
@@ -54,7 +55,7 @@ test('剩余提案整体 API：注册、管理鉴权、只读缓存与暂停保�
 
   await t.test('新增路由实际注册，GET与所有写入口要求管理凭据、控制标记和同源',async()=>{
    assert.equal((await app.inject({url:'/healthz'})).statusCode,200);
-   for(const url of reads){const pattern=url.startsWith('/api/feed/conversations/posts/')?'/api/feed/conversations/:key/items':url.startsWith('/api/personas/')?'/api/personas/:id':url.split('?')[0];assert.equal(app.hasRoute({method:'GET',url:pattern}),true,url+' 已注册');assert.equal((await app.inject({url})).statusCode,401,url+' 无凭据');assert.equal((await app.inject({url,headers:{...auth,origin:'https://other.invalid'}})).statusCode,403,url+' 跨来源');}
+   for(const url of reads){const pattern=url.startsWith('/api/feed/conversations/posts/')?'/api/feed/conversations/:key/items':url.endsWith('/export')?'/api/personas/:id/export':url.startsWith('/api/personas/')?'/api/personas/:id':url.split('?')[0];assert.equal(app.hasRoute({method:'GET',url:pattern}),true,url+' 已注册');assert.equal((await app.inject({url})).statusCode,401,url+' 无凭据');assert.equal((await app.inject({url,headers:{...auth,origin:'https://other.invalid'}})).statusCode,403,url+' 跨来源');}
    for(const request of writes){const {pattern,...route}=request;assert.equal(app.hasRoute({method:route.method,url:pattern??route.url}),true,route.url+' 已注册');assert.equal((await app.inject({...route,payload:{}})).statusCode,401,route.url+' 无凭据');assert.equal((await app.inject({...route,headers:auth,payload:{}})).statusCode,403,route.url+' 缺控制标记');assert.equal((await app.inject({...route,headers:{...write,origin:'https://other.invalid'},payload:{}})).statusCode,403,route.url+' 跨来源');}
    assert.equal(workflow.control(),'paused');
   });

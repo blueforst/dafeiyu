@@ -8,6 +8,8 @@ import { redact } from './config.js';
 export function registerPersonaLibraryRoutes(app:FastifyInstance,deps:{store:Store;persona:PersonaService}):void {
  const handle=(fn:(req:any)=>unknown)=>async(req:any,reply:any)=>{try{return await fn(req);}catch(error:any){const code=error?.statusCode??(error instanceof PersonaValidationError?400:500);if(code>=500)deps.store.log('persona-library-api-error','人设库操作失败，原设置保持不变','warn');return reply.code(code).send({error:code>=500?'人设库操作失败，请检查设置文件':redact(error?.message??error)});}};
  app.get('/api/personas',handle(()=>deps.persona.library.list()));
+ app.get('/api/personas/:id/export',handle(req=>deps.persona.library.exportFile(req.params.id)));
+ app.post('/api/personas/import',{bodyLimit:128*1024},handle(req=>deps.persona.library.importFile(req.body)));
  app.get('/api/personas/:id',handle(req=>deps.persona.library.detail(req.params.id)));
  app.post('/api/personas',{bodyLimit:128*1024},handle(req=>deps.persona.library.create(req.body)));
  app.put('/api/personas/:id',{bodyLimit:128*1024},handle(req=>deps.persona.library.save(req.params.id,req.body)));

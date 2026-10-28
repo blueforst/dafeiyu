@@ -444,3 +444,11 @@ body.workspace .notice{position:fixed;z-index:80;top:var(--ws-top-height,57px);r
 body.workspace .notice{pointer-events:none;top:calc(var(--ws-top-height,57px) + var(--ws-header-height,44px) + 6px);max-width:min(520px,calc(100vw - 24px))}
 .ws-disclosure-root:empty{display:none}.ws-disclosure-root:not(:empty){flex:none;max-height:38%;overflow:auto;padding:8px 14px;border-bottom:1px solid var(--ws-border)}.ws-disclosure-root .callout{margin-top:0}
 .ws-recall-item{padding:7px 0;border-bottom:1px solid var(--ws-border);overflow-wrap:anywhere}.ws-recall-item:last-child{border-bottom:0}.ws-right .ws-card>.row{align-items:start}.ws-right .ws-card>.row>:last-child{max-width:68%}
+
+/* 工作区条目链接与按钮共用正文色。 */
+.ws-shell .ws-side-item{color:var(--ws-text)}
+.ws-shell a.ws-side-item:hover{text-decoration:none}
+.ws-dot{display:inline-block;flex:none;width:7px;height:7px;border-radius:50%;background:var(--ws-muted)}
+.ws-dot.normal{background:var(--ws-ok)}
+.ws-dot.attention{background:var(--ws-warning)}
+.ws-dot.error{background:var(--ws-error)}

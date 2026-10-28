@@ -57,6 +57,15 @@ export class PersonaLibraryService {
   const title=raw.name===undefined?this.nextName(library,base):name(raw.name);this.unique(library,title);const at=this.now(),item:PersonaLibraryItem={id:randomUUID(),name:title,revision:1,createdAt:at,updatedAt:at,origin,persona};library.items.push(item);
   const saved=this.persist(library,libraryRevision,panel);this.store.log('persona-create',JSON.stringify(identity(item)));return this.response(item,library,saved.revision);
  }
+ exportFile(id:string){const item=this.detail(id);return {format:'role-workflow-persona',version:1,name:item.name,persona:item.persona};}
+ importFile(raw:unknown){
+  if(!object(raw)||!object(raw.document)||raw.document.format!=='role-workflow-persona'||raw.document.version!==1)throw new PersonaLibraryError('请选择本系统导出的人设 JSON 文件（版本 1）');
+  const persona=validatePersona(raw.document.persona),base=name(raw.document.name),{library,libraryRevision,panel}=this.read();
+  if(library.items.length>=20)throw new PersonaLibraryError('最多保存二十个人设，请先删除不用的人设');
+  const title=raw.name===undefined?this.nextName(library,base):name(raw.name);this.unique(library,title);
+  const at=this.now(),item:PersonaLibraryItem={id:randomUUID(),name:title,revision:1,createdAt:at,updatedAt:at,origin:{kind:'blank'},persona};
+  library.items.push(item);const saved=this.persist(library,libraryRevision,panel);this.store.log('persona-import',JSON.stringify(identity(item)));return this.response(item,library,saved.revision);
+ }
  save(id:string,raw:any,opts:{expectedPersonaRevision?:number}={}){
   if(!object(raw)||!Number.isSafeInteger(raw.revision)||raw.revision<0)throw new PersonaLibraryError('保存时需要当前人设修订号');
   const {library,libraryRevision,panel}=this.read(),item=this.find(library,id);if(raw.revision!==item.revision)throw new PersonaLibraryError('人设修订已变化，请重新读取后保存',409);

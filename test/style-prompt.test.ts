@@ -12,9 +12,9 @@ import type {Config,Event} from '../src/types.js';
 
 const base={staticText:'固定测试角色',message:'现在聊另一件事',channel:'public' as const,accountId:'worker'};
 const segment=(result:ReturnType<typeof assembleReplyPrompt>,kind:string)=>result.segments.find(s=>s.kind===kind)!;
-test('v4只把近期往来放进独立user段，保留删除约束与稳定system',()=>{
+test('v5只把近期往来放进独立user段，保留删除约束与稳定system',()=>{
  const memory={memories:[{text:'喜欢茶'}],recent:[{message:'昨天好吗',reply:'我用过的口癖'}],experiences:[{text:'已确认的角色发帖'}],recallOmitted:2},before=JSON.stringify(memory),now=Date.now();
- const result=assembleReplyPrompt({...base,memory,now});assert.equal(REPLY_PROMPT_VERSION,'reply-context-v4');assert.ok(FIXED_SYSTEM_RULES.includes('记录由运营者管理'));
+ const result=assembleReplyPrompt({...base,memory,now});assert.equal(REPLY_PROMPT_VERSION,'reply-context-v5');assert.ok(FIXED_SYSTEM_RULES.includes('记录由运营者管理'));
  assert.deepEqual(result.segments.filter(s=>s.role==='user').map(s=>s.kind),['experiences','daily','memory','recent','conversation','reminders','message','now']);
  assert.deepEqual(JSON.parse(segment(result,'memory').content),{memories:memory.memories,recallOmitted:2});const recent=JSON.parse(segment(result,'recent').content);assert.deepEqual(recent.items,memory.recent);assert.match(recent.note,/reply 是你已经发出的原话/);assert.match(recent.note,/梗、口癖、开头、收尾和说法/);
  assert.equal((result.user.match(/我用过的口癖/g)??[]).length,1);assert.ok(!result.system.includes('我用过的口癖'));assert.equal(result.system,assembleReplyPrompt({...base,memory:{...memory,recent:[]},now:now+1000}).system);assert.equal(JSON.stringify(memory),before);

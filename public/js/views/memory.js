@@ -41,7 +41,7 @@ export function mount(root, ctx) {
   }
   function renderUsers() {
     set(list, users.length ? users.map(user => h('button', { type: 'button', class: 'memory-user' + (selected && selected.userId === user.userId && selected.accountId === user.accountId && selected.channel === user.channel ? ' selected' : ''), onclick: () => select(user) },
-      h('b', {}, user.label || user.userId), h('span', { class: 'muted small' }, (user.accountId || '未知归属') + ' · ' + CHANNEL[user.channel] + (user.identityConfirmed ? '' : ' · 身份未确认')),
+      h('b', {}, user.label || user.userId), h('span', { class: 'muted small' }, (user.accountId || '未知归属') + ' · ' + CHANNEL[user.channel] + (user.identityConfirmed ? '' : ' · 身份未确认')+(user.linkedTo?.length?' · 已关联':'')),
       h('span', { class: 'small' }, (user.forgotten ? '已遗忘／停止记录' : user.itemCount + ' 条记忆') + ' · 最近互动 ' + (fmtDateTime(user.lastInteractionAt) || '暂无')),
       h('span', { class: 'muted small' }, '整理时间 ' + (fmtDateTime(user.lastSummaryAt) || '尚未整理')))) : empty('没有符合筛选条件的用户或会话。'));
     set(identity,h('option',{value:''},'选择用户或会话'),users.map((user,index)=>h('option',{value:String(index)},(user.label||user.userId)+' · '+CHANNEL[user.channel])));const index=selected?users.findIndex(user=>user.userId===selected.userId&&user.accountId===selected.accountId&&user.channel===selected.channel):-1;if(selected&&index<0)identity.append(h('option',{value:'selected'},(selected.label||selected.userId)+' · '+CHANNEL[selected.channel]));identity.value=selected?(index<0?'selected':String(index)):'';more.hidden = nextCursor === null || nextCursor === undefined;
@@ -68,14 +68,31 @@ export function mount(root, ctx) {
   function renderDetails() {
     const data = current;
     set(details, h('div', {}, h('h2', { class: 'card-h' }, selected.label || data.userId), h('div', { class: 'muted small' }, (data.accountId || '未知归属') + ' · ' + CHANNEL[data.channel] + ' · ' + (data.forgotten ? '已遗忘，停止记录' : '允许记录'))),
+      renderLinks(data),
       h('div', { class: 'toolbar' },
         h('button', { id: 'memory-preview', class: 'btn', type: 'button', onclick: () => action('preview') }, '只读召回预览'),
         h('button', { class: 'btn', type: 'button', disabled: data.forgotten, onclick: () => action('summarize') }, '重新整理 ',billingBadge()),
         h('button', { class: 'btn' + (data.forgotten ? '' : ' danger'), type: 'button', onclick: () => action(data.forgotten ? 'remember' : 'forget') }, data.forgotten ? '恢复后续记录' : '遗忘并停止记录')),
       h('div', { class: 'stack' }, data.items?.length ? data.items.map(renderItem) : empty('暂无长期记忆。')),
+      data.linkedItems?.length?h('section',{class:'stack'},h('h3',{},'关联身份的记忆（只读）'),data.linkedItems.map(item=>h('div',{class:'subcard small pre-wrap'},h('b',{},CHANNEL[item.channel]+' · '+item.userId+' · 来源：'+linkSource(item.linkSource)),h('div',{},item.text)))):null,
       h('details', {}, h('summary', {}, '有来源的互动记录'), data.experiences?.length ? data.experiences.map(item => h('div', { class: 'subcard' }, h('div', { class: 'muted small' }, fmtDateTime(item.createdAt) + ' · ' + (item.channel === 'private' ? '私信' : '公开')), h('div', { class: 'pre-wrap' }, item.text), h('div', { class: 'muted small break' }, '来源：' + (item.sourceMessageId || '平台回执')), item.receipt ? json(item.receipt) : null)) : empty('暂无有来源的真实互动记录。虚构日程不会写入此处。')),
       h('details', {}, h('summary', {}, '近期可见互动'), data.recent?.length ? data.recent.map(row => h('div', { class: 'subcard pre-wrap' }, typeof row === 'string' ? row : JSON.stringify(row, null, 2))) : empty('暂无近期互动')),
       h('details', {}, h('summary', {}, '整理进度'), json(data.progress || {})), h('div', { id: 'memory-action-result', class: 'stack' }));
+  }
+  function linkSource(source){return {'chat-test':'试聊',platform:'平台读取',admin:'管理员'}[source]||source;}
+  function renderLinks(data){
+    const links=data.links?.links||[],blocks=data.links?.blocks||[],box=h('section',{class:'subcard stack memory-identity-links'},h('h3',{},'身份关联'));
+    async function change(method,privateUserId,publicHandle){
+      if(itemDirty()){notice('请先保存记忆修改再变更关联','error');return;}
+      const scope=selected;try{await api('/api/memory/links',{method,body:{accountId:scope.accountId,privateUserId,...(publicHandle?{publicHandle}:{})}});if(!alive||selected!==scope)return;await loadDetails();await loadUsers();notice(method==='PUT'?'身份已关联':'管理员已解除关联','ok');}catch(error){if(alive&&selected===scope)notice(error.message,'error');}
+    }
+    for(const link of links)box.append(h('div',{class:'stack small'},h('span',{},'已关联 '+(data.channel==='private'?'@'+link.publicUserId.slice(2):link.privateUserId)+' · 来源：'+linkSource(link.source)),h('button',{class:'btn small',type:'button',onclick:()=>change('DELETE',link.privateUserId)},'解除关联')));
+    if(!links.length)box.append(h('span',{class:'muted small'},blocks.length?'管理员已解除':'尚未关联公开身份'));
+    if(data.channel==='private'&&!links.length){const input=h('input',{class:'input',placeholder:'@handle','aria-label':'公开身份 handle',maxlength:16}),confirm=h('div',{class:'callout warn stack',hidden:true},h('span',{},'关联后，私信记忆会在公开回复中作为背景，并有重合检查。是否确认关联？'));
+      confirm.append(h('button',{class:'btn primary small',type:'button',onclick:()=>change('PUT',data.userId,input.value.trim())},'确认关联'),h('button',{class:'btn small',type:'button',onclick:()=>{confirm.hidden=true;}},'取消'));
+      box.append(input,h('button',{class:'btn small',type:'button',onclick:()=>{confirm.hidden=false;}},'关联公开身份'),confirm);
+    }
+    return box;
   }
   function renderItem(item) {
     const input = h('textarea', { class: 'input', rows: 4, value: edits.get(item.id) ?? item.text, oninput: e => { edits.set(item.id, e.target.value); } });

@@ -72,7 +72,7 @@ async function fresh(control = 'paused', { mode = 'draft', busy = false, fail = 
 // 等待 app 自身轮询；Camoufox 的 evaluate 动态 import 使用独立模块上下文。
 async function refresh() { await page.waitForResponse(response => new URL(response.url()).pathname === '/api/status', { timeout: 20000 }); }
 async function enabled(selector) { await page.waitForFunction(selector => { const el = document.querySelector(selector); return el && !el.disabled; }, selector); }
-async function expectedBrowserSummary(text){await page.waitForFunction(text=>document.querySelector('[data-settings-item="browser"] .settings-nav-summary')?.textContent===text,text);assert.equal(await page.locator('[data-settings-item="browser"] .settings-nav-summary').textContent(),text);}
+async function expectedBrowserSummary(text){if(text==='未接管'||text==='—'){await page.waitForFunction(()=>!document.querySelector('[data-settings-item="browser"] .ws-dot'));assert.equal(await page.locator('[data-settings-item="browser"] .ws-dot').count(),0);}else{await page.waitForFunction(text=>document.querySelector('[data-settings-item="browser"] .ws-dot')?.getAttribute('title')==='浏览器：'+text,text);assert.equal(await page.locator('[data-settings-item="browser"] .ws-dot').getAttribute('aria-label'),'浏览器：'+text);}}
 async function expectedPill(text) { await page.locator('#status-pill').filter({ hasText: text }).waitFor(); assert.equal(await page.locator('#status-pill').innerText(), text); }
 async function shot(name) { await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForFunction(() => scrollY === 0); await page.screenshot({ path: OUT + '/' + name + '.png', fullPage: true }); report.screenshots.push(name + '.png'); }
 async function layout(manual) {

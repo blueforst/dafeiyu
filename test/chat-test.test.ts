@@ -129,3 +129,21 @@ test('人设删除后旧轮次仍保留名称修订并标注已删除，待处�
   const old=f.service.turns(user.id).items[0];assert.equal(old.persona.name,'可删除的人设');assert.equal(old.persona.deleted,true);await assert.rejects(f.service.process(user.id),{statusCode:409});
  }finally{await f.close();}
 });
+
+test('同一测试用户跨渠道关联，新建与补写、重置保留、删除移除',{timeout:10000},async()=>{
+ const f=fixture();try{
+  const user=f.user();await f.service.addMessage(user.id,{channel:'public',text:'你好呀'});
+  const turn=(await f.service.addMessage(user.id,{channel:'private',text:'你还记得我吗?'})).turn;
+  assert.ok(turn.diagnostics.memory.recent.some((r:any)=>r.channel==='public'&&r.message==='你好呀'));
+  const identities=f.service.memory(user.id);assert.equal(identities.public.links.links.length,1);assert.equal(identities.private.links.links[0].source,'chat-test');
+  assert.equal((f.store.db.prepare('SELECT count(*) n FROM identity_links').get() as any).n,0);
+  f.service.reset(user.id);assert.equal(f.service.memory(user.id).public.links.links.length,1);
+  await f.service.close();const {DatabaseSync:RestartDb}=await import('node:sqlite'),legacy=new RestartDb(join(f.data,'chat-test','workflow.sqlite'));legacy.exec('DELETE FROM identity_links');legacy.close();
+  const restarted=new ChatTestService(f.service.deps);try{assert.equal(restarted.memory(user.id).public.links.links.length,1);assert.equal(restarted.memory(user.id).public.links.links.length,1);restarted.reset(user.id,true);assert.equal(restarted.users().items.length,0);}finally{await restarted.close();}
+  const {DatabaseSync}=await import('node:sqlite'),db=new DatabaseSync(join(f.data,'chat-test','workflow.sqlite'));try{assert.equal(db.prepare('SELECT count(*) n FROM identity_links').get()!.n,0);}finally{db.close();}
+ }finally{await f.close();}
+});
+
+test('试聊时间注入覆盖最终提示词，晨间与深夜各用自己的时段',async()=>{
+ const f=fixture();try{for(const [time,label]of [['2026-10-29T08:15:00+08:00','08:15（早上'],['2026-10-29T03:53:00+08:00','03:53（深夜']]){f.setNow(Date.parse(time));const user=f.user('时钟'+label),turn=(await f.service.addMessage(user.id,{channel:'public',text:'你好，想聊点轻松的 '+label})).turn;assert.ok(turn.segments.find((s:any)=>s.kind==='now').content.includes(label));}}finally{await f.close();}
+});

@@ -63,7 +63,7 @@ export function buildReplyHints(input:ReplyHintInput):ReplyHints {
  const recent=scopedReplies(input.recentReplies??[],input.accountId,input.channel,input.conversationId);
  if(settings.lateEnabled&&input.timestampReliable===true&&Number.isFinite(input.timestamp)&&(input.timestamp as number)>0&&now-(input.timestamp as number)>=settings.lateMinutes*60000){
   const hours=Math.max(1,Math.round((now-input.timestamp!)/3600000));
-  hints.push({kind:'late',text:'对方约 '+hours+' 小时前发来消息；自然地为迟到致歉一次，并按现在的时段问候。',reason:'可靠平台时间早于本轮 '+settings.lateMinutes+' 分钟阈值'});
+  hints.push({kind:'late',text:'对方约 '+hours+' 小时前发来消息；自然地为迟到致歉一次，不要按你这边的时间推断对方现在的时段。',reason:'可靠平台时间早于本轮 '+settings.lateMinutes+' 分钟阈值'});
  }
  if(settings.languageEnabled){
   const language=detectLanguage(input.message),texts:Partial<Record<ReplyLanguage,string>>={traditional:'請以繁體中文回覆，不混入簡體字形。',japanese:'请使用对方的日文回复。',korean:'请使用对方的韩文回复。',latin:'请使用对方消息所用的语言回复，不要擅自切换为中文。'};

@@ -13,6 +13,9 @@ function scope(req:any,deps:Deps){
 }
 export function registerMemoryRoutes(app:FastifyInstance,deps:Deps){
  const handle=(fn:(req:any)=>any)=>async(req:any,reply:any)=>{try{return await fn(req);}catch(e:any){if(e instanceof MemoryError||Number.isInteger(e?.statusCode))return reply.code(e.statusCode??400).send({error:e.message});throw e;}};
+ app.get('/api/memory/links',handle(req=>{const s=scope(req,deps);return deps.memory.links.detail(s.accountId,String(req.query?.userId??''));}));
+ app.put('/api/memory/links',handle(req=>{const s=scope(req,deps),b=req.body??{};if(typeof b.publicHandle!=='string'||!/^@?[a-zA-Z0-9_]{1,15}$/.test(b.publicHandle))throw new MemoryError('公开 handle 无效');return deps.memory.links.link(s.accountId,b.privateUserId,'x:'+b.publicHandle.replace(/^@/,'').toLowerCase(),'admin');}));
+ app.delete('/api/memory/links',handle(req=>{const s=scope(req,deps);return deps.memory.links.unlink(s.accountId,req.body?.privateUserId);}));
  app.get('/api/memory/policy',handle(()=>deps.memory.policy()));
  app.put('/api/memory/policy',handle(req=>deps.memory.savePolicy(req.body?.policy,req.body?.revision)));
  app.get('/api/memory/users',handle(req=>{

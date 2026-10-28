@@ -20,3 +20,14 @@ export function formatIssues(text:string):FormatIssue[] {
  if(/(?:^|\n)[ \t]*#{1,6}[ \t]+\S/.test(text)||/\*\*[^\r\n]+?\*\*|__[^\r\n]+?__/.test(text)||/(?:^|\n)[ \t]*```/.test(text))issues.push('markdown');
  return issues;
 }
+
+/** 按 Unicode 码点比较；符号和空白不参与，返回最长的规范化重合片段。 */
+export function privateOverlap(text:string,backgroundTexts:string[],min=8):{fragment:string}|null {
+ const normalize=(value:string)=>Array.from(value.normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]/gu,''));
+ const reply=normalize(text);if(reply.length<min||!backgroundTexts.length)return null;
+ let longestLength=0,end=0;
+ for(const raw of backgroundTexts){const chars=normalize(raw),lengths=new Uint32Array(reply.length+1);
+  for(const char of chars)for(let i=reply.length;i>0;i--){lengths[i]=reply[i-1]===char?lengths[i-1]+1:0;if(lengths[i]>longestLength){longestLength=lengths[i];end=i;}}
+ }
+ return longestLength>=min?{fragment:reply.slice(end-longestLength,end).join('')}:null;
+}

@@ -5,7 +5,7 @@ import type {Persona,PersonaService} from './persona.js';
 import type {SnapshotInput} from './persona-replay.js';
 import {assembleReplyPrompt} from './reply-prompt.js';
 import type {ReplySample} from './reply-hints.js';
-import {formatIssues} from './reply-style.js';
+import {formatIssues,privateOverlap} from './reply-style.js';
 import {normalizePublicText,validatePostingText,postingLimitPrompt,type PostingCapability} from './posting-policy.js';
 
 /** 生产和独立试聊共用的生成步骤。调度、额度、收发及状态均留给调用方。 */
@@ -56,7 +56,9 @@ export async function generateReply(sources:ReplySources,event:Event,options:Rep
  const draft=parseDraft(result.text,{channel:event.channel});
  if(event.channel==='public')draft.text=normalizePublicText(draft.text);
  draft.meta={...assembled.meta,callId:result.callId};
- const validation=draft.action==='reply'?validatePostingText(draft.text,event.channel==='public'?'reply':'dm',{accountId,capability:sources.posting?.()}):undefined;
+ let validation=draft.action==='reply'?validatePostingText(draft.text,event.channel==='public'?'reply':'dm',{accountId,capability:sources.posting?.()}):undefined;
+ const background=(memory as any)?.privateBackground;
+ if(event.channel==='public'&&draft.action==='reply'&&Array.isArray(background)&&background.length){const overlap=privateOverlap(draft.text,background.map((item:any)=>item.text).filter((text:unknown):text is string=>typeof text==='string'));if(overlap){draft.privacy={overlap:overlap.fragment};if(validation)validation={...validation,allowed:false,code:'private-overlap',reason:'可能提及私信内容'};}}
  if(validation)draft.validation=validation;
  draft.format={issues:formatIssues(draft.text)};
  return {draft,result,validation,assembled,conversation,memory};

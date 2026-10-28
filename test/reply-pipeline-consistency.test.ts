@@ -12,7 +12,7 @@ import type {Config,Event,Channel} from '../src/types.js';
 import type {Transport} from '../src/transport.js';
 import {exampleConfig} from './config-fixture.js';
 
-const fixturePath=process.env.REPLY_BASELINE_PATH??fileURLToPath(new URL('./fixtures/reply-pipeline-baseline.json',import.meta.url));
+const fixturePath=process.env.REPLY_BASELINE_PATH??fileURLToPath(new URL('./fixtures/reply-pipeline-v5.json',import.meta.url));
 const at=Date.parse('2026-10-28T04:34:00Z');
 const persona:Persona={sections:[{id:'role',title:'始终生效',content:'固定夹具人格：自然回应，记住已发生的往来。'}],triggers:[
  {id:'praise',title:'被夸',condition:'被夸时',content:'谦逊接住夸奖。',enabled:true,order:0,match:'keywords',keywords:['可爱']},
@@ -42,7 +42,7 @@ async function record(channel:Channel){
  }finally{workflow.stop();store.db.close();rmSync(dir,{recursive:true,force:true});if(old===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=old;}
 }
 
-test('公开与私信生产提示词、调用顺序和元数据保持修改前逐字一致',{timeout:10000},async t=>{
+test('公开与私信生产提示词符合 v5 明确变更后的冻结基线，调用顺序保持一致',{timeout:10000},async t=>{
  t.mock.method(Date,'now',()=>at);
  const value=[];for(const channel of ['public','private'] as Channel[])value.push(await record(channel));
  if(process.env.WRITE_REPLY_BASELINE==='1'){

@@ -109,3 +109,15 @@ test('日程读取近七天包含失败和未生成日期，历史详情不高�
   assert.equal((await app.inject({url:'/api/persona/daily?date=2026-02-30'})).statusCode,400);assert.equal((await app.inject({method:'PUT',url:'/api/persona/daily',payload:{date:'2026-10-27',revision:1,content}})).statusCode,409);assert.equal(JSON.stringify(f.store.db.prepare('SELECT * FROM daily_revisions').all()),before);
  }finally{await app.close();f.close();}
 });
+
+test('人设导入导出往返只包含可移植内容，新建未启用并严格校验文件与名称',()=>{
+ const f=fixture();try{
+  const made=f.service.library.create({from:'preset',presetId:'glm'}),file=f.service.library.exportFile(made.item.id),before=f.service.get();
+  assert.deepEqual(Object.keys(file).sort(),['format','name','persona','version']);assert.equal(file.format,'role-workflow-persona');assert.deepEqual(file.persona,made.item.persona);
+  const imported=f.service.library.importFile({document:file});assert.notEqual(imported.item.id,made.item.id);assert.notEqual(imported.item.name,made.item.name);assert.deepEqual(imported.item.persona,made.item.persona);assert.equal(imported.item.origin.kind,'blank');
+  assert.equal(imported.activeId,'current');assert.deepEqual(f.service.get(),before);assert.equal(f.service.library.detail(imported.item.id).origin.kind,'blank');
+  const snapshot=readFileSync(f.file,'utf8');for(const document of [null,{}, {...file,version:2},{...file,format:'other'},{...file,persona:{sections:[],triggers:'bad'}},{...file,name:'x'.repeat(41)}])assert.throws(()=>f.service.library.importFile({document}));
+  assert.throws(()=>f.service.library.importFile({document:file,name:made.item.name}),/已存在/);assert.equal(readFileSync(f.file,'utf8'),snapshot);assert.equal(f.store.get('control'),'paused');
+  while(f.service.library.list().items.length<20)f.service.library.create({from:'blank'});const full=readFileSync(f.file,'utf8');assert.throws(()=>f.service.library.importFile({document:file}),/二十/);assert.equal(readFileSync(f.file,'utf8'),full);
+ }finally{f.close();}
+});

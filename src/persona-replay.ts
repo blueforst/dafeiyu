@@ -62,12 +62,18 @@ export function eraseReplayScope(store:Store,userId:string,accountId:string,befo
 /** 人工改记忆后旧召回失效；回放永远重新调用当前允许范围的召回。 */
 export function invalidateReplayMemory(store:Store,accountId:string,userId:string,channel?:Channel):void {
  if(!hasTable(store.db,'generation_snapshots'))return;
- // 私信也可能召回公开记忆，公开范围变化时同时使该用户私信的派生数据失效。
- const privateOnly=channel==='private',args=privateOnly?[accountId,userId,'private']:[accountId,userId];
- const rows=store.db.prepare('SELECT message_id,body_json FROM generation_snapshots WHERE account_id=? AND user_id=?'+(privateOnly?' AND channel=?':'')).all(...args) as any[];
- for(const row of rows){const body=parse(row.body_json);delete body.memory;body.memoryInvalidated=true;store.db.prepare('UPDATE generation_snapshots SET body_json=? WHERE message_id=?').run(JSON.stringify(body),row.message_id);}
- store.db.prepare('DELETE FROM replay_items WHERE account_id=? AND user_id=?'+(privateOnly?' AND channel=?':'')).run(...args);
- for(const scope of privateOnly?['private']:['public','private']){const key=memoryRevisionKey(accountId,userId,scope);store.set(key,String(Number(store.get(key,'0'))+1));}
+ const affected=new Map<string,Channel|undefined>([[userId,channel]]);
+ if(hasTable(store.db,'identity_links')){
+  const links=store.db.prepare('SELECT private_user_id,public_user_id FROM identity_links WHERE account_id=? AND (private_user_id=? OR public_user_id=?)').all(accountId,userId,userId) as any[];
+  for(const link of links)affected.set(link.private_user_id===userId?link.public_user_id:link.private_user_id,undefined);
+ }
+ for(const [identity,scope] of affected){
+  const privateOnly=scope==='private',args=privateOnly?[accountId,identity,'private']:[accountId,identity];
+  const rows=store.db.prepare('SELECT message_id,body_json FROM generation_snapshots WHERE account_id=? AND user_id=?'+(privateOnly?' AND channel=?':'')).all(...args) as any[];
+  for(const row of rows){const body=parse(row.body_json);delete body.memory;body.memoryInvalidated=true;store.db.prepare('UPDATE generation_snapshots SET body_json=? WHERE message_id=?').run(JSON.stringify(body),row.message_id);}
+  store.db.prepare('DELETE FROM replay_items WHERE account_id=? AND user_id=?'+(privateOnly?' AND channel=?':'')).run(...args);
+  for(const visible of privateOnly?['private']:['public','private']){const key=memoryRevisionKey(accountId,identity,visible);store.set(key,String(Number(store.get(key,'0'))+1));}
+ }
 }
 const memoryRevisionKey=(accountId:string,userId:string,channel:string)=>'replay:memory-revision:'+JSON.stringify([accountId,userId,channel]);
 export function pruneReplayData(store:Store,before:number):void {

@@ -1,3 +1,4 @@
+import {readPrivatePeer} from './chat-dom.js';
 import Fastify from 'fastify';
 import twitterText from 'twitter-text';
 import { type BrowserContext, type Page } from 'playwright-core';
@@ -150,7 +151,7 @@ export async function replyArticleIndex(page:Page,target:string):Promise<number>
  }),target);
  if(indexes.length!==1)throw Object.assign(new Error('无法唯一定位要回复的主帖'),{code:indexes.length?'public-target-ambiguous':'public-target-timeout',stage:'target-validate'});return indexes[0];
 }
-export async function readDM(page:Page,conversationId:string):Promise<{events:Event[];all:any[]}> {
+export async function readDM(page:Page,conversationId:string,selfHandle=''):Promise<{events:Event[];all:any[]}> {
  if(await page.locator('[data-testid="xchatEmbedRoute"]').count()){
   // 已观察到的新版 Chat 只有分钟显示时间，未满足可靠入站及回执契约。
   await inspectPrivateConversation(page,conversationId);
@@ -177,6 +178,7 @@ export async function readDM(page:Page,conversationId:string):Promise<{events:Ev
   events.push({id:'dm:'+conversationId+':'+latest.id,platformId:String(latest.id),targetId:conversationId,channel:'private',userId:'dm:'+conversationId,handle:'',text:latest.text,url:page.url().split('?')[0],conversationId,timestamp:latest.timestamp||0,timestampReliable:!!latest.timestamp,mediaUnavailable:latest.media});
  }
  if(!all.length||latest?.direction==='unknown')throw new Error('私信方向或新版聊天结构尚未确认，已跳过');
+ const peer=await readPrivatePeer(page,conversationId,selfHandle);if(peer.peerHandle)for(const event of events)event.peerHandle=peer.peerHandle;
  return {events,all};
 }
 export type CollectionBudgetInput={page:Page;handle:string;deadline:number;navigate:(page:Page,url:string,deadline:number)=>Promise<void>;now?:()=>number};

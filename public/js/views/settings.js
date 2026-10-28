@@ -1,8 +1,8 @@
 import {h,set} from '../dom.js';
 import {api} from '../api.js';
 import {onStatus,onEvent,getStatus} from '../state.js';
-import {empty,errorBox,money} from '../view-utils.js';
-import {mountWorkspace} from '../shell.js';
+import {empty,errorBox} from '../view-utils.js';
+import {mountWorkspace,sideItem} from '../shell.js';
 
 const GROUPS=[['运行',['run','model','tasks','triage']],['数据',['memory','billing']],['浏览器与采集',['browser','sources']],['排查',['health','logs','history']]];
 const ITEMS={run:['运行与发送','保存后下一轮生效，顶部启动与暂停控制业务'],model:['模型','管理服务商、模型与参数'],tasks:['定时任务','计划统一使用北京时间'],triage:['消息分级与过滤','分级、优先名单与骚扰冷却'],memory:['记忆','用户记忆、角色经历与召回策略'],billing:['计费','Pi 内置价格估算 · 美元 · 北京时间'],browser:['浏览器接管','接管后自动处理停止，释放后保持暂停'],sources:['采集来源','仅在打开此项时读取浏览器来源状态'],health:['健康与日报','健康指标、账号检查与每日归档'],logs:['日志阶段与队列','运行事件与排查信息'],history:['任务执行历史','执行状态、耗时与关联调用']};
@@ -14,18 +14,13 @@ export function mount(root,ctx){
  style();let alive=true,active=null,sequence=0,summaryGeneration=0,summaryInFlight=false,summaryQueued=false;const mounted=new Map(),summaries=new Map();
  const ws=mountWorkspace(root,{page:'settings'}),heading=h('div',{class:'settings-heading'}),actions=h('div',{class:'settings-actions'});set(ws.leftHeader,h('strong',{},'设置'));set(ws.mainHeader,heading,actions);
  const childGuard=()=>active?.guard?.()??true;ctx.setLeaveGuard(childGuard);
- for(const [title,ids]of GROUPS){const group=h('section',{class:'settings-nav-group'},h('h2',{class:'settings-nav-label'},title));for(const id of ids){const summary=h('span',{class:'settings-nav-summary'},id==='sources'||id==='logs'?'':'—'),link=h('a',{href:'#/settings/'+id,class:'settings-nav-item',dataset:{settingsItem:id}},h('span',{class:'settings-nav-title'},ITEMS[id][0]),summary);summaries.set(id,summary);group.append(link);}ws.left.append(group);}
- function setSummary(id,value,level){const node=summaries.get(id);if(!node)return;node.textContent=value;node.dataset.level=level||'';}
- function updateStatus(s){if(!s)return;const config=s.config||{};setSummary('run',(config.mode==='auto'?'自动':'草稿')+' · '+(CONTROL[s.control]||s.control||'未知'));const model=config.model;setSummary('model',model?.configured?[model.provider,model.id].filter(Boolean).join(' / '):'尚未配置');setSummary('browser',s.control==='manual'?'人工接管中':(s.browser?.loggedIn??s.identity?.loggedIn)===false?'需要登录':'未接管',s.control==='manual'?'attention':'');const cached=mounted.get('browser');if(cached&&cached!==active&&!cached.root.querySelector('#desktop-frame'))dispose(cached);}
- async function refreshSummaries(){if(!alive)return;const generation=++summaryGeneration;if(summaryInFlight){summaryQueued=true;return;}summaryInFlight=true;try{const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(Date.now()),end=new Date(Date.parse(day+'T00:00:00+08:00')+86400000).toLocaleDateString('en-CA',{timeZone:'Asia/Shanghai'});const jobs=[
-  ['run','/api/program',d=>(d.settings?.mode==='auto'?'自动':'草稿')+' · '+(CONTROL[d.control]||d.control||'未知')],
-  ['tasks','/api/tasks',d=>{const tasks=(d.tasks||[]).filter(t=>!['main','health'].includes(t.id));return tasks.filter(t=>t.enabled).length+' / '+tasks.length+' 启用';}],
-  ['triage','/api/triage/summary',d=>'排队 '+(d.queues||[]).reduce((n,q)=>n+Number(q.count||0),0)],
-  ['memory','/api/memory/policy',d=>'近期 '+d.policy.recentCount+' 次 / '+d.policy.recentDays+' 天'],
-  ['billing','/api/billing/summary?'+new URLSearchParams({from:day,to:end}),d=>{const totals=d.totals||d.summary||d;return totals.unpriced?'未定价 '+totals.unpriced:'今日 '+money(totals.costUSD??totals.estimatedUsd??0);}],
-  ['health','/api/health',d=>{const n=(d.metrics||[]).filter(m=>m.level!=='normal').length;return d.status==='error'?'异常 '+n:d.status==='attention'?'需关注 '+n:'正常';}],
-  ['history','/api/tasks/runs?limit=1',d=>d.items?.[0]?.status==='failed'?'最近失败':'']
- ];await Promise.allSettled(jobs.map(async([id,path,format])=>{try{const d=await api(path);if(alive&&generation===summaryGeneration){setSummary(id,format(d),id==='health'?d.status:id==='history'&&d.items?.[0]?.status==='failed'?'error':'');}}catch{if(alive&&generation===summaryGeneration)setSummary(id,'—');}}));if(alive)updateStatus(getStatus());}finally{summaryInFlight=false;if(alive&&summaryQueued){summaryQueued=false;void refreshSummaries();}}}
+ for(const [title,ids]of GROUPS){const group=h('section',{class:'settings-nav-group'},h('h2',{class:'settings-nav-label'},title));for(const id of ids){const summary=h('span',{class:'settings-nav-status'}),link=sideItem({title:ITEMS[id][0],href:'#/settings/'+id,meta:summary});link.dataset.settingsItem=id;summaries.set(id,summary);group.append(link);}ws.left.append(group);}
+ function setSummary(id,value,level){const node=summaries.get(id);if(!node)return;set(node,...(['attention','error'].includes(level)?[h('span',{class:'ws-dot '+level,role:'img','aria-label':value,title:value})]:[]));}
+ function updateStatus(s){if(!s)return;const config=s.config||{};setSummary('run',s.configError?'运行：'+s.configError:'',s.configError?'error':'');setSummary('model','模型：尚未配置',config.model?.configured?'':'attention');const login=(s.browser?.loggedIn??s.identity?.loggedIn)===false;setSummary('browser',login?'浏览器：需要登录':'浏览器：人工接管中',login?'error':s.control==='manual'?'attention':'');const cached=mounted.get('browser');if(cached&&cached!==active&&!cached.root.querySelector('#desktop-frame'))dispose(cached);}
+ async function refreshSummaries(){if(!alive)return;const generation=++summaryGeneration;if(summaryInFlight){summaryQueued=true;return;}summaryInFlight=true;try{const jobs=[
+  ['health','/api/health',d=>{const n=(d.metrics||[]).filter(m=>m.level!=='normal').length;return '健康：'+(d.status==='error'?'异常 '+n+' 项':d.status==='attention'?'需关注 '+n+' 项':'正常');}],
+  ['history','/api/tasks/runs?limit=1',d=>d.items?.[0]?.status==='failed'?'任务：最近一次执行失败':'']
+ ];await Promise.allSettled(jobs.map(async([id,path,format])=>{try{const d=await api(path);if(alive&&generation===summaryGeneration)setSummary(id,format(d),id==='health'?d.status:d.items?.[0]?.status==='failed'?'error':'');}catch{if(alive&&generation===summaryGeneration)setSummary(id,'');}}));if(alive)updateStatus(getStatus());}finally{summaryInFlight=false;if(alive&&summaryQueued){summaryQueued=false;void refreshSummaries();}}}
  function dispose(entry){entry.cleanup?.();entry.root.remove();mounted.delete(entry.id);}
  async function route(target=ctx.route){if(target.page!=='settings')return;const wanted=target.section||stored()||'run',id=ITEMS[wanted]?wanted:'run';if(target.section!==id){const query=target.params?.toString();const hash='#/settings/'+id+(query?'?'+query:'');if(ctx.replaceRouteHash)ctx.replaceRouteHash(hash);else history.replaceState(null,'',hash);target={...target,section:id,hash};ctx.route=target;}try{localStorage.setItem('ws:settings:item',id);}catch{}
   if(active?.id===id&&(id!=='memory'||target.hash===active.ctx.route.hash)){active.ctx.route={...target,section:id};return;}

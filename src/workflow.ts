@@ -1,3 +1,4 @@
+import {PLATFORM_IDENTITY_LINKS} from './identity-links.js';
 import { Store } from './store.js';
 import { createHash,randomUUID } from 'node:crypto';
 import { loadConfig } from './config.js';
@@ -213,6 +214,7 @@ export class Workflow {
     })():await this.stage('collect',roundId,async()=>{const result=await this.transport.collect(handle,{signal:this.abort!.signal,deadline:budget.collectionDeadline('public',c.health)});this.services.health?.recordCollectionResult(handle,roundId,result);return result;});
     for(const _warning of collected.warnings)this.store.log('collection-warning',JSON.stringify({roundId,accountId:handle,reason:'页面采集存在异常，请检查浏览器结构'}),'warn');
     await this.stage('queue',roundId,async()=>{for(const e of collected.events){
+     if(e.channel==='private'&&e.peerHandle){this.store.log('private-peer-candidate',JSON.stringify({accountId:handle,userId:e.userId,peerHandle:e.peerHandle,enabled:PLATFORM_IDENTITY_LINKS}));if(PLATFORM_IDENTITY_LINKS)this.services.memory?.links.link(handle,e.userId,'x:'+e.peerHandle.toLowerCase(),'platform');}
      if(this.services.triage)this.services.triage.ingest(e,handle,c.maxAgeHours);else this.store.ingest(e,handle);
     }});
     this.services.triage?.refreshQueued(handle,c.maxAgeHours);

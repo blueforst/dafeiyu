@@ -24,3 +24,22 @@
 
 .settings-memory-mobile-controls{display:none}.provider-mobile-bar{display:contents}.provider-mobile-add{display:none}
 @media(max-width:860px){.settings-memory-mobile-controls{display:flex}.settings-memory-mobile-controls .memory-user-controls{display:flex}.settings-memory-mobile-controls .memory-user-controls .toolbar{display:flex;flex-wrap:wrap}.settings-memory-mobile-controls .memory-user-controls .input{width:100%}.provider-mobile-bar{display:flex;gap:8px;margin-bottom:16px}.provider-mobile-bar .provider-mobile{flex:1;min-width:0}.provider-mobile-add{display:block;white-space:nowrap}}
+
+.settings-nav-group .ws-side-item{width:100%;box-sizing:border-box}
+.settings-nav-status{display:inline-flex;align-items:center}
+.health-metrics{min-width:0;border:1px solid var(--ws-border);border-radius:var(--ws-radius);overflow:hidden}
+.health-status{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--ws-border)}
+.health-group{display:grid;grid-template-columns:88px minmax(0,1fr);padding:8px 12px;border-bottom:1px solid var(--ws-border);gap:8px}
+.health-group:last-child{border-bottom:0}
+.health-group h2{font-size:12px;line-height:34px;margin:0;color:var(--ws-muted);font-weight:500}
+.health-rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:0 16px;min-width:0}
+.health-row{display:grid;grid-template-columns:7px minmax(96px,auto) auto minmax(0,1fr);gap:8px;align-items:center;min-height:34px;font-size:12px;min-width:0}
+.health-level{color:var(--ws-muted);white-space:nowrap}
+.health-description{color:var(--ws-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.health-row.attention-row{grid-column:1/-1}
+.health-row.attention-row .health-description{white-space:normal;overflow-wrap:anywhere}
+.health-account-footer{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:12px;padding:6px 0}
+.health-page .table-wrap{overflow-x:auto;max-width:100%;min-width:0}
+.health-page table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
+.health-page th,.health-page td{padding:9px 10px;border-bottom:1px solid var(--ws-border);text-align:left}
+@media(max-width:860px){.health-group{grid-template-columns:minmax(0,1fr)}.health-group h2{line-height:22px}.health-rows{grid-template-columns:minmax(0,1fr)}.health-row{grid-template-columns:7px minmax(80px,auto) auto minmax(0,1fr);gap:6px}.health-row.attention-row .health-description{grid-column:2/-1}.health-report-table{min-width:820px}}

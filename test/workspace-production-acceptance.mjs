@@ -55,7 +55,7 @@ async function ready(path){
  if(name==='feed')await page.waitForFunction(()=>{const node=document.querySelector('.feed-conversations');return node&&(node.querySelector('.feed-conversation')||node.textContent.includes('暂无会话'));},null,{timeout:30000});
  if(name==='settings'){
   const item=id||'run';await page.locator('[data-settings-view="'+item+'"]:not([hidden])').waitFor({timeout:30000});
-  const markers={run:'input[data-setting="privatePerDay"]',model:'#provider-add',tasks:'[data-task-id="main"]',triage:'textarea',memory:'.settings-memory',billing:'.usage-heatmap',browser:'.settings-browser',sources:'.collection-source,.empty-state',health:'.settings-metric',logs:'#program-logs',history:'details,.empty-state'};
+  const markers={run:'input[data-setting="privatePerDay"]',model:'#provider-add',tasks:'[data-task-id="main"]',triage:'textarea',memory:'.settings-memory',billing:'.usage-heatmap',browser:'.settings-browser',sources:'.collection-source,.empty-state',health:'.health-status',logs:'#program-logs',history:'details,.empty-state'};
   const root=page.locator('[data-settings-view="'+item+'"]');await root.locator(markers[item]).first().waitFor({state:'attached',timeout:30000});
   if(item==='memory'&&!path.includes('view=policy'))await page.waitForFunction(()=>{const node=document.getElementById('memory-users');return node&&(node.querySelector('.memory-user')||node.textContent.includes('没有符合筛选条件'));},null,{timeout:30000});
   if(item==='memory'&&path.includes('view=policy'))await page.locator('#memory-policy-save').waitFor({timeout:30000});

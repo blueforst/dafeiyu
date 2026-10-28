@@ -100,6 +100,17 @@
    - 新增两个只读的会话查询接口；
    - 草稿审核与出站规则不变。
 
+## 设置页细节、跨渠道记忆与时区中立：候选已实现
+
+[提案](changes/refine-settings-memory-timezone/proposal.md) · [设计](changes/refine-settings-memory-timezone/design.md) · [任务](changes/refine-settings-memory-timezone/tasks.md) · [增量规格](changes/refine-settings-memory-timezone/specs/)
+
+2026-10-29 根据管理员试用 0.1.19 的反馈整理，当前 **16/19**，实现及定向验收完成，全量界面与发布继续验收。主要内容：
+
+- 设置左栏改用与另外两页相同的条目样式和正文色，去掉文字摘要，只在需要处理时显示状态圆点；
+- 健康页按六组排成表格，账号检查并入“账号”组，日报改为表格；只改展示；
+- 新增公开与私信身份关联（试聊自动、平台读取需真实样本、管理员手动），召回改为双向：私信可用公开往来，公开回复只拿私信长期记忆作背景，并用八字重合检查兜底；
+- 提示词标明北京时间是角色这边的时间，不按它推断对方作息，迟到提醒不再按时段问候，版本升为 `reply-context-v5`。
+
 ## 依赖与维护规则
 
 - 七页基线提案和原计划保留为来源；后续修改以相应 change 的提案、完整增量规格、设计和任务为准，避免设计分叉。
@@ -107,6 +118,7 @@
 - `remove-message-forget-command` 应在七页基线之后；运行／接管分离应在七页与五页面板之后；文风提案应在七页与回复提示词提案之后。
 - `add-private-daily-limit` 应在 `add-reply-triage` 之后；`add-reply-hours` 应在分级、健康及私信日额度提案之后。两项都修改分级能力，并行实施时需协调共享源码与设置入口。
 - 面板改版三份提案按 `add-persona-workspace` → `redesign-settings-workspace` → `redesign-feed-workspace` 的顺序实施和归档。三份都排在七页基线、五页面板、运行／接管分离、人设预设、人设回放和参考补齐之后。`add-reply-hours`、`add-private-daily-limit` 新增的时段和额度检查只能放在生产路径，不能影响试聊。
+- `refine-settings-memory-timezone` 修改面板改版三份提案、七页基线的记忆可见范围和回复提示词提案中的能力，归档应在这些来源提案之后；它改写了试聊“公开与私信记忆分开”的场景，实施时以本提案为准。
 - 未完成任务不得归档。同步主规格前核对实际行为和全部验收证据；CLI 显示规划产物完成只表示可进入实施。
 - 修改需求时同步提案、规格、设计和任务；任务只在完整验收条件通过后勾选。构建、自动化测试、批量模型及界面验收只在服务器独立环境运行，不使用生产 profile 跑模拟测试。
 
@@ -155,3 +167,7 @@ OPENSPEC=/srv/role-workflow-openspec-tools/node_modules/.bin/openspec
 单项校验可用 `validate <change> --strict --no-interactive`。校验通过只证明规划结构有效，不替代业务测试、真实平台验收或任务完成。
 
 参考：[OpenSpec 官方入门](https://github.com/Fission-AI/OpenSpec/blob/main/docs/getting-started.md)、[CLI 说明](https://github.com/Fission-AI/OpenSpec/blob/main/docs/cli.md)。
+
+## 人设文件导入与导出
+
+[提案](changes/add-persona-file-transfer/proposal.md) · [任务](changes/add-persona-file-transfer/tasks.md)。当前 2/3；支持本地 JSON 下载、文件选择导入，新建未使用项，发布任务继续验收。

@@ -11,6 +11,7 @@ import {BrowserResourceGuard,assessCompliance,readBrowserMemory,waitForIdentityR
 import {readCompliance,identity as browserIdentity,collectPublicWithBudget,collectPrivateWithBudget} from '../dist/browser.js';
 import {Store} from '../dist/store.js';
 import {Workflow} from '../dist/workflow.js';
+import {readPrivatePeer} from '../dist/chat-dom.js';
 import {readPublicPageSnapshot} from '../dist/public-collection.js';
 
 const artifactDir=process.env.ARTIFACT_DIR||'/artifacts';mkdirSync(artifactDir,{recursive:true});
@@ -85,6 +86,13 @@ try{
   }});
   assert.equal(partialPrivate.events.length,1);assert.equal(partialPrivate.events[0].platformId,'dm201');assert.ok(partialPrivate.diagnostics.some(d=>d.code==='private-collection-deadline'&&d.status==='partial'));assert.equal(privateNavigations.length,4);assert.ok(privateNavigations.includes('https://x.com/messages/1-3'));assert.ok(!privateNavigations.includes('https://x.com/messages/1-4'));assert.equal(partialPrivate.events.some(event=>event.platformId==='dm202'),false);checks('私信采集真实循环：首会话保留，第二会话导航耗尽预算后不解析、不开始第三会话', {syntheticDOM:true,events:partialPrivate.events.length,navigations:privateNavigations.length});
  }finally{await page.unroute('https://x.com/**');}
+ let peerFixture='';await page.route('https://x.com/**',route=>route.fulfill({contentType:'text/html',body:peerFixture}));
+ for(const native of [false,true])for(const [handles,expected] of [[['alice'],'alice'],[['alice','bob'],undefined],[[],undefined],[['fixture_worker'],undefined]]){
+  const header='<header data-testid="dm-conversation-header">'+handles.map(handle=>'<a href="/'+handle+'">@'+handle+'</a>').join('')+'</header>',body='<article><a href="/untrusted_body">@untrusted_body</a></article>';
+  peerFixture=native?'<div data-testid="xchatEmbedRoute"></div><script>document.querySelector("div").attachShadow({mode:"open"}).innerHTML='+JSON.stringify(header+body)+'</script>':header+body;
+  await page.goto('https://x.com/'+(native?'i/chat/':'messages/')+'111-222?case='+Math.random(),{waitUntil:'domcontentloaded'});const before=page.url(),peer=await readPrivatePeer(page,'111-222','fixture_worker');assert.equal(peer.peerHandle,expected);assert.equal(peer.code,expected?'private-peer-verified':handles.length>1?'private-peer-ambiguous':'private-peer-unverified');assert.equal(page.url(),before);
+ }
+ await page.unroute('https://x.com/**');checks('旧版与原生shadow私信头部：唯一、多个、缺失、自己handle八种DOM，只读且不读取正文链接',{syntheticDOM:true,cases:8});
  assert.ok(requests.length>=3);assert.ok(requests.every(url=>url==='/profile-fixture'||url==='/favicon.ico'));checks('网络只访问隔离localhost；所有外部页面请求被拒绝', {localRequests:requests.length,blockedExternalRequests:blocked.length});
 }catch(error){output.errors.push(String(error?.stack||error));process.exitCode=1;}
 finally{
