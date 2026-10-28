@@ -73,8 +73,8 @@ try{
  await check('元素深度和root三类遍历预算截断均不能确认ready empty或locked',async()=>{
   await nativePage();await page.locator('[data-testid="xchatEmbedRoute"]').evaluate(node=>{const root=node.shadowRoot,markup=root.innerHTML;root.innerHTML='<section id="budget-nested-host"></section>';root.querySelector('#budget-nested-host').attachShadow({mode:'open'}).innerHTML=markup;});
   assert.equal((await readPrivateUIState(page,{kind:'conversation',conversationId:'111-222'})).state,'ready');
-  for(const traversal of [{maxElements:1},{maxDepth:1},{maxRoots:1}]){
-   const state=await readPrivateUIState(page,{kind:'conversation',conversationId:'111-222',traversal});assert.equal(state.state,'unsupported');assert.equal(state.code,'private-structure-unverified');assert.equal(state.traversalTruncated,true);assert.equal(['ready','empty','locked'].includes(state.state),false);
+  for(const [traversal,counter] of [[{maxElements:1},'elementTruncations'],[{maxDepth:1},'depthTruncations'],[{maxRoots:1},'rootTruncations']]){
+   const state=await readPrivateUIState(page,{kind:'conversation',conversationId:'111-222',traversal});assert.equal(state.state,'unsupported');assert.equal(state.code,'private-structure-unverified');assert.equal(state.traversalTruncated,true);assert.equal(['ready','empty','locked'].includes(state.state),false);assert.ok(state[counter]>0);assert.ok(state.maxObservedDepth>=1);
    const read=await inspectPrivateConversation(page,'111-222',{...fastReadiness,traversal});assert.equal(read.ui.state,'unsupported');assert.equal(read.ui.traversalTruncated,true);assert.equal(read.all.length,0);assert.equal(read.events.length,0);
    const found=await discoverPrivateInboxes(page,{...fastReadiness,traversal});assert.equal(found.ui.state,'unsupported');assert.equal(found.conversations.length,0);
   }
@@ -109,5 +109,11 @@ try{
  await check('真实会话非base路由加载中或锁定UI会阻止原生Empty inbox面板判空',async()=>{
   const contexts=[{path:'/i/chat',extra:'<div role="listbox" aria-label="Conversations"><div data-testid="dm-conversation-item-111:222"><a id="dm-conversation-option-111:222" role="option" href="/i/chat/111-222">真实合成会话</a></div></div>',state:'ready'},{path:'/i/chat/requests',extra:'',state:'unknown'},{path:'/i/chat',extra:'<div role="progressbar">Loading</div>',state:'loading'},{path:'/i/chat',extra:'<input type="password" aria-label="Passcode">',state:'locked'}];
   for(const context of contexts){await nativePage(context.path);await replaceNative('<main><button role="tab" aria-selected="true">All</button><input type="search" aria-label="Search"><section><h2>Empty inbox</h2><p>Message someone</p></section>'+context.extra+'</main>');const state=await readPrivateUIState(page,{kind:'inbox'});assert.equal(state.emptyPanelProof,0);assert.equal(state.emptyPanelProofType,null);assert.equal(state.state,context.state);assert.notEqual(state.state,'empty');}
+ });
+ await check('二十层布局包装的原生列表消息在默认深度预算内完整可读且不造事件',async()=>{
+  await nativePage();await page.locator('[data-testid="xchatEmbedRoute"]').evaluate(node=>{const root=node.shadowRoot,markup=root.innerHTML;root.innerHTML='<div>'.repeat(20)+markup+'</div>'.repeat(20);});
+  for(const expected of [{kind:'inbox'},{kind:'conversation',conversationId:'111-222'}]){const state=await readPrivateUIState(page,expected);assert.equal(state.state,'ready');assert.ok(state.maxObservedDepth>=20);assert.equal(state.depthTruncations,0);assert.equal(state.rootTruncations,0);assert.equal(state.elementTruncations,0);assert.equal(state.traversalTruncated,false);}
+  const found=await discoverPrivateInboxes(page,fastReadiness);assert.equal(found.ui.state,'ready');assert.equal(found.conversations.length,1);
+  const read=await inspectPrivateConversation(page,'111-222',fastReadiness);assert.equal(read.ui.state,'ready');assert.equal(read.all.length,2);assert.equal(read.events.length,0);assert.ok(read.ui.maxObservedDepth>=20);assert.equal(read.ui.depthTruncations,0);assert.equal(read.ui.rootTruncations,0);assert.equal(read.ui.elementTruncations,0);assert.equal(read.ui.traversalTruncated,false);assert.ok(read.all.every(row=>row.timestamp===0&&!row.timestampReliable));
  });
 }finally{await browser.close();writeFileSync(OUT+'/chat-dom-acceptance.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));if(result.errors.length)process.exitCode=1;}

@@ -29,7 +29,7 @@ export function inspectComplianceQualitySnapshot(snapshot:ComplianceQualitySnaps
 
 export function inspectComplianceFiltersSnapshot(snapshot:ComplianceFiltersSnapshot):string|null{
  if(!ownPath(snapshot.url,'/settings/notifications')||snapshot.mainCount!==1||snapshot.loading||snapshot.failed||snapshot.links.length!==1)return null;
- const link=snapshot.links[0];return /^\/settings\/notifications\/[a-z0-9_/-]+$/i.test(link)?link:null;
+ const link=snapshot.links[0];return link==='/settings/notifications/filters'?link:null;
 }
 
 export type ComplianceWaitOptions={timeoutMs?:number;stableMs?:number;intervalMs?:number;now?:()=>number;sleep?:(milliseconds:number)=>Promise<void>};
@@ -86,7 +86,12 @@ export async function readComplianceProfileSnapshot(page:Page):Promise<Complianc
   const content=(node:Element|null)=>(node as HTMLElement|null)?.innerText?.trim()??node?.textContent?.trim()??'';
   const handles=name?Array.from(new Set((content(name).match(/(?:^|\s)@([a-zA-Z0-9_]{1,15})(?=\s|$)/g)??[]).map(value=>value.trim().slice(1).toLowerCase()))):[];
   const handle=handles.length===1?handles[0]:'';
-  const edit=scope?Array.from(scope.querySelectorAll('a[href="/settings/profile"]')).filter(owned):[];
+  // 原生“Set up profile”是未完善资料时的本人入口；与编辑入口共同计数，仍必须唯一且不属于可编辑正文或时间线。
+  const edit=scope?Array.from(scope.querySelectorAll('a[href]')).filter(node=>{
+   if(!owned(node)||node.closest(excluded)||name?.contains(node))return false;
+   const href=node.getAttribute('href')??'';if(href==='/settings/profile')return true;
+   try{const target=new URL(href,location.href);return target.origin==='https://x.com'&&!target.username&&!target.password&&target.pathname==='/i/flow/setup_profile'&&!target.search&&!target.hash&&content(node).replace(/\s+/g,' ')==='Set up profile';}catch{return false;}
+  }):[];
   const bios=scope?Array.from(scope.querySelectorAll('[data-testid="UserDescription"]')).filter(owned):[];
   const profileLinks=scope?Array.from(scope.querySelectorAll('a[href]')).filter(owned).map(node=>node.getAttribute('href')??''):[];
   const following=profileLinks.filter(href=>href.toLowerCase()==='/'+handle+'/following').length;
@@ -116,8 +121,15 @@ export async function readComplianceFiltersSnapshot(page:Page):Promise<Complianc
  return page.evaluate(()=>{
   const visible=(node:Element)=>{if(node.closest('[hidden],[aria-hidden="true"]'))return false;const style=getComputedStyle(node);return style.display!=='none'&&style.visibility!=='hidden'&&!!node.getClientRects().length;};
   const mains=Array.from(document.querySelectorAll('main')).filter(visible),main=mains.length===1?mains[0]:null;
-  const nodes=main?Array.from(main.querySelectorAll('a[href]')).filter(node=>visible(node)&&!node.closest('article,[role="dialog"]')):[];
-  const links=nodes.filter(node=>/^(?:Filters|过滤|筛选)$/i.test((node.textContent??'').trim())).map(node=>node.getAttribute('href')??'');
+  const nodes=main?Array.from(main.querySelectorAll('a[href]')).filter(node=>visible(node)&&!node.closest('article,[data-testid="tweet"],[data-testid="UserCell"],[data-testid="UserDescription"],[data-testid="messageEntry"],[data-dm-message-row],[data-testid^="message-text-"],[role="dialog"]')):[];
+  const links=nodes.flatMap(node=>{
+   // 原生设置入口的标题与说明同在一条链接中；只认第一个可见独立标题，不扫描副文中的关键词。
+   const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let title='';while(walker.nextNode()){const current=walker.currentNode,parent=current.parentElement;if(parent&&visible(parent)&&(current.textContent??'').trim()){title=(current.textContent??'').replace(/\s+/g,' ').trim();break;}}
+   if(!/^(?:Filters|过滤|筛选)$/i.test(title))return [];
+   // 错误目标仍占用一个同标题候选，不能从多个可见入口中挑出碰巧符合预期的一条。
+   let target:URL;try{target=new URL(node.getAttribute('href')??'',location.href);}catch{return ['invalid-filter-route'];}
+   return target.origin==='https://x.com'&&!target.username&&!target.password&&target.pathname==='/settings/notifications/filters'&&!target.search&&!target.hash?['/settings/notifications/filters']:['invalid-filter-route'];
+  });
   const loading=!!main&&(main.getAttribute('aria-busy')==='true'||Array.from(main.querySelectorAll('[role="progressbar"],[aria-busy="true"]')).some(visible));
   const failed=!!main&&Array.from(main.querySelectorAll('[role="alert"],[data-testid="error-detail"]')).filter(visible).some(node=>/something went wrong|try reloading|unable to load|发生错误|加载失败|重新加载/i.test(node.textContent??''));
   return {url:location.href,mainCount:mains.length,loading,failed,links};

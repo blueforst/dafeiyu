@@ -14,7 +14,7 @@ const temporary=mkdtempSync(tmpdir()+'/role-compliance-dom-'),profile=temporary+
 const output={evidence:'服务器隔离Camoufox／真实DOM执行；X页面均由route合成，不代表真实账号合规验收',productionProfileUsed:false,externalRequests:0,writes:0,checks:[],errors:[]};
 const check=(name,detail={})=>output.checks.push({name,passed:true,...detail}),delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const ready={timeoutMs:1000,stableMs:20,intervalMs:10};let xvfb,context,page,markup='',monitoredPageLoaded=false;
-const header=({name='AI 测试角色',bio='AI 非官方合成角色',label='',handle:profileHandle=handle,details=true,bioMarkup,extra=''}={})=>'<div data-testid="primaryColumn"><a href="/settings/profile">Edit profile</a><div data-testid="UserName"><div>'+name+'</div><div>@'+profileHandle+'</div></div>'+(bioMarkup??'<div data-testid="UserDescription">'+bio+'</div>')+label+(details?'<a href="/'+profileHandle+'/following">1 Following</a><a href="/'+profileHandle+'/verified_followers">2 Followers</a>':'')+extra+'</div>';
+const header=({name='AI 测试角色',bio='AI 非官方合成角色',label='',handle:profileHandle=handle,details=true,bioMarkup,extra='',owner='<a href="/settings/profile">Edit profile</a>'}={})=>'<div data-testid="primaryColumn">'+owner+'<div data-testid="UserName"><div>'+name+'</div><div>@'+profileHandle+'</div></div>'+(bioMarkup??'<div data-testid="UserDescription">'+bio+'</div>')+label+(details?'<a href="/'+profileHandle+'/following">1 Following</a><a href="/'+profileHandle+'/verified_followers">2 Followers</a>':'')+extra+'</div>';
 const documentFor=body=>'<!doctype html><html><body><main>'+body+'</main></body></html>';
 async function readWriteMonitor(target=page){const raw=await target.evaluate(()=>document.documentElement.getAttribute('data-compliance-write-count'));assert.equal(typeof raw,'string','每页写入监测器必须已初始化');assert.match(raw,/^\d+$/,'写入计数必须为十进制整数');const count=Number(raw);assert.equal(Number.isSafeInteger(count),true,'写入计数必须为安全整数');return count;}
 async function load(url,body){if(monitoredPageLoaded)output.writes+=await readWriteMonitor();markup=documentFor(body);await page.goto(url,{waitUntil:'domcontentloaded'});monitoredPageLoaded=true;assert.equal(await readWriteMonitor(),0,'新文档监测器必须从零开始');}
@@ -33,6 +33,27 @@ try{
  page=context.pages()[0]||await context.newPage();
  const nativeLabel='<div data-testid="UserLabel"><span>Automated by </span><a href="/fixture_owner">@fixture_owner</a></div>';
  let result=await profileResult(header({label:nativeLabel}));assert.equal(result.reliable,true);assert.equal(result.automatedLabel,true);assert.match(result.name,/AI/);check('唯一完整目标资料与原生管理账号标签可确认');
+ const setupProfile='<a href="/i/flow/setup_profile">Set up profile</a>';
+ for(const href of ['/i/flow/setup_profile','https://x.com/i/flow/setup_profile']){
+  result=await profileResult(header({owner:'<a href="'+href+'">Set up profile</a>'}));assert.equal(result.reliable,true);check('原生Set up profile精确路径与标题可作自身入口',{absolute:href.startsWith('https:')});
+ }
+ for(const [name,body] of [
+  ['时间线内setup链接',header({owner:'',extra:'<article data-testid="tweet">'+setupProfile+'</article>'})],
+  ['简介内setup链接',header({owner:'',bioMarkup:'<div data-testid="UserDescription">'+setupProfile+'</div>'})],
+  ['推荐UserCell内setup链接',header({owner:'',extra:'<div data-testid="UserCell">'+setupProfile+'</div>'})],
+  ['隐藏setup链接',header({owner:'',extra:'<div hidden>'+setupProfile+'</div>'})],
+  ['编辑与setup两个自身入口',header({extra:setupProfile})],
+  ['两个setup自身入口',header({owner:setupProfile+setupProfile})],
+  ['setup路径不符',header({owner:'<a href="/i/flow/setup_profile/other">Set up profile</a>'})],
+  ['setup外部host',header({owner:'<a href="https://example.com/i/flow/setup_profile">Set up profile</a>'})],
+  ['setup伪装host',header({owner:'<a href="https://x.com.example.com/i/flow/setup_profile">Set up profile</a>'})],
+  ['setup含凭据',header({owner:'<a href="https://user@x.com/i/flow/setup_profile">Set up profile</a>'})],
+  ['setup含query',header({owner:'<a href="/i/flow/setup_profile?source=test">Set up profile</a>'})],
+  ['setup含hash',header({owner:'<a href="/i/flow/setup_profile#step">Set up profile</a>'})],
+  ['setup错误标题',header({owner:'<a href="/i/flow/setup_profile">Edit profile</a>'})],
+  ['setup标题仅前缀相同',header({owner:'<a href="/i/flow/setup_profile">Set up profile later</a>'})],
+  ['无原生href的setup按钮',header({owner:'<button type="button">Set up profile</button>'})],
+ ]){assert.equal((await profileResult(body)).reliable,false);check(name+'不能作自身资料凭据');}
  result=await profileResult(header({bio:'Automated by @spoofed_owner'}));assert.equal(result.reliable,true);assert.equal(result.automatedLabel,false);check('简介文字不能冒充平台自动化标签');
  result=await profileResult(header({extra:'<article data-testid="tweet"><div data-testid="UserName">他人 @other</div><div data-testid="UserDescription">AI</div><span>Automated by @spoofed_owner</span></article>'}));assert.equal(result.reliable,true);assert.equal(result.automatedLabel,false);assert.ok(!result.name.includes('他人'));check('时间线同名testid与标签字样不污染资料');
  for(const [name,body,url] of [
@@ -61,8 +82,30 @@ try{
   ['错误设置URL','<button role="switch" aria-label="Quality filter" aria-checked="true"></button>','https://x.com/settings/privacy_and_safety'],
  ]){assert.equal(await qualityResult(body,url),null);check(name+'保持unknown');}
  await load('https://x.com/settings/notifications','<a href="/settings/notifications/filters">Filters</a>');assert.equal(inspectComplianceFiltersSnapshot(await readComplianceFiltersSnapshot(page)),'/settings/notifications/filters');
- await load('https://x.com/settings/notifications','<a href="/settings/notifications/filters">Filters</a><a href="/settings/notifications/advanced_filters">Filters</a>');assert.equal(inspectComplianceFiltersSnapshot(await readComplianceFiltersSnapshot(page)),null);check('过滤入口必须是当前通知页唯一原生链接');
- const navigations=[],complianceStartedAt=Date.now();const observation=await readCompliance(page,handle,async(_page,url)=>{navigations.push(url);if(url==='https://x.com/'+handle)await load(url,header({label:nativeLabel}));else if(url==='https://x.com/settings/notifications')await load(url,'<a href="/settings/notifications/filters">Filters</a>');else if(url==='https://x.com/settings/notifications/filters')await load(url,'<div><span>Quality filter</span><button role="switch" aria-checked="false">toggle</button></div>');else throw Error('出现非预期导航');},ready);
+ const filterDescription='Choose the notifications you’d like to see — and those you don’t.';
+ const filterRow=(href='/settings/notifications/filters',title='Filters',description=filterDescription)=>'<a href="'+href+'"><div><span>'+title+'</span></div><div>'+description+'</div></a>';
+ for(const href of ['/settings/notifications/filters','https://x.com/settings/notifications/filters']){
+  await load('https://x.com/settings/notifications',filterRow(href));assert.equal(inspectComplianceFiltersSnapshot(await readComplianceFiltersSnapshot(page)),'/settings/notifications/filters');check('Filters独立标题与真实副文可读取唯一原生入口',{absolute:href.startsWith('https:')});
+ }
+ for(const [name,body] of [
+  ['Filters错误路径',filterRow('/settings/notifications/advanced_filters')],
+  ['Filters路径含额外层级',filterRow('/settings/notifications/filters/other')],
+  ['Filters含query',filterRow('/settings/notifications/filters?source=test')],
+  ['Filters含hash',filterRow('/settings/notifications/filters#quality')],
+  ['Filters外部host',filterRow('https://example.com/settings/notifications/filters')],
+  ['Filters伪装host',filterRow('https://x.com.example.com/settings/notifications/filters')],
+  ['Filters含凭据',filterRow('https://user@x.com/settings/notifications/filters')],
+  ['仅说明提及Filters',filterRow('/settings/notifications/filters','Preferences','Choose Filters for the notifications you’d like to see.')],
+  ['隐藏Filters入口','<div hidden>'+filterRow()+'</div>'],
+  ['隐藏首标题不能冒充可见标题','<a href="/settings/notifications/filters"><span hidden>Filters</span><span>Preferences</span><span>'+filterDescription+'</span></a>'],
+  ['article内Filters入口','<article>'+filterRow()+'</article>'],
+  ['messageEntry内Filters入口','<div data-testid="messageEntry">'+filterRow()+'</div>'],
+  ['UserCell内Filters入口','<div data-testid="UserCell">'+filterRow()+'</div>'],
+  ['简介内Filters入口','<div data-testid="UserDescription">'+filterRow()+'</div>'],
+  ['同标题正确及错误目标并存',filterRow()+filterRow('/settings/notifications/advanced_filters')],
+ ]){await load('https://x.com/settings/notifications',body);assert.equal(inspectComplianceFiltersSnapshot(await readComplianceFiltersSnapshot(page)),null);check(name+'不能作为通知过滤入口');}
+ await load('https://x.com/settings/notifications','<a href="/settings/notifications/filters">Filters</a><a href="https://x.com/settings/notifications/filters">Filters</a>');assert.equal(inspectComplianceFiltersSnapshot(await readComplianceFiltersSnapshot(page)),null);check('过滤入口必须是当前通知页唯一原生链接');
+ const navigations=[],complianceStartedAt=Date.now();const observation=await readCompliance(page,handle,async(_page,url)=>{navigations.push(url);if(url==='https://x.com/'+handle)await load(url,header({owner:setupProfile,label:nativeLabel}));else if(url==='https://x.com/settings/notifications')await load(url,filterRow());else if(url==='https://x.com/settings/notifications/filters')await load(url,'<div><span>Quality filter</span><button role="switch" aria-checked="false">toggle</button></div>');else throw Error('出现非预期导航');},ready);
  const compliance=assessCompliance(observation,['AI','非官方']);assert.equal(compliance.disclosure,'confirmed');assert.equal(compliance.automatedLabel,'confirmed');assert.equal(compliance.qualityFilter,'off');assert.deepEqual(navigations,['https://x.com/'+handle,'https://x.com/settings/notifications','https://x.com/settings/notifications/filters']);output.writes+=await readWriteMonitor();assert.equal(output.writes,0);assert.equal(output.externalRequests,0);check('实际readCompliance顺序导航与DTO评估，零点击零写请求');
  const diagnostics=observation.diagnostics;assert.deepEqual(Object.keys(diagnostics).sort(),['filters','profile','quality']);assert.equal(diagnostics.profile.mainCount,1);assert.equal(diagnostics.profile.nameCount,1);assert.equal(diagnostics.profile.handleCount,1);assert.equal(diagnostics.profile.editCount,1);assert.equal(diagnostics.profile.bioCount,1);assert.equal(diagnostics.profile.expectedHandleMatches,true);assert.equal(diagnostics.filters.visibleEntryCount,1);assert.equal(diagnostics.quality.matchedControlCount,1);assert.equal(diagnostics.quality.associationValidCount,1);assert.equal(diagnostics.quality.nativeStateCount,0);assert.equal(diagnostics.quality.ariaStateCount,1);
  assert.equal(diagnostics.profile.handleMatches,true);for(const part of Object.values(diagnostics)){assert.equal(part.locationMatches,true);assert.equal(part.stable,true);assert.ok(part.sampleCount>=2);assert.ok(part.readAttempts>=part.sampleCount);assert.ok(part.sampledAt>=complianceStartedAt&&part.sampledAt<=Date.now());for(const value of Object.values(part))assert.ok(value===null||typeof value==='number'||typeof value==='boolean');}

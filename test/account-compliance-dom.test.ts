@@ -116,6 +116,8 @@ test('通知过滤导航只接受通知设置页唯一同源路径候选，不�
   {links:['/settings/notifications/filters?source=test']},
   {links:['/settings/notifications/filters#quality']},
   {links:['/settings/profile']},
+  {links:['/settings/notifications/advanced_filters']},
+  {links:['/settings/notifications/filters/extra']},
  ];
  for(const patch of invalid)assert.equal(inspectComplianceFiltersSnapshot(filters(patch)),null,JSON.stringify(patch));
 });
