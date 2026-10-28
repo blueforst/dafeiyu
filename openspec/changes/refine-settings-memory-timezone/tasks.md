@@ -1,6 +1,6 @@
 # 设置页细节、跨渠道记忆与时区中立实施任务
 
-当前完成 16/19 项；隔离回归、真实模型有效时段样本与人工关联界面已验证，平台真实样本及发布仍保留独立任务。证据见 [本轮实施记录](../../../docs/实施记录/2026-10-29-设置记忆与人设文件.md)。规格见 [panel-navigation](specs/panel-navigation/spec.md)、[panel-design-system](specs/panel-design-system/spec.md)、[conversation-memory](specs/conversation-memory/spec.md)、[chat-test](specs/chat-test/spec.md) 和 [reply-prompt-context](specs/reply-prompt-context/spec.md)，实现边界见 [design.md](design.md)。
+当前完成 18/19 项；正式构建 663/663、十八套界面、真实模型有效时段样本及 0.1.20 发布已验证；仅 7.2 真实私信样本未取得，自动平台关联继续关闭。证据见 [本轮实施记录](../../../docs/实施记录/2026-10-29-设置记忆与人设文件.md)。规格见 [panel-navigation](specs/panel-navigation/spec.md)、[panel-design-system](specs/panel-design-system/spec.md)、[conversation-memory](specs/conversation-memory/spec.md)、[chat-test](specs/chat-test/spec.md) 和 [reply-prompt-context](specs/reply-prompt-context/spec.md)，实现边界见 [design.md](design.md)。
 
 - 构建和测试只在服务器隔离环境 `/srv/role-workflow-proposals` 执行，不使用生产 profile。
 - 真实模型抽查是计费调用，生产发布和真实私信样本验收都需要另行授权；提案创建不视为任何授权。
@@ -50,6 +50,6 @@
 
 ## 8. 回归、文档与发布
 
-- [ ] 8.1 服务器类型检查、全量回归、`dev/workspace-ui-test.sh` 和构建通过。验收：日志存入证据目录，失败、取消、跳过均为零；原有界面验收的业务断言保留。
+- [x] 8.1 服务器类型检查、全量回归、`dev/workspace-ui-test.sh` 和构建通过。验收：日志存入证据目录，失败、取消、跳过均为零；原有界面验收的业务断言保留。
 - [x] 8.2 文档：`docs/前端接口.md`（关联接口、`linkedTo`、`private-overlap`）、`docs/记忆策略.md`（跨渠道召回与私信背景）、`docs/设计规范.md`（左栏圆点与链接色规则）、`docs/无人值守健康.md`（健康页分组）。验收：文档与实现一致。
-- [ ] 8.3 取得发布授权后随下一次发布上线，保持原有控制状态。验收：生产只读读回 schema 14、设置左栏与健康页截图、记忆页关联入口；发布记录写明私信对方 handle 读取是否已有真实样本。
+- [x] 8.3 取得发布授权后随下一次发布上线，保持原有控制状态。验收：生产只读读回 schema 14、设置左栏与健康页截图、记忆页关联入口；发布记录写明私信对方 handle 读取是否已有真实样本。
