@@ -1,6 +1,6 @@
 # 回复文风：近期往来、帖子去重与格式标记实施任务
 
-当前完成 6/8 项；最终服务器类型检查、508 项回归、构建及文风界面 7/7 组通过。真实模型五轮前后对比和发布后观察仍未完成。规格见 [reply-prompt-context](specs/reply-prompt-context/spec.md)、[task-scheduling](specs/task-scheduling/spec.md) 与 [x-message-workflow](specs/x-message-workflow/spec.md)，实现边界见 [design.md](design.md)。构建、测试和界面验收只在服务器隔离环境执行，不使用生产 profile；真实模型验收和生产发布需要另行授权。实施前核对 `src/reply-prompt.ts`、`src/persona.ts`、`public/js/views/persona.js` 上其他提案的未提交改动，不得覆盖。
+当前完成 7/8 项；最终服务器类型检查、508 项回归、构建及文风界面 7/7 组通过。真实模型旧／新各五轮对比已完成，费用估算 0.003053568 美元；用户明确本批通过、八股改进延后，不据此宣称已证明改善。发布后连续几天观察仍未完成，详见[审定记录](../../../docs/实施记录/2026-10-28-发布与实机修复.md)。规格见 [reply-prompt-context](specs/reply-prompt-context/spec.md)、[task-scheduling](specs/task-scheduling/spec.md) 与 [x-message-workflow](specs/x-message-workflow/spec.md)，实现边界见 [design.md](design.md)。构建、测试和界面验收只在服务器隔离环境执行，不使用生产 profile；真实模型验收和生产发布需要另行授权。实施前核对 `src/reply-prompt.ts`、`src/persona.ts`、`public/js/views/persona.js` 上其他提案的未提交改动，不得覆盖。
 
 ## 1. 提示词
 
@@ -49,7 +49,7 @@
   - `docs/前端接口.md`：试聊的 `format` 字段和动态提醒字段的说明。
 
   验收：文档与实现一致。
-- [ ] 4.2 取得模型调用授权后，用试聊模拟同一个人连续聊五轮（前几轮作为近期往来传入），比较改动前后梗、口癖、开头和收尾的重复。可与 `add-persona-presets` 任务 4.3 合并进行。验收：结果与费用写入实施记录；提案创建不视为调用授权。
+- [x] 4.2 取得模型调用授权后，用试聊模拟同一个人连续聊五轮（前几轮作为近期往来传入），比较改动前后梗、口癖、开头和收尾的重复。可与 `add-persona-presets` 任务 4.3 合并进行。验收：结果与费用写入实施记录；提案创建不视为调用授权。
 - [ ] 4.3 取得发布授权后按现有流程发布。发布后只读观察早晚安帖连续几天的开头和句式，以及被标记的回复和帖子数量。验收：发布记录与观察结果；提案创建不视为发布授权。
 
 ## Workflow follow-up

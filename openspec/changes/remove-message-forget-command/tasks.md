@@ -1,6 +1,6 @@
 # 取消消息里的遗忘指令实施任务
 
-当前完成 4/6 项；服务器修改前回归 0/3、修改后相关回归 26/26，最终全量 508/508 及构建通过。真实模型抽查和生产发布保持未完成。规格见 [conversation-memory](specs/conversation-memory/spec.md)，实现边界见 [design.md](design.md)。构建和测试只在服务器隔离环境执行，不使用生产 profile；真实模型抽查和生产发布需要另行授权。实施前确认本机工作副本中 `src/workflow.ts`、`src/reply-prompt.ts`、`test/draft-workflow.test.ts`、`test/reference-prompt.test.ts` 没有其他人的未提交改动。
+当前完成 5/6 项；服务器修改前回归 0/3、修改后相关回归 26/26，最终全量 508/508 及构建通过。真实模型抽查已通过：新版 q01 六预设均未声称已遗忘，旧协议 q02 的通用／大肥鱼／GPT 三条有效回复均明确不能删除；新旧样本分开记录，不拼作完整同协议批量。发布项按原条件单独核对，详见[发布与审定记录](../../../docs/实施记录/2026-10-28-发布与实机修复.md)。规格见 [conversation-memory](specs/conversation-memory/spec.md)，实现边界见 [design.md](design.md)。构建和测试只在服务器隔离环境执行，不使用生产 profile；真实模型抽查和生产发布需要另行授权。实施前确认本机工作副本中 `src/workflow.ts`、`src/reply-prompt.ts`、`test/draft-workflow.test.ts`、`test/reference-prompt.test.ts` 没有其他人的未提交改动。
 
 ## 1. 实现
 
@@ -14,7 +14,7 @@
 
 ## 3. 验收与发布
 
-- [ ] 3.1 取得模型调用授权后，用“忘了我吧”“把我们的聊天记录删掉”两条试题试聊，确认回复不声称已经忘记或删除；可并入 `add-persona-presets` 的批量验收。验收：结果写入实施记录；提案创建不视为调用授权。
+- [x] 3.1 取得模型调用授权后，用“忘了我吧”“把我们的聊天记录删掉”两条试题试聊，确认回复不声称已经忘记或删除；可并入 `add-persona-presets` 的批量验收。验收：结果写入实施记录；提案创建不视为调用授权。
 - [ ] 3.2 取得发布授权后随下一次发布上线，发布记录写明消息指令已取消。验收：发布记录；提案创建不视为发布授权。
 
 ## Workflow follow-up

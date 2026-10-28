@@ -18,7 +18,7 @@
 
 修复后原计划 156 次的主组实际发出 **154 次**，其中 **153 次有效、1 次 GPT 娘解析失败**，该连续组后两轮因前轮失败而阻塞，未调用。另完成通用人设身份／危机边界点验 **2 次**，不混作原主组缺失轮次。加上冻结旧批 82 次与文风对比 10 次，本轮实际共 **248 次，不超过已授权的 250 次**；不能写成原 156 次全通过，也不能把旧批拼成新版完整 240 次验收。
 
-文风旧／新各五轮已完成且独立计量；本样本两侧重复指标均为零，未证明文风改善，并有误接上文线索。人设语义与效果审定仍待管理员完成。逐项结果、费用和审阅结论见 [最新发布与实机记录](../docs/实施记录/2026-10-28-发布与实机修复.md)；Pi 估算不是供应商实际扣款或账单，调用成功也不等于效果已审定。
+文风旧／新各五轮已完成且独立计量；本样本未证明文风改善，并有误接上文线索。2026-10-28 经逐条复核，用户明确同意“这批先通过吧，修八股以后再考虑”，本批模型与人设效果验收通过，八股文风作为后续非阻断改进；失败与缺轮事实不变。逐项结果、费用和审定范围见 [最新发布与实机记录](../docs/实施记录/2026-10-28-发布与实机修复.md)；Pi 估算不是供应商实际扣款或账单，本批批准不代表未测场景或平台收发已通过。
 
 ## 已部署代码所涵盖的提案
 
@@ -36,9 +36,9 @@
 | [参考帖子遗漏补齐](changes/fill-reference-post-gaps/proposal.md)：引用／卡片、目标上下文、关键词卡、角色经历、链接补录及模型对比；通知“全部”仍待样本且关闭 | [设计](changes/fill-reference-post-gaps/design.md) | [任务](changes/fill-reference-post-gaps/tasks.md) | [规格](changes/fill-reference-post-gaps/specs/) |
 | [计费图表交互](changes/add-billing-chart-interaction/proposal.md)：即时提示、日期列悬停、环图联动、触屏与键盘操作 | [设计](changes/add-billing-chart-interaction/design.md) | [任务](changes/add-billing-chart-interaction/tasks.md) | [规格](changes/add-billing-chart-interaction/specs/) |
 | [人设预设与默认人设](changes/add-persona-presets/proposal.md)：六个原创 v2 预设、通用默认、关键词卡（含“不给步骤”“被夸”）、编辑器填入与统一人设；真实调用及效果审定以最新记录为准 | [设计](changes/add-persona-presets/design.md) | [任务](changes/add-persona-presets/tasks.md) | [规格](changes/add-persona-presets/specs/) |
-| [取消消息里的遗忘指令](changes/remove-message-forget-command/proposal.md)：消息不能执行遗忘或恢复，管理员操作与独立账本保留；真实回复抽查待完成 | [设计](changes/remove-message-forget-command/design.md) | [任务](changes/remove-message-forget-command/tasks.md) | [规格](changes/remove-message-forget-command/specs/) |
+| [取消消息里的遗忘指令](changes/remove-message-forget-command/proposal.md)：消息不能执行遗忘或恢复，管理员操作与独立账本保留；真实回复抽查通过 | [设计](changes/remove-message-forget-command/design.md) | [任务](changes/remove-message-forget-command/tasks.md) | [规格](changes/remove-message-forget-command/specs/) |
 | [运行状态与浏览器接管分离](changes/separate-run-control-from-takeover/proposal.md)：顶部启动／暂停，设置页接管／释放，释放后继续暂停 | [设计](changes/separate-run-control-from-takeover/design.md) | [任务](changes/separate-run-control-from-takeover/tasks.md) | [规格](changes/separate-run-control-from-takeover/specs/) |
-| [回复文风与格式标记](changes/improve-reply-style/proposal.md)：同人近期往来、角色帖去重与格式只标记；前后五轮真实比较已执行，效果审定及发布后观察待完成 | [设计](changes/improve-reply-style/design.md) | [任务](changes/improve-reply-style/tasks.md) | [规格](changes/improve-reply-style/specs/) |
+| [回复文风与格式标记](changes/improve-reply-style/proposal.md)：同人近期往来、角色帖去重与格式只标记；前后五轮真实比较与本批审定通过，八股改进延后，发布后观察仍待完成 | [设计](changes/improve-reply-style/design.md) | [任务](changes/improve-reply-style/tasks.md) | [规格](changes/improve-reply-style/specs/) |
 
 使用说明与证据：
 
