@@ -8,7 +8,7 @@ import { Store } from '../src/store.js';
 import { PersonaService,legacyPersona,type Persona } from '../src/persona.js';
 import { parseDraft,parseDraftStructure,type Generator } from '../src/model.js';
 import { assembleReplyPrompt,beijingTime,REPLY_PROMPT_VERSION } from '../src/reply-prompt.js';
-import { DEFAULT_PROMPT_HINTS,validatePromptHints,buildReplyHints,detectLanguage,replyOpening,expressionFlags,recentReplySamples,type ReplySample } from '../src/reply-hints.js';
+import { DEFAULT_PROMPT_HINTS,validatePromptHints,buildReplyHints,detectLanguage,replyOpening,expressionFlags,recentReplySamples,scopedReplies,type ReplySample } from '../src/reply-hints.js';
 import { registerPromptHintsRoutes } from '../src/reply-hints-routes.js';
 import { Program,registerProgramRoutes } from '../src/program.js';
 import { Outbox } from '../src/outbox.js';
@@ -39,7 +39,7 @@ test('提示词实际请求与分段一致，动态数据及命中规则不进�
  assert.equal(first.system,second.system);assert.ok(!first.system.includes('不给步骤'));assert.ok(!first.system.includes('读书'));assert.ok(first.user.includes('不给步骤'));
  assert.equal(first.system,first.segments.filter(s=>s.role==='system').map(s=>s.content).filter(Boolean).join('\n\n'));
  assert.equal(first.user,first.segments.filter(s=>s.role==='user').map(s=>'【'+s.title+'】\n'+s.content).join('\n\n'));
- assert.deepEqual(first.segments.filter(s=>s.role==='user').map(s=>s.kind),['experiences','daily','memory','conversation','reminders','message','now']);
+ assert.deepEqual(first.segments.filter(s=>s.role==='user').map(s=>s.kind),['experiences','daily','memory','recent','conversation','reminders','message','now']);
  assert.equal(first.segments.find(s=>s.kind==='daily')!.content,second.segments.find(s=>s.kind==='daily')!.content);
  const tomorrow=assembleReplyPrompt({...input,now:NOW+86400000});assert.equal(first.system,tomorrow.system);assert.notEqual(first.segments.find(s=>s.kind==='daily')!.content,tomorrow.segments.find(s=>s.kind==='daily')!.content);
  const revised=assembleReplyPrompt({...input,staticText:'修改后的人格'});assert.notEqual(first.system,revised.system);assert.ok(revised.system.includes('修改后的人格'));
@@ -66,12 +66,12 @@ test('语言提醒区分繁体、日文、韩文、拉丁字母与无法确定�
  assert.ok(hint.text.includes('不混入簡體'));assert.equal(hint.kind,'language');
 });
 
-test('开头截断与去重保留码点，公开与私信会话的资料严格隔离',()=>{
+test('回放开头截断保留码点，旧开关不生成开头提醒且样本范围仍严格隔离',()=>{
  assert.equal(replyOpening('  你好呀，后续内容'),'你好呀');assert.equal(Array.from(replyOpening('😀😀😀😀😀😀😀😀😀')).length,8);
  const samples:ReplySample[]=[{text:'公开开头，正文',channel:'public',accountId:'a'},{text:'同会话呀，正文',channel:'private',conversationId:'one',accountId:'a'},{text:'别的私密，正文',channel:'private',conversationId:'two',accountId:'a'},{text:'其他账号，正文',channel:'public',accountId:'b'},{text:'公开开头！重复',channel:'public',accountId:'a'}];
  const input={message:'你好',channel:'public' as const,accountId:'a',recentReplies:samples,settings:{...disabled,openingEnabled:true}};
- const pub=buildReplyHints(input).hints[0].text;assert.ok(pub.includes('公开开头'));assert.ok(!pub.includes('私密'));assert.ok(!pub.includes('同会话'));assert.ok(!pub.includes('其他账号'));
- const dm=buildReplyHints({...input,channel:'private',conversationId:'one'}).hints[0].text;assert.ok(dm.includes('同会话'));assert.ok(!dm.includes('别的私密'));assert.equal((pub.match(/公开开头/gu)??[]).length,1);
+ assert.deepEqual(buildReplyHints(input).hints,[]);assert.deepEqual(buildReplyHints({...input,channel:'private',conversationId:'one'}).hints,[]);
+ assert.deepEqual(scopedReplies(samples,'a','public').map(s=>s.text),['公开开头，正文','公开开头！重复']);assert.deepEqual(scopedReplies(samples,'a','private','one').map(s=>s.text),['公开开头，正文','同会话呀，正文','公开开头！重复']);
 });
 
 test('颜文字、emoji和波浪号统计独立，连续颜文字与各上限生效',()=>{
@@ -100,7 +100,7 @@ test('语义判定与提示词层共用一次路由，试聊样本来自模拟�
  const f=fixture();try{
   const persona:Persona=legacyPersona('角色');persona.triggers=[{id:'rule',title:'不给步骤',condition:'问做法',content:'不要提供步骤',enabled:true,order:0}];
   const result=await f.service.preview({persona,channel:'public',messages:[{role:'assistant',text:'模拟开头，原回复'},{role:'user',text:'How are you doing today?'}]});
-  assert.equal(f.requests.length,2);assert.equal(result.meta.promptVersion,REPLY_PROMPT_VERSION);assert.equal(result.meta.sampleSource,'preview-dialogue');assert.ok(result.hints.some(h=>h.kind==='language'));assert.ok(result.hints.some(h=>h.kind==='opening'));assert.ok(result.segments.find(s=>s.kind==='reminders')!.content.includes('模拟开头'));assert.ok(!f.requests[1].system.includes('不要提供步骤'));assert.ok(f.requests[1].user.includes('不要提供步骤'));
+  assert.equal(f.requests.length,2);assert.equal(result.meta.promptVersion,REPLY_PROMPT_VERSION);assert.equal(result.meta.sampleSource,'preview-dialogue');assert.ok(result.hints.some(h=>h.kind==='language'));assert.ok(!result.hints.some(h=>String(h.kind)==='opening'));assert.ok(!result.segments.find(s=>s.kind==='reminders')!.content.includes('模拟开头'));assert.ok(result.segments.find(s=>s.kind==='conversation')!.content.includes('模拟开头'));assert.ok(!f.requests[1].system.includes('不要提供步骤'));assert.ok(f.requests[1].user.includes('不要提供步骤'));
   assert.equal((f.store.db.prepare('SELECT count(*) AS n FROM messages').get() as any).n,0);assert.equal((f.store.db.prepare('SELECT count(*) AS n FROM memory').get() as any).n,0);
  }finally{f.close();}
 });

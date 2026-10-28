@@ -2,6 +2,8 @@ import { h, set, fmtDateTime } from '../dom.js';
 import { api } from '../api.js';
 import { notice } from '../state.js';
 import { mount as mountReplay } from './persona-replay.js';
+import { mount as mountPresets } from './persona-presets-panel.js';
+import { formatNotice } from '../reply-format.js';
 import { field, empty, money, editorGuard, errorBox, billingBadge } from '../view-utils.js';
 
 const DAILY_STATUS = { ready: '已生成', unavailable: '当前账号未确认', missing: '暂无当日日程', absent: '暂无当日日程', generating: '正在生成', failed: '生成失败', backoff: '失败后退避', exhausted: '当天自动尝试已用完', paused: '业务暂停', superseded: '旧结果已被新修订取代' };
@@ -10,7 +12,9 @@ const DAILY_SOURCE = { automatic: '自动生成', 'manual-generation': '人工�
 export function mount(root, ctx) {
   let alive = true, saved = '', savedDaily = '', revision = 0, persona = null, daily = null, dailyDraft = null;
   let promptHints = null, hintSaved = '', hintRevision = 0;
-  let replayCleanup = () => {};
+  let replayCleanup = () => {}, invalidateReplay = () => {}, presets = null;
+  const replaySources=new Map();
+  const signature=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
   let previewBusy = false, saving = false, dailyBusy = false, dailySaving = false, messages = [];
   const sections = h('div', { class: 'stack' });
   const rules = h('div', { class: 'stack' });
@@ -28,7 +32,7 @@ export function mount(root, ctx) {
   const previewButton = h('button', { id: 'persona-preview', class: 'btn primary', type: 'button', onclick: preview }, '发送试聊 ', billingBadge());
   const save = h('button', { id: 'persona-save', class: 'btn primary', type: 'button', onclick: savePersona }, '保存人设');
   const add = h('button', { id: 'trigger-add', class: 'btn', type: 'button', onclick: () => {
-    persona.triggers.push({ id: crypto.randomUUID(), title: '', condition: '', content: '', match:'semantic', enabled: true, order: persona.triggers.length }); renderRules(); update();
+    persona.triggers.push({ id: crypto.randomUUID(), title: '', condition: '', content: '', match:'semantic', enabled: true, order: persona.triggers.length }); renderRules(); update(true);
   } }, '添加触发规则');
   const page = h('div', { class: 'stack' }, h('div', {}, h('h1', { class: 'page-title' }, '人设')),
     content,
@@ -42,67 +46,77 @@ export function mount(root, ctx) {
   const names = [['persona','人设'],['daily','今日日程'],['preview','试聊']];
   for (const [id,title] of names) tabs.append(h('button', { class:'btn', id:'persona-tab-'+id, type:'button', role:'tab', onclick:()=>{location.hash='#/persona/'+id;} }, title));
   page.children[0].after(tabs);
+  const persistentPresetNotice=h('div');tabs.after(persistentPresetNotice);
   const selectTab = (target=ctx.route) => { const selected = names.some(([id])=>id===target.section)?target.section:'persona'; names.forEach(([id],i)=>{panels[i].hidden=id!==selected; tabs.children[i].setAttribute('aria-selected',String(id===selected)); tabs.children[i].setAttribute('aria-pressed',String(id===selected));}); };
   const routeListener=e=>{if(e.detail.page==='persona')selectTab(e.detail);};
   window.addEventListener('panel-route',routeListener); selectTab();
   set(root, page);
-  const dirty = () => (promptHints && JSON.stringify(promptHints)!==hintSaved) || (!!persona && JSON.stringify(persona) !== saved) || (!!dailyDraft && JSON.stringify(dailyDraft) !== savedDaily);
+  const dirty = () => presets?.isDirty() || (promptHints && JSON.stringify(promptHints)!==hintSaved) || (!!persona && JSON.stringify(persona) !== saved) || (!!dailyDraft && JSON.stringify(dailyDraft) !== savedDaily);
   const cleanup = editorGuard(ctx, page, dirty);
   channel.addEventListener('change', resetChat);
 
-  function update() {
+  function update(edited=false) {
     if (!persona) return;
+    if(edited)invalidateReplay();
     const length = persona.sections.reduce((n, x) => n + x.content.length, 0) + persona.triggers.reduce((n, x) => n + x.condition.length + x.content.length + (x.keywords||[]).reduce((sum,word)=>sum+word.length,0), 0);
-    tally.textContent = length.toLocaleString() + ' / 20,000 字符' + (JSON.stringify(persona) !== saved ? ' · 未保存' : ' · 已保存');
+    tally.textContent = length.toLocaleString() + ' / 20,000 字符' + (presets?.isDirty()||JSON.stringify(persona) !== saved ? ' · 未保存' : ' · 已保存');
     tally.className = length > 20000 ? 'bad small' : 'muted small';
     save.disabled = saving || length > 20000;
   }
   function renderSections() {
     set(sections, persona.sections.map((section, index) => {
-      const input = h('textarea', { id: 'persona-section-' + index, class: 'input', rows: index === 0 ? 7 : 4, value: section.content, oninput: e => { section.content = e.target.value; update(); } });
+      const input = h('textarea', { id: 'persona-section-' + index, class: 'input', rows: index === 0 ? 7 : 4, value: section.content, oninput: e => { section.content = e.target.value; update(true); } });
       return field(section.title, input);
     }));
   }
   function renderRules() {
     set(rules, persona.triggers.length ? persona.triggers.map((rule, index) => {
-      const edit = (key, rows, label) => field(label, h(rows ? 'textarea' : 'input', { class: 'input', rows: rows || undefined, value: rule[key], oninput: e => { rule[key] = e.target.value; update(); } }));
-      const condition=h('textarea',{class:'input',rows:2,value:rule.condition,oninput:e=>{rule.condition=e.target.value;update();}});
+      const edit = (key, rows, label) => field(label, h(rows ? 'textarea' : 'input', { class: 'input', rows: rows || undefined, value: rule[key], oninput: e => { rule[key] = e.target.value; update(true); } }));
+      const condition=h('textarea',{class:'input',rows:2,value:rule.condition,oninput:e=>{rule.condition=e.target.value;update(true);}});
       const mode=h('select',{class:'input','aria-label':'触发方式'},h('option',{value:'semantic'},'语义判断'),h('option',{value:'keywords'},'关键词（不调用模型）'));
       mode.value=rule.match||'semantic';
       const keywords=h('textarea',{class:'input',rows:3,maxlength:2000,'aria-label':'关键词（每行一个）',placeholder:'怎么做\n教程\n步骤',value:(rule.keywords||[]).join('\n')});
       const keywordBox=h('div',{class:'stack',hidden:mode.value!=='keywords'},field('关键词（每行一个）',keywords,'1–30 个，每个 1–40 字符；只匹配当前消息正文。'));
       const autoCondition=()=>{if(rule.match==='keywords'&&!rule.condition.trim()&&(rule.keywords||[]).length){rule.condition='消息包含以下任一关键词：'+rule.keywords.join('、');condition.value=rule.condition;}};
-      mode.onchange=()=>{rule.match=mode.value;keywordBox.hidden=mode.value!=='keywords';autoCondition();update();};
-      keywords.oninput=()=>{const oldGenerated='消息包含以下任一关键词：'+(rule.keywords||[]).join('、');const generated=rule.condition===oldGenerated;rule.keywords=keywords.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(generated)rule.condition='';autoCondition();update();};
+      mode.onchange=()=>{rule.match=mode.value;keywordBox.hidden=mode.value!=='keywords';autoCondition();update(true);};
+      keywords.oninput=()=>{const oldGenerated='消息包含以下任一关键词：'+(rule.keywords||[]).join('、');const generated=rule.condition===oldGenerated;rule.keywords=keywords.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(generated)rule.condition='';autoCondition();update(true);};
       return h('section', { class: 'subcard', dataset: { rule: rule.id } },
-        h('div', { class: 'toolbar' }, h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: rule.enabled, onchange: e => { rule.enabled = e.target.checked; update(); } }), '启用'),
+        h('div', { class: 'toolbar' }, h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: rule.enabled, onchange: e => { rule.enabled = e.target.checked; update(true); } }), '启用'),
           h('span', { class: 'muted small grow' }, '规则 ' + (index + 1)),
           h('button', { class: 'btn small', type: 'button', disabled: index === 0, onclick: () => moveRule(index, -1) }, '上移'),
           h('button', { class: 'btn small', type: 'button', disabled: index === persona.triggers.length - 1, onclick: () => moveRule(index, 1) }, '下移'),
-          h('button', { class: 'btn small danger', type: 'button', onclick: () => { persona.triggers.splice(index, 1); renumber(); renderRules(); update(); } }, '删除规则')),
+          h('button', { class: 'btn small danger', type: 'button', onclick: () => { persona.triggers.splice(index, 1); renumber(); renderRules(); update(true); } }, '删除规则')),
         edit('title', 0, '名称'),field('触发方式',mode),keywordBox,field('自然语言触发条件',condition,'关键词规则未填写时，将按关键词自动生成条件说明。'), edit('content', 4, '命中后加入的提示词'));
     }) : empty('尚未添加触发规则。回复直接使用静态分区，不产生语义判定调用。'));
   }
   function renumber() { persona.triggers.forEach((x, i) => { x.order = i; }); }
-  function moveRule(index, delta) { const other = index + delta; [persona.triggers[index], persona.triggers[other]] = [persona.triggers[other], persona.triggers[index]]; renumber(); renderRules(); update(); }
+  function moveRule(index, delta) { const other = index + delta; [persona.triggers[index], persona.triggers[other]] = [persona.triggers[other], persona.triggers[index]]; renumber(); renderRules(); update(true); }
   async function loadPersona() {
     try {
       const data = await api('/api/persona'); if (!alive) return;
       persona = structuredClone(data.persona); revision = data.revision; saved = JSON.stringify(persona);
       fixed.textContent = data.fixedRules;
-      set(content, h('section', { class: 'card stack' }, h('h2', { class: 'card-h' }, '始终生效的静态分区'), sections),
+      const presetRoot=h('div');
+      set(content, presetRoot, h('section', { class: 'card stack' }, h('h2', { class: 'card-h' }, '始终生效的静态分区'), sections),
         h('details', { class: 'card stack' }, h('summary', {}, '语义与关键词触发规则'), h('div', { class:'toolbar' }, add), rules),
         h('details', { class: 'card' }, h('summary', {}, '固定系统约束 · 只读'), fixed), h('div', { class: 'toolbar' }, save, tally));
-      renderSections(); renderRules(); update();
+      renderSections(); renderRules();
+      presets=mountPresets(presetRoot,{getPersona:()=>persona,replacePersona:value=>{persona=value;renderSections();renderRules();invalidateReplay();update();},onStateChange:update,reminderRoot:persistentPresetNotice});update();
       mountHints();
-      const replayBox=h('details',{class:'card'},h('summary',{},'回放对比与质量统计')); const replayBody=h('div',{class:'settings-body stack'}); replayBox.append(replayBody);content.append(replayBox);let replayOff=null;replayBox.ontoggle=()=>{if(replayBox.open&&!replayOff)replayOff=mountReplay(replayBody,{getCandidate:()=>({persona:structuredClone(persona),personaRevision:revision,promptHints:promptHints?structuredClone(promptHints):undefined})});}; replayCleanup=()=>replayOff?.();
+      const replayBox=h('details',{class:'card'},h('summary',{},'回放对比与质量统计')); const replayBody=h('div',{class:'settings-body stack'}); replayBox.append(replayBody);content.append(replayBox);let replayOff=null;
+      replayBox.ontoggle=()=>{if(replayBox.open&&!replayOff)replayOff=mountReplay(replayBody,{getCandidate:()=>({persona:structuredClone(persona),personaRevision:revision,promptHints:promptHints?structuredClone(promptHints):undefined}),captureCandidate:()=>presets?.captureSave(),onRunStarted:(id,token)=>{if(alive)replaySources.set(id,token);},onAdopt:(data,adoptedRun)=>{
+       if(!alive||data.revision<revision)return;const adopted=adoptedRun.persona,normalized=data.persona||adopted;if(!normalized)return;
+       const captured=replaySources.get(adoptedRun.id),same=JSON.stringify(persona)===captured?.personaJSON||signature(persona)===signature(adopted),token=captured||(same?{...presets?.captureSave(),origin:null}:null);
+       revision=data.revision;saved=JSON.stringify(normalized);if(same){persona=structuredClone(normalized);renderSections();renderRules();}presets?.saved(token,normalized);update();
+      }});}; replayCleanup=()=>replayOff?.();invalidateReplay=()=>replayBody.dispatchEvent(new Event('input'));
     } catch (e) { if (alive) errorBox(content, e, loadPersona); }
   }
   async function savePersona() {
     if (!persona || saving) return; saving = true; update();
     for(const rule of persona.triggers)if(rule.match==='keywords'&&!rule.condition.trim()&&(rule.keywords||[]).length)rule.condition='消息包含以下任一关键词：'+rule.keywords.join('、');
     const snapshot = structuredClone(persona);
-    try { const data = await api('/api/persona', { method: 'PUT', body: { persona: snapshot, revision } }); if (!alive) return; revision = data.revision; const normalized=data.persona||snapshot;saved = JSON.stringify(normalized);if(JSON.stringify(persona)===JSON.stringify(snapshot)){persona=structuredClone(normalized);renderSections();renderRules();} notice('人设已保存，下一轮处理生效', 'ok'); }
+    const presetSave=presets?.captureSave();
+    try { const data = await api('/api/persona', { method: 'PUT', body: { persona: snapshot, revision } }); if (!alive||data.revision<revision) return; revision = data.revision; const normalized=data.persona||snapshot;saved = JSON.stringify(normalized);if(JSON.stringify(persona)===JSON.stringify(snapshot)){persona=structuredClone(normalized);renderSections();renderRules();}presets?.saved(presetSave,normalized); notice('人设已保存，下一轮处理生效', 'ok'); }
     catch (e) { notice(e.message, 'error'); }
     finally { saving = false; update(); }
   }
@@ -119,6 +133,7 @@ export function mount(root, ctx) {
       set(chat, messages.map(x => h('div', { class: 'chat-message', dataset: { role: x.role } }, h('b', {}, x.role === 'user' ? '模拟用户' : '角色'), h('div', { class: 'pre-wrap' }, x.text))));
       set(result, data.error ? h('div', { class: 'callout bad' }, data.error) : null, data.warning ? h('div', { class: 'callout warn' }, data.warning) : null,
         data.draft?.action === 'skip' ? h('div', { class: 'callout warn' }, '跳过：' + data.draft.reason) : null,
+        formatNotice(data.format, { check: true }),
         h('div', { class: 'status-line' }, '本轮 ' + (data.fees?.requests ?? data.calls?.length ?? 0) + ' 次调用 · ' + (data.latencyMs ?? 0) + ' ms · 估算 ' + money(data.fees?.estimatedUsd) + ' · 未定价 ' + (data.fees?.unpriced ?? 0) + ' · 未知 ' + (data.fees?.unknown ?? 0)),
         data.postingPolicy ? h('div',{class:'small muted'},'公开长度策略：'+(data.postingPolicy.simulation?'普通账号模拟':data.postingPolicy.accountId||'当前账号')+' · '+(data.postingPolicy.rule?.limit??280)+' '+({'weighted-characters':'加权字符','normalized-code-points':'规范化码点','javascript-characters':'JS字符'}[data.postingPolicy.rule?.unit]||'加权字符')) : null,
         data.meta ? h('div',{class:'small muted'},'提示词 '+(data.meta.promptVersion||'未知')+' · '+(data.meta.sampleSource||'模拟采样')+' · 样本 '+(data.meta.sampleCount??0)) : null,
@@ -189,10 +204,10 @@ export function mount(root, ctx) {
   async function mountHints() {
     const box=h('details',{class:'card'},h('summary',{},'动态提醒')); const body=h('div',{class:'settings-body stack'});box.append(body);content.append(box);
     try {const d=await api('/api/persona/prompt-hints');if(!alive)return;promptHints=structuredClone(d.promptHints);hintRevision=d.revision;hintSaved=JSON.stringify(promptHints);
-      const fields=[['lateEnabled','迟到提醒'],['languageEnabled','跟随对方语言'],['openingEnabled','避免开头重复'],['expressionEnabled','表情节制'],['replyCheckEnabled','生成前自检']];
-      set(body,h('div',{class:'grid2'},fields.map(([key,label])=>h('label',{class:'check'},h('input',{type:'checkbox',checked:!!promptHints[key],onchange:e=>{promptHints[key]=e.target.checked;}}),label))),h('div',{class:'grid2'},[['lateMinutes','迟到阈值（分钟）',30,360],['openingCount','开头采样数量',1,12],['kaomojiPer10','每10条颜文字次数',0,10],['emojiPer10','每10条 emoji 次数',0,10],['tildePer10','每10条波浪号次数',0,10]].map(([key,label,min,max])=>field(label,h('input',{class:'input',type:'number',min,max,value:promptHints[key],oninput:e=>{promptHints[key]=Number(e.target.value);}})))),h('button',{class:'btn primary',onclick:async e=>{const b=e.currentTarget;b.disabled=true;try{const value=structuredClone(promptHints),r=await api('/api/persona/prompt-hints',{method:'PUT',body:{promptHints:value,revision:hintRevision}});hintRevision=r.revision;hintSaved=JSON.stringify(value);notice('动态提醒已保存，下一轮生效','ok');}catch(error){notice(error.message,'error');}finally{b.disabled=false;}}},'保存提醒'));
+      const fields=[['lateEnabled','迟到提醒'],['languageEnabled','跟随对方语言'],['expressionEnabled','表情节制'],['replyCheckEnabled','生成前自检']];
+      set(body,h('div',{class:'grid2'},fields.map(([key,label])=>h('label',{class:'check'},h('input',{type:'checkbox',checked:!!promptHints[key],onchange:e=>{promptHints[key]=e.target.checked;}}),label))),h('div',{class:'grid2'},[['lateMinutes','迟到阈值（分钟）',30,360],['kaomojiPer10','每10条颜文字次数',0,10],['emojiPer10','每10条 emoji 次数',0,10],['tildePer10','每10条波浪号次数',0,10]].map(([key,label,min,max])=>field(label,h('input',{class:'input',type:'number',min,max,value:promptHints[key],oninput:e=>{promptHints[key]=Number(e.target.value);}})))),h('button',{class:'btn primary',onclick:async e=>{const b=e.currentTarget;b.disabled=true;try{const value=structuredClone(promptHints),r=await api('/api/persona/prompt-hints',{method:'PUT',body:{promptHints:value,revision:hintRevision}});hintRevision=r.revision;hintSaved=JSON.stringify(value);notice('动态提醒已保存，下一轮生效','ok');}catch(error){notice(error.message,'error');}finally{b.disabled=false;}}},'保存提醒'));
     }catch(e){errorBox(body,e);}
   }
   loadPersona(); loadDaily();
-  return () => { alive = false; cleanup(); replayCleanup(); window.removeEventListener('panel-route',routeListener); };
+  return () => { alive = false; cleanup(); replayCleanup();presets?.dispose();replaySources.clear(); window.removeEventListener('panel-route',routeListener); };
 }

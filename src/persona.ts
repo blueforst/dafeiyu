@@ -10,6 +10,8 @@ import { assembleReplyPrompt,FIXED_SYSTEM_RULES,type PromptSegment } from './rep
 import { validatePromptHints,type PromptHintSettings,type ReplySample,type ReplyHint } from './reply-hints.js';
 import { postingLimitPrompt,validatePostingText,type PostingCapability } from './posting-policy.js';
 import { validatePublicExtras } from './public-post.js';
+import { resolvePersona } from './persona-presets.js';
+import { formatIssues,type ReplyFormat } from './reply-style.js';
 export { FIXED_SYSTEM_RULES } from './reply-prompt.js';
 export type { PromptSegment } from './reply-prompt.js';
 
@@ -78,6 +80,18 @@ function fees(calls:PersonaCall[]):PersonaFees {
 }
 function call(r:any,purpose:string):PersonaCall { return {callId:r.callId,purpose,input:r.input,output:r.output,cache:r.cache,cost:r.cost??null,pricingStatus:r.pricingStatus??'unknown'}; }
 
+function simulatedMemory(raw:unknown):unknown {
+ if(raw===undefined)return {simulated:true,items:[]};
+ if(typeof raw==='string')return {simulated:true,items:string(raw,'模拟记忆',8000)};
+ if(!object(raw))throw new PersonaValidationError('模拟记忆需要文字或对象');
+ let serialized:string|undefined;try{serialized=JSON.stringify(raw);}catch{throw new PersonaValidationError('模拟记忆对象无效');}
+ if(typeof serialized!=='string')throw new PersonaValidationError('模拟记忆对象无效');
+ if(serialized.length>8000)throw new PersonaValidationError('模拟记忆不能超过 8,000 字符');
+ const value=JSON.parse(serialized);
+ if(value.recent!==undefined&&(!Array.isArray(value.recent)||value.recent.length>30||value.recent.some((item:any)=>!object(item)||typeof item.message!=='string'||(item.reply!==undefined&&typeof item.reply!=='string')||(item.channel!==undefined&&!['public','private'].includes(item.channel))||(item.timestamp!==undefined&&!Number.isFinite(item.timestamp)))))throw new PersonaValidationError('模拟近期往来需要至多三十条有效消息');
+ return {...value,simulated:true};
+}
+
 async function routingConfig(c:Config):Promise<Config> {
  const routing=structuredClone(c);routing.model.maxTokens=512;
  let levels=['off'];
@@ -87,7 +101,7 @@ async function routingConfig(c:Config):Promise<Config> {
  return routing;
 }
 
-export type AssembleInput = { config?:Config; persona?:Persona; message:string; channel:Channel; accountId:string; conversationId?:string; conversation?:unknown; memory?:unknown; dailyState?:unknown; experiences?:unknown; mediaUnavailable?:boolean; quote?:Event['quote']; card?:Event['card']; signal?:AbortSignal; sessionId?:string; interactionId?:string; contextLimit?:number; now?:number; timestamp?:number; timestampReliable?:boolean; recentReplies?:ReplySample[]; promptHints?:Partial<PromptHintSettings>; sampleSource?:string; lengthRule?:string; routingPurpose?:string; routingSource?:string; routingSide?:'baseline'|'candidate'|'shared'; generator?:Generator };
+export type AssembleInput = { config?:Config; persona?:Persona; message:string; channel:Channel; accountId:string; conversationId?:string; conversation?:unknown; memory?:unknown; dailyState?:unknown; experiences?:unknown; mediaUnavailable?:boolean; quote?:Event['quote']; card?:Event['card']; signal?:AbortSignal; sessionId?:string; interactionId?:string; contextLimit?:number; now?:number; timestamp?:number; timestampReliable?:boolean; recentReplies?:ReplySample[]; promptHints?:Partial<PromptHintSettings>; sampleSource?:string; postVariety?:boolean; lengthRule?:string; routingPurpose?:string; routingSource?:string; routingSide?:'baseline'|'candidate'|'shared'; generator?:Generator };
 export type AssembledPrompt = { system:string; user:string; segments:PromptSegment[]; hits:TriggerHit[]; hints:ReplyHint[]; meta:{hintKinds:string[];promptVersion:string;sampleSource:string;sampleCount:number;triggerHits:TriggerHit[]}; warning?:string; interactionId:string; calls:PersonaCall[] };
 
 export class PersonaService {
@@ -95,7 +109,7 @@ export class PersonaService {
  constructor(public store:Store,public generator:Generator,public config:()=>Config=loadConfig){}
  get(){
   const settings=readPanelSettings();
-  const persona=settings.persona?validatePersona(settings.persona):legacyPersona(this.config().persona);
+  const persona=resolvePersona(settings.persona,settings.persona===undefined?this.config().persona:'');
   return {persona,revision:settings.revisions?.persona??0,fixedRules:FIXED_SYSTEM_RULES};
  }
  save(raw:unknown,expectedRevision?:number){
@@ -142,24 +156,25 @@ export class PersonaService {
   if(messages.at(-1)!.role!=='user')throw new PersonaValidationError('试聊最后一条必须是用户消息');
   if(JSON.stringify(messages).length>40000)throw new PersonaValidationError('试聊上下文不能超过 40,000 字符');
   const c=structuredClone(this.config()),persona=validatePersona(raw.persona??this.get().persona),started=Date.now();
-  const memory=raw.memory===undefined?{simulated:true,items:[]}: {simulated:true,items:string(raw.memory,'模拟记忆',8000)};
+  const memory=simulatedMemory(raw.memory);
   const dailyState=raw.dailyState===undefined?'模拟场景：暂无当日日程':string(raw.dailyState,'模拟日程',8000);
   const policy=this.postingPolicy?.()??{accountId:this.store.get('activeAccount'),reply:undefined},accountId=policy.accountId||'preview';
   const now=Date.now(),previewReplies:ReplySample[]=messages.slice(0,-1).filter(m=>m.role==='assistant').reverse().map(m=>({text:m.text,channel:raw.channel,conversationId:'preview',accountId}));
   const promptHints=raw.promptHints===undefined?validatePromptHints(c.promptHints??{}):validatePromptHints(raw.promptHints);
   const current=messages.at(-1)!;
   const assembled=await this.assemble({config:c,persona,message:current.text,channel:raw.channel,accountId,conversationId:'preview',conversation:messages.slice(0,-1),memory,dailyState,interactionId:randomUUID(),contextLimit:40000,now,recentReplies:previewReplies,promptHints,sampleSource:'preview-dialogue',lengthRule:postingLimitPrompt(raw.channel==='public'?'reply':'dm',policy.reply,policy.accountId),quote:current.quote,card:current.card});
-  let draft:ReturnType<typeof parseDraft>|null=null,error:string|undefined;
+  let draft:ReturnType<typeof parseDraft>|null=null,error:string|undefined,format:ReplyFormat|null=null;
   try{
    const result=await this.generator.complete(c,assembled.system,assembled.user,undefined,undefined,{purpose:'persona-preview',source:'panel-preview',accountId:'preview',channel:raw.channel,interactionId:assembled.interactionId});
    assembled.calls.push(call(result,'persona-preview'));
    draft=parseDraft(result.text,{channel:raw.channel});
    if(draft.action==='reply'){const validation=validatePostingText(draft.text,raw.channel==='public'?'reply':'dm',{accountId:policy.accountId,capability:policy.reply});if(!validation.allowed)throw new Error(validation.reason);}
+   format={issues:formatIssues(draft.text)};draft.format=format;
   }catch(err){draft=null;error=redact(err instanceof Error?err.message:err);}
   // 失败或中止的调用也已持久计量，不能只汇总成功返回给业务层的结果。
   const ledger=new LlmStore(this.store),persisted=ledger.calls({interactionId:assembled.interactionId,limit:100}).items;
   const persistedCalls:PersonaCall[]=persisted.map(r=>({callId:r.id,purpose:r.purpose,input:r.usage?.input??undefined,output:r.usage?.output??undefined,cache:r.usage?.cacheRead??undefined,cost:r.cost,pricingStatus:r.pricingStatus}));
   const allCalls=persistedCalls.length?persistedCalls:assembled.calls;
-  return {draft,error,segments:assembled.segments,hits:assembled.hits,hints:assembled.hints,meta:assembled.meta,postingPolicy:{accountId:policy.accountId||null,simulation:!policy.accountId,rule:postingLimitPrompt(raw.channel==='public'?'reply':'dm',policy.reply,policy.accountId)},warning:assembled.warning,interactionId:assembled.interactionId,calls:allCalls,fees:fees(allCalls),latencyMs:Date.now()-started};
+  return {draft,error,format,segments:assembled.segments,hits:assembled.hits,hints:assembled.hints,meta:assembled.meta,postingPolicy:{accountId:policy.accountId||null,simulation:!policy.accountId,rule:postingLimitPrompt(raw.channel==='public'?'reply':'dm',policy.reply,policy.accountId)},warning:assembled.warning,interactionId:assembled.interactionId,calls:allCalls,fees:fees(allCalls),latencyMs:Date.now()-started};
  }
 }

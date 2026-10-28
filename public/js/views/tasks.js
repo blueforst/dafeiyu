@@ -2,10 +2,11 @@
 import { h, set, fmtDateTime } from '../dom.js';
 import { api } from '../api.js';
 import { notice, refreshStatus, onEvent } from '../state.js';
+import { formatNotice } from '../reply-format.js';
 
 const STATUS = { running: '执行中', pending: '等待执行', queued: '排队中', completed: '完成', success: '完成', succeeded: '完成', failed: '失败', unknown: '提交结果未知，只回查', missed: '已错过窗口', skipped: '已跳过', cancelled: '已取消', aborted: '已中止', interrupted: '重启中断' };
 const LABEL = { main: '主循环', 'daily-state': '虚构日程', 'memory-summary': '记忆补整理', 'morning-post': '早安帖', 'evening-post': '晚安帖', backup: '数据库备份', health: '宿主健康检查' };
-const HINT = { main: '一轮完成后再等待设定秒数。启停与右上角全局控制一致。', 'daily-state': '每天生成一份虚构日程；当天已有结果时复用，暂停期间不自动调用。', 'memory-summary': '仅整理存在新增真实入站记录的用户；暂停期间不自动调用。', 'morning-post': '生成并发布公开早安帖，只在计划后五分钟内开始，共享公开额度。', 'evening-post': '生成并发布公开晚安帖，只在计划后五分钟内开始，共享公开额度。', backup: '只备份业务数据库，保留最近七份；恢复仍重放独立遗忘记录。', health: '宿主独立执行，每五分钟检查；应用故障或业务暂停时继续运行。' };
+const HINT = { main: '一轮完成后再等待设定秒数。启停与顶部的启动／暂停一致。', 'daily-state': '每天生成一份虚构日程；当天已有结果时复用，暂停期间不自动调用。', 'memory-summary': '仅整理存在新增真实入站记录的用户；暂停期间不自动调用。', 'morning-post': '生成并发布公开早安帖，只在计划后五分钟内开始，共享公开额度。', 'evening-post': '生成并发布公开晚安帖，只在计划后五分钟内开始，共享公开额度。', backup: '只备份业务数据库，保留最近七份；恢复仍重放独立遗忘记录。', health: '宿主独立执行，每五分钟检查；应用故障或业务暂停时继续运行。' };
 function signature(v) { return JSON.stringify({ enabled: !!v.enabled, ...(v.time !== undefined ? { time: v.time } : {}), ...(v.intervalSeconds !== undefined ? { intervalSeconds: Number(v.intervalSeconds) } : {}) }); }
 function duration(v) { return v == null ? '未知' : Number(v) < 1000 ? v + ' ms' : (Number(v) / 1000).toFixed(1) + ' 秒'; }
 function money(v) { return v == null ? '未知' : '$' + Number(v).toFixed(8); }
@@ -106,6 +107,7 @@ export function mount(root, ctx) {
     return h('article', { style: 'border-top:1px solid var(--border);padding:10px 0;overflow-wrap:anywhere' },
       h('div', { class: 'row' }, h('strong', {}, LABEL[r.taskId] || r.taskId), h('span', { class: r.status === 'failed' ? 'bad' : r.status === 'unknown' ? 'warn' : 'muted' }, STATUS[r.status] || r.status)),
       h('p', { class: 'muted small' }, fmtDateTime(r.startedAt || r.scheduledAt) + ' · ' + (r.source === 'manual' ? '手动' : r.source === 'host' ? '宿主' : '计划') + ' · ' + duration(r.durationMs) + (r.callIds?.length ? ' · 模型估算 ' + money(cost) : '')),
+      formatNotice(r.result?.format),
       r.error ? h('p', { class: 'bad small' }, r.error) : null,
       r.cost && (r.cost.unpriced || r.cost.unknown) ? h('p', { class: 'warn small' }, '模型调用中未定价 ' + (r.cost.unpriced || 0) + ' 次、用量未知 ' + (r.cost.unknown || 0) + ' 次；这些费用未包含在可估价部分中。') : null,
       h('details', {}, h('summary', { class: 'small' }, '关联与结果'), h('p', { class: 'small pre-wrap' }, [

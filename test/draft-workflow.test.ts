@@ -33,6 +33,24 @@ function fixture(mode:'draft'|'auto'='draft'){
 }
 const notSubmitted:Receipt={status:'not_submitted',reason:'编辑器限制已变化',validation:validatePostingText('中'.repeat(141),'reply')};
 
+test('未遗忘用户的遗忘措辞走普通分级和生成，不改变遗忘状态',async()=>{
+ for(const text of ['忘了我吧','忘记我吧','忘我吧','忘了我吧。！','@worker 忘了我吧']){
+  const f=fixture();try{await f.workflow.resume();f.workflow.services.triage=new ReplyTriage(f.store);const event=f.event('901',{text}),epoch=f.store.epoch(event.userId,'worker');f.setEvents([event]);
+   await f.workflow.tick();assert.equal(f.store.forgotten(event.userId,'worker'),false,text);assert.equal(f.store.epoch(event.userId,'worker'),epoch,text);const row=f.store.getMessage(event.id,'worker');assert.ok(row,text);assert.equal(row.status,'draft',text);assert.equal(row.tier,'priority');assert.equal(JSON.parse(row.draft).text,'新的回复');assert.equal(f.counts().generations,1);assert.equal(f.counts().sends,0);
+  }finally{f.close();}
+ }
+});
+test('未遗忘用户的恢复措辞也是普通消息，不写恢复状态或跳过回复',async()=>{
+ const f=fixture();try{await f.workflow.resume();const event=f.event('902',{text:'重新记住我！'}),epoch=f.store.epoch(event.userId,'worker');f.setEvents([event]);await f.workflow.tick();assert.equal(f.store.forgotten(event.userId,'worker'),false);assert.equal(f.store.epoch(event.userId,'worker'),epoch);const row=f.store.getMessage(event.id,'worker');assert.ok(row);assert.equal(row.status,'draft');assert.equal(f.counts().generations,1);assert.equal(f.counts().sends,0);
+ }finally{f.close();}
+});
+test('管理员已遗忘用户不能通过消息恢复，仍不入库或生成',async()=>{
+ for(const text of ['重新记住我','重新记住我！','忘了我吧']){
+  const f=fixture();try{await f.workflow.resume();const event=f.event('903',{text});f.store.forget(event.userId,'worker');const epoch=f.store.epoch(event.userId,'worker');f.setEvents([event]);await f.workflow.tick();assert.equal(f.store.forgotten(event.userId,'worker'),true,text);assert.equal(f.store.epoch(event.userId,'worker'),epoch,text);assert.equal(f.store.getMessage(event.id,'worker'),undefined);assert.deepEqual(f.counts(),{sends:0,generations:0,lookups:0});assert.equal(f.outbox.source('worker','reply',event.id),undefined);
+  }finally{f.close();}
+ }
+});
+
 test('草稿模式仅发送人工批准项，未批准草稿保持原样且不额外生成',async()=>{
  const f=fixture();try{await f.workflow.resume();const approved=f.add(f.event('101')),untouched=f.add(f.event('102',{userId:'x:bob',handle:'bob'}));f.approve(approved,'人工确认的正文');
   await f.workflow.tick();assert.equal(f.store.getMessage(approved.id).status,'confirmed');assert.equal(f.store.getMessage(untouched.id).status,'draft');assert.equal(f.counts().sends,1);assert.equal(f.counts().generations,0);assert.deepEqual(f.sentIds,[approved.id]);assert.equal(f.outbox.source('worker','reply',approved.id)?.text,'人工确认的正文');
@@ -111,4 +129,16 @@ test('批准项认领sending不提前占自己的最后小时或每日名额',as
 
 test('完整RPC资源保护在begin之前停止，确定未提交不会卡成unknown',async()=>{
  const f=fixture('auto');try{await f.workflow.resume();f.setEvents([f.event('oversized-rpc',{text:'中'.repeat(100000)})]);await f.workflow.tick();const row=f.store.getMessage('x:oversized-rpc','worker');assert.equal(row.status,'draft');assert.equal(JSON.parse(row.draft).validation.code,'rpc-resource-limit');assert.equal(f.counts().sends,0);const outbox=f.outbox.source('worker','reply',row.id);assert.equal(outbox?.status,'cancelled');assert.equal(outbox?.submitted_at,null);assert.equal(JSON.parse(outbox!.validation_json!).code,'rpc-resource-limit');assert.equal(f.outbox.count('public','worker'),0);assert.equal(f.store.get('cooldown:public'),'');}finally{f.close();}
+});
+
+test('自动回复和私信含列表仍只生成及发送一次，保留格式标记而不写错误',async()=>{
+ for(const channel of ['public','private'] as const){const f=fixture('auto');try{await f.workflow.resume();const event=f.event('format-auto-'+channel,{channel});f.setEvents([event]);f.setOutput(JSON.stringify({action:'reply',text:'1. 先喝水\n2. 再散步',reason:''}));await f.workflow.tick();const row=f.store.getMessage(event.id);assert.equal(row.status,'confirmed');assert.deepEqual(JSON.parse(row.draft).format,{issues:['list-or-steps']});assert.ok(!row.error);assert.deepEqual(f.counts(),{sends:1,generations:1,lookups:0});assert.deepEqual((f.feed.list({filter:channel==='public'?'reply':'dm'}).items[0] as any).draft.format,{issues:['list-or-steps']});}finally{f.close();}}
+});
+
+test('带格式草稿保持审批流程，批准原稿或人工去掉格式都重新记录标记',async()=>{
+ for(const edit of [false,true]){const f=fixture();try{await f.workflow.resume();const event=f.event('format-draft-'+edit);f.setEvents([event]);f.setOutput(JSON.stringify({action:'reply',text:'**今天很适合散步**',reason:''}));await f.workflow.tick();let row=f.store.getMessage(event.id);assert.equal(row.status,'draft');assert.deepEqual(JSON.parse(row.draft).format,{issues:['markdown']});assert.equal(f.counts().sends,0);assert.ok(!row.error);f.approve(row,edit?'今天很适合散步':JSON.parse(row.draft).text);await f.workflow.tick();row=f.store.getMessage(event.id);assert.equal(row.status,'confirmed');assert.deepEqual(JSON.parse(row.draft).format,{issues:edit?[]:['markdown']});assert.deepEqual(f.counts(),{sends:1,generations:1,lookups:0});}finally{f.close();}}
+});
+
+test('人工重写生成的新正文重新计算格式，auto下仍待管理员审批',async()=>{
+ const f=fixture('auto');try{await f.workflow.resume();const row=f.add(f.event('format-regenerate'),'draft',{action:'reply',text:'1. 先喝水\n2. 再散步',reason:'',format:{issues:['list-or-steps']}});f.feed.mutate(row.id,'regenerate',{revision:row.updated_at});f.setOutput(JSON.stringify({action:'reply',text:'那就一起走走吧',reason:''}));await f.workflow.tick();const current=f.store.getMessage(row.id);assert.equal(current.status,'draft');assert.deepEqual(JSON.parse(current.draft).format,{issues:[]});assert.equal(JSON.parse(current.draft).review,true);assert.equal(f.counts().sends,0);assert.equal(f.counts().generations,1);}finally{f.close();}
 });

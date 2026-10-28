@@ -5,14 +5,15 @@ import { mergePanelSettings,readPanelSettings } from './settings.js';
 import { HostMaintenance } from './host-maintenance.js';
 import { LlmStore } from './llm-store.js';
 import { redact } from './config.js';
+import type { ReplyFormat } from './reply-style.js';
 
 export const TASK_IDS=['main','daily-state','memory-summary','morning-post','evening-post','backup','health','daily-report','account-check'] as const;
 export type TaskId=typeof TASK_IDS[number];
 export type TaskPlan={enabled:boolean;time?:string;intervalSeconds?:number};
 export type TaskStatus='running'|'completed'|'failed'|'interrupted'|'unknown'|'missed'|'skipped'|'cancelled';
 export type MainRunStatus='completed'|'failed'|'cancelled'|'interrupted';
-export type TaskRun={id:string;taskId:TaskId;accountId:string;scheduledAt:number;source:'automatic'|'manual';status:TaskStatus;startedAt:number;finishedAt:number|null;durationMs:number|null;error:string|null;callIds:string[];outboxId:string|null;receipt:unknown;detail:string;attempts:number;hostRequestId:string|null;cost?:ReturnType<LlmStore['summaryForCallIds']>};
-export type TaskOutcome={status?:'completed'|'unknown'|'skipped'|'cancelled';callIds?:string[];outboxId?:string;receipt?:unknown;detail?:string};
+export type TaskRun={id:string;taskId:TaskId;accountId:string;scheduledAt:number;source:'automatic'|'manual';status:TaskStatus;startedAt:number;finishedAt:number|null;durationMs:number|null;error:string|null;callIds:string[];outboxId:string|null;receipt:unknown;detail:string;attempts:number;hostRequestId:string|null;result?:{format?:ReplyFormat};cost?:ReturnType<LlmStore['summaryForCallIds']>};
+export type TaskOutcome={status?:'completed'|'unknown'|'skipped'|'cancelled';callIds?:string[];outboxId?:string;receipt?:unknown;detail?:string;format?:ReplyFormat};
 export type TaskContext={runId:string;taskId:TaskId;accountId:string;scheduledAt:number;source:'automatic'|'manual';signal:AbortSignal;ensureEnabled:()=>boolean};
 export type SchedulerDeps={account:()=>string;control:()=>string;mode?:()=>string;nextTick?:()=>number;businessBusy?:()=>boolean;execute:(id:TaskId,ctx:TaskContext)=>Promise<TaskOutcome|void>;lookup?:(run:TaskRun,source?:'automatic'|'manual')=>Promise<TaskOutcome|void>;observe?:(id:'daily-report'|'account-check',ctx:TaskContext)=>Promise<TaskOutcome|void>;clock?:()=>number;host?:HostMaintenance};
 export const BACKUP_SCOPE='仅业务 SQLite 数据库，保留最近七份；不包含面板配置、密钥、源码或浏览器 profile。恢复时必须保留并重放独立遗忘账本。';
@@ -73,7 +74,8 @@ export class TaskScheduler {
  private decorate(run:TaskRun){
   const linked=this.store.db.prepare('SELECT id FROM llm_calls WHERE interaction_id=? ORDER BY started_at,id LIMIT 1000').all(run.id) as {id:string}[];
   const callIds=[...new Set([...run.callIds,...linked.map(row=>row.id)])];
-  return {...run,callIds,cost:this.billing.summaryForCallIds(callIds)};
+  let result:TaskRun['result'];try{result=JSON.parse(this.store.get('task-result:'+run.id)||'null')??undefined;}catch{}
+  return {...run,...(result?{result}:{}),callIds,cost:this.billing.summaryForCallIds(callIds)};
  }
  list(){
   this.refreshHostRuns();const plans=this.plans(),now=this.now(),effectiveHostPlans=this.host.plans()??{};
@@ -214,6 +216,7 @@ export class TaskScheduler {
  }
  private finish(runId:string,outcome:TaskOutcome){
   const old=this.getRun(runId);if(!old)return;
+  if(outcome.format)this.store.set('task-result:'+runId,JSON.stringify({...old.result,format:outcome.format}));
   const callIds=[...new Set([...old.callIds,...(outcome.callIds??[])])];
   this.store.db.prepare('UPDATE task_runs SET status=?,finished_at=?,call_ids=?,outbox_id=COALESCE(?,outbox_id),receipt=COALESCE(?,receipt),detail=?,error=NULL WHERE id=?').run(outcome.status??'completed',this.now(),JSON.stringify(callIds),outcome.outboxId??null,outcome.receipt?JSON.stringify(outcome.receipt):null,safeText(outcome.detail??''),runId);
  }

@@ -3,6 +3,7 @@ import { loadConfig, redact } from './config.js';
 import type { Generator } from './model.js';
 import { applyMigration } from './migrations.js';
 import { readPanelSettings } from './settings.js';
+import { resolvePersona } from './persona-presets.js';
 import type { Store } from './store.js';
 import type { Config } from './types.js';
 
@@ -152,8 +153,9 @@ export class DailyStateService {
    if(!opts.manual&&!this.canAuto())throw new DailyStateError('业务已暂停，日程未生成',409);
    const original=this.config(),c:Config={...original,model:{...original.model,maxTokens:Math.min(original.model.maxTokens,3072)}};
    const settings=readPanelSettings() as any;
-   const sections=settings.persona?.sections;
-   const persona=Array.isArray(sections)?sections.map((s:any)=>typeof s.content==='string'?s.content:'').join('\n\n'):c.persona;
+   const sections=resolvePersona(settings.persona,c.persona).sections.map(section=>section.content);
+   // 未保存的旧自定义人格只有角色定义非空，保留此前直接传入原文的语义；已保存分区仍按原格式拼接。
+   const persona=(settings.persona===undefined?sections.filter(content=>content!==''):sections).join('\n\n');
    const configRevision=Number(settings.revisions?.persona??0);
    const historyStart=shanghaiDate(Date.parse(date+'T00:00:00+08:00')-7*DAY);
    const history=(this.store.db.prepare(`SELECT d.* FROM daily_revisions d WHERE account_id=? AND local_date>=? AND local_date<?

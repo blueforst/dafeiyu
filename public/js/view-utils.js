@@ -23,6 +23,7 @@ export function editorGuard(ctx, root, dirty) {
   const beforeUnload = e => { if (dirty()) { e.preventDefault(); e.returnValue = ''; } };
   ctx.setLeaveGuard(() => {
     if (!dirty()) return true;
+    banner.classList.toggle('confirm-over-modal', !!root.querySelector('.modal-overlay'));
     banner.hidden = false;
     banner.scrollIntoView({ block: 'nearest' });
     return new Promise(done => { resolve?.(false); resolve = done; });

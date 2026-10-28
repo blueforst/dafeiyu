@@ -40,6 +40,19 @@ async function snapshot(){
 }
 async function step(name,fn){try{await fn();results.checks.push(name);return true;}catch(error){results.errors.push(name+'：'+redact(error?.message||error));return false;}}
 async function statusIs(expected){const status=await readJson('/api/status');assert.equal(status.control,expected,'控制状态变化，停止本次控制操作');return status;}
+async function assertTopControl(control){
+ await page.waitForFunction(control=>document.getElementById('status-pill')?.textContent==='已暂停'&&document.getElementById('primary-action')?.textContent==='启动'&&document.getElementById('primary-action')?.disabled===(control==='manual')&&document.getElementById('takeover-link')?.hidden===(control!=='manual'),control,{timeout:30000});
+ assert.equal(await page.locator('#status-pill').innerText(),'已暂停','暂停或接管时顶部运行状态不符');
+ assert.equal(await page.locator('#primary-action').innerText(),'启动','顶部主按钮不是启动');
+ assert.equal(await page.locator('#primary-action').isDisabled(),control==='manual','顶部启动可用状态不符');
+ assert.equal(await page.locator('#takeover-link').isVisible(),control==='manual','顶部接管提示可见状态不符');
+ assert.equal(await page.locator('.top-actions #release').count(),0,'顶部不应提供释放接管按钮');
+ if(control==='manual'){
+  assert.equal(await page.locator('#takeover-link').getAttribute('href'),'#/settings/browser');
+  assert.match(await page.locator('#primary-action').getAttribute('title')||'',/浏览器接管分区释放接管/,'顶部启动缺少释放接管说明');
+  assert.ok(await page.locator('#primary-action').getAttribute('aria-describedby'),'顶部启动缺少无障碍说明');
+ }
+}
 async function screenshot(name,extraMasks=[]){
  // 私信条目及桌面整块遮蔽；不把可见的真实 Chat/profile 内容保存到证据文件。
  const privateCards=page.locator('.feed-item').filter({has:page.locator('b').filter({hasText:/^私信(?: ·|$)/})});
@@ -119,7 +132,7 @@ try{
     await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:1000});
     for(const [route,label,selector]of ROUTES){
      await page.goto(BASE+'/?acceptance-view='+route+'-'+scheme+'-'+width+'#/'+route);
-     await page.locator('.tabs a.active[data-route="'+route+'"]').waitFor({timeout:30000});await page.locator(selector).waitFor({timeout:30000});await waitData(route);
+     await page.locator('.tabs a.active[data-route="'+route+'"]').waitFor({timeout:30000});await page.locator(selector).waitFor({timeout:30000});await waitData(route);await assertTopControl(initial.control);
      assert.deepEqual(await page.locator('.tabs a').evaluateAll(nodes=>nodes.map(a=>({route:a.dataset.route,label:a.childNodes[0]?.textContent.trim()}))),ROUTES.map(([r,l])=>({route:r,label:l})),'导航不是精确五页');
      assert.ok(page.url().endsWith('#/'+route),'页面地址与导航不符');
      const scrollWidth=await page.evaluate(()=>document.documentElement.scrollWidth);assert.ok(scrollWidth<=width+1,route+' 横向溢出 '+scrollWidth+'/'+width);
@@ -144,13 +157,17 @@ try{
   if(browserPage&&initial.control==='paused'){
    await step('初始暂停时受控接管与noVNC有效画布',async()=>{
     await statusIs('paused');permittedControl='takeover';
-    try{const responsePromise=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/control/takeover',{timeout:120000});await page.locator('#connect').click();const response=await responsePromise;assert.equal(response.status(),200,'接管请求未确认成功');ownsTakeover=true;await page.locator('#status-pill',{hasText:'人工接管中'}).waitFor({timeout:120000});}finally{permittedControl=null;}
+    try{const responsePromise=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/control/takeover',{timeout:120000});await page.locator('#connect').click();const response=await responsePromise;assert.equal(response.status(),200,'接管请求未确认成功');ownsTakeover=true;await page.locator('#takeover-link').waitFor({state:'visible',timeout:120000});await assertTopControl('manual');assert.equal(await page.locator('#settings-browser .section-summary').innerText(),'人工接管中');}finally{permittedControl=null;}
     await page.locator('#desktop-frame').waitFor({timeout:30000});await page.locator('#desktop-frame').scrollIntoViewIfNeeded();const frame=await(await page.locator('#desktop-frame').elementHandle()).contentFrame();assert.ok(frame,'桌面 iframe 不可用');
     try{await frame.waitForFunction(()=>{const canvas=document.querySelector('#noVNC_container canvas');return document.documentElement.classList.contains('noVNC_connected')&&canvas?.width>100;},null,{timeout:45000,polling:100});await frame.waitForFunction(()=>{const c=document.querySelector('#noVNC_container canvas'),x=c?.getContext('2d');if(!c||!x)return false;const d=x.getImageData(0,0,Math.min(c.width,800),Math.min(c.height,600)).data,colors=new Set();for(let i=0;i<d.length;i+=400)if(d[i+3])colors.add(d[i]+','+d[i+1]+','+d[i+2]);return colors.size>12;},null,{timeout:20000,polling:100});}
     catch(error){results.desktopDiagnostic=await frame.evaluate(()=>({rootClass:document.documentElement.className,width:document.querySelector('#noVNC_container canvas')?.width||0,height:document.querySelector('#noVNC_container canvas')?.height||0})).catch(()=>({unavailable:true}));await screenshot('production-desktop-failed-masked');throw error;}
     results.desktop=await frame.evaluate(()=>{const c=document.querySelector('#noVNC_container canvas');return{connected:document.documentElement.classList.contains('noVNC_connected'),width:c?.width||0,height:c?.height||0,hasPixels:true,screenshotMasked:true};});await screenshot('production-desktop-connected-masked');
    });
-   if(ownsTakeover)await step('释放本次接管后仍暂停且桌面423',async()=>{await statusIs('manual');await releaseOwned();await page.locator('#status-pill',{hasText:'已暂停'}).waitFor({timeout:30000});assert.equal(await page.locator('#desktop-frame').count(),0);assert.equal((await context.request.get(BASE+'/desktop/vnc.html')).status(),423);});
+   if(ownsTakeover)await step('接管分区释放本次接管后仍暂停且桌面423',async()=>{
+    await statusIs('manual');await assertTopControl('manual');permittedControl='release';
+    try{const responsePromise=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/control/release',{timeout:120000});await page.locator('#settings-browser .desk-bar #release').click();const response=await responsePromise;assert.equal(response.status(),200,'分区释放接管请求失败');await statusIs('paused');ownsTakeover=false;}finally{permittedControl=null;}
+    await page.locator('#takeover-link').waitFor({state:'hidden',timeout:30000});await assertTopControl('paused');assert.equal(await page.locator('#settings-browser .section-summary').innerText(),'按需连接');assert.equal(await page.locator('#desktop-frame').count(),0);assert.equal((await context.request.get(BASE+'/desktop/vnc.html')).status(),423);
+   });
    else results.desktopSkipped='未确认取得本次接管所有权，未盲目释放。';
   }else if(initial.control==='manual')results.desktopSkipped='初始已由他人接管，只读取面板，不连接桌面、不释放他人会话。';
   await step('配置、模型库、LLM调用与消息计数保持不变',async()=>{

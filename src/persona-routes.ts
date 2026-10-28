@@ -5,6 +5,7 @@ import { redact } from './config.js';
 import { PersonaService, PersonaValidationError } from './persona.js';
 import { DailyStateService } from './daily-state.js';
 import { LlmStore } from './llm-store.js';
+import { PERSONA_PRESETS,PERSONA_PRESETS_VERSION } from './persona-presets.js';
 
 type Deps = {store:Store;persona:PersonaService;daily:DailyStateService;accountId:()=>string};
 export function registerPersonaRoutes(app:FastifyInstance,deps:Deps):void {
@@ -27,6 +28,7 @@ export function registerPersonaRoutes(app:FastifyInstance,deps:Deps):void {
   const result=deps.daily.describe(id),interactionId=result.interactionId??result.today?.interactionId,callId=result.callId??result.today?.callId;
   return {...result,history:history(id),fees:cost(interactionId,callId),calls:interactionId?ledger.calls({interactionId,limit:100}).items:[],scheduleTime:scheduleTime()};
  };
+ app.get('/api/persona/presets',handle(()=>({version:PERSONA_PRESETS_VERSION,items:structuredClone(PERSONA_PRESETS)})));
  app.get('/api/persona',handle(()=>({...deps.persona.get(),daily:daily(),scheduleTime:scheduleTime()})));
  app.put('/api/persona',{bodyLimit:128*1024},handle(req=>{
   const revision=req.body?.revision;

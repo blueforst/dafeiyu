@@ -1,10 +1,10 @@
 import { start, onStatus, onEvent, runControl, isPending, notice } from './state.js';
-const LABEL={paused:'已暂停',running:'处理中',draining:'等待当前操作结束',manual:'人工接管中'};
-const PRIMARY={paused:['resume','恢复处理'],running:['pause','暂停'],draining:[null,'等待当前操作结束…'],manual:['release','释放接管']};
+const LABEL={paused:'已暂停',running:'运行中',draining:'正在暂停…',manual:'已暂停'};
+const PRIMARY={paused:['resume','启动'],running:['pause','暂停'],draining:[null,'正在暂停…'],manual:[null,'启动']};
 const ROUTES={feed:()=>import('./views/feed.js'),persona:()=>import('./views/persona.js'),memory:()=>import('./views/memory.js'),settings:()=>import('./views/settings.js'),billing:()=>import('./views/billing.js')};
 const OLD={overview:'feed',model:'settings/model',program:'settings/logs',tasks:'settings/tasks',browser:'settings/browser'};
-const pill=document.getElementById('status-pill'),primary=document.getElementById('primary-action'),view=document.getElementById('view');
-onStatus(s=>{pill.dataset.state=s?s.control:'error';pill.textContent=s?(LABEL[s.control]||s.control):'连接失败';const [action,label]=s?.control==='draining'&&!s.busy&&!isPending()?['pause','重试暂停']:PRIMARY[s?.control]||[null,'…'];primary.textContent=label;primary.dataset.action=action||'';primary.disabled=!s||!action||isPending();});
+const pill=document.getElementById('status-pill'),primary=document.getElementById('primary-action'),takeoverLink=document.getElementById('takeover-link'),view=document.getElementById('view');
+onStatus(s=>{const manual=s?.control==='manual';pill.dataset.state=manual?'paused':s?s.control:'error';pill.textContent=s?(LABEL[s.control]||s.control):'连接失败';const [action,label]=s?.control==='draining'&&!s.busy&&!isPending()?['pause','重试暂停']:PRIMARY[s?.control]||[null,'…'];primary.textContent=label;primary.dataset.action=action||'';primary.disabled=!s||!action||isPending();takeoverLink.hidden=!manual;if(manual){primary.title='请先在浏览器接管分区释放接管';primary.setAttribute('aria-describedby','takeover-hint');}else{primary.removeAttribute('title');primary.removeAttribute('aria-describedby');}});
 primary.onclick=()=>{if(primary.dataset.action)runControl(primary.dataset.action);};
 onEvent('feed',p=>{const b=document.getElementById('feed-count');b.textContent=Number(p.pending)>0?String(p.pending):'';b.hidden=!(Number(p.pending)>0);});
 let current={route:'',hash:'',unmount:null},leaveGuard=null,navigation=0;

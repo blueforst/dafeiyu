@@ -59,10 +59,10 @@ export function notice(text, kind = 'info') {
 }
 
 const DONE = {
-  resume: s => '已恢复处理' + (s?.config?.mode === 'auto' ? '' : '（草稿模式，只生成草稿，不发送）'),
+  resume: s => '已启动' + (s?.config?.mode === 'auto' ? '' : '（草稿模式，只生成草稿，不发送）'),
   pause: () => '已暂停',
   takeover: () => '已接管，自动处理已停止',
-  release: () => '处理保持暂停，可在右上角恢复',
+  release: () => '已释放接管，处理保持暂停，可在顶部启动',
 };
 
 // Runs one control action; all control buttons stay disabled while it is in flight.

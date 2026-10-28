@@ -387,3 +387,31 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
   .usage-more-filters { margin-left:0; }
 }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+/* 人设预设：只影响预设入口与保存提示。 */
+.persona-presets-choices { border:0; margin:0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; min-width:0; }
+.persona-preset-option { display:flex; align-items:flex-start; gap:10px; padding:14px; border:1px solid var(--border); border-radius:9px; cursor:pointer; min-width:0; }
+.persona-preset-option:has(input:checked) { background:var(--surface-2); border-color:var(--text); }
+.persona-preset-option input { margin:3px 0 0; flex-shrink:0; }
+.persona-preset-option .stack { gap:4px; min-width:0; overflow-wrap:anywhere; }
+.persona-preset-bio { resize:vertical; }
+.persona-preset-saved { border:1px solid var(--border); background:var(--surface); padding:16px; }
+.persona-preset-saved p { margin:0; }
+@media(max-width:700px) { .persona-presets-choices { grid-template-columns:minmax(0,1fr); } }
+/* 顶部启停与浏览器接管：接管入口保持可见，窄屏允许状态组换行。 */
+.top-actions { min-width: 0; }
+.run-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+#takeover-link { font-size: 12px; white-space: nowrap; }
+#primary-action { flex-shrink: 0; }
+.top-actions .conn { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .top-actions { flex-wrap: wrap; }
+  .top-actions .conn:not(:empty) { flex-basis: 100%; }
+  .run-status { flex: 1; }
+}
+
+/* 模型弹窗编辑的离开确认须能在遮罩上方用鼠标操作。 */
+.confirm-over-modal { position:fixed; z-index:60; top:16px; left:16px; right:16px; margin:0; box-shadow:0 8px 28px #0004; }
+
+/* 回复格式仅作阅读提示，不表达发送失败。 */
+.reply-format-note, .reply-format-check { margin: 0; padding: 6px 10px; border-left: 2px solid var(--border-strong); color: var(--muted); overflow-wrap: anywhere; }

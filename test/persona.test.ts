@@ -10,6 +10,7 @@ import type { Config } from '../src/types.js';
 import type { Generator,GenerationResult } from '../src/model.js';
 import { readPanelSettings,mergePanelSettings } from '../src/settings.js';
 import { exampleConfig } from './config-fixture.js';
+import { defaultPersona } from '../src/persona-presets.js';
 
 function fixture(run?:(n:number,system:string,user:string,c:Config,meta:any)=>Promise<GenerationResult>){
  const dir=mkdtempSync(join(tmpdir(),'role-persona-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=dir;
@@ -26,7 +27,11 @@ function rules():Persona {
 test('旧人格原文完整保留，不自动添加身份事实，最大旧文本仍可导入',()=>{
  const original='  原文\n第二行\n';assert.equal(legacyPersona(original).sections[0].content,original);
  assert.equal(validatePersona(legacyPersona('字'.repeat(20000))).sections[0].content.length,20000);
- const f=fixture();try{assert.equal(f.service.get().persona.sections[0].content,exampleConfig.persona);assert.equal(f.service.get().fixedRules,FIXED_SYSTEM_RULES);}finally{f.close();}
+ const f=fixture();try{
+  assert.deepEqual(f.service.get().persona,defaultPersona());assert.equal(f.service.get().revision,0);assert.equal(f.service.get().fixedRules,FIXED_SYSTEM_RULES);
+  f.service.config=()=>({...structuredClone(exampleConfig),persona:original}) as Config;
+  assert.equal(f.service.get().persona.sections[0].content,original);assert.equal(f.service.get().revision,0);
+ }finally{f.close();}
 });
 
 test('人设保存按域修订，不覆盖模型或恢复暂停，陈旧修订返回冲突',()=>{
@@ -115,6 +120,6 @@ test('生产组装保留合法长消息及三次原文，不误用试聊额度',
  const f=fixture();try{
   const message='长'.repeat(30000),recent=Array.from({length:3},()=>({message:'旧'.repeat(20000),reply:'已确认'}));
   const result=await f.service.assemble({persona:legacyPersona('角色'),message,channel:'private',accountId:'worker-a',memory:{recent}});
-  const messageSegment=JSON.parse(result.segments.find(s=>s.kind==='message')!.content),memory=JSON.parse(result.segments.find(s=>s.kind==='memory')!.content);assert.equal(messageSegment.message.length,30000);assert.equal(memory.recent.length,3);assert.equal(memory.recent[0].message.length,20000);assert.equal(f.requests,0);
+  const messageSegment=JSON.parse(result.segments.find(s=>s.kind==='message')!.content),memory=JSON.parse(result.segments.find(s=>s.kind==='memory')!.content),recentSegment=JSON.parse(result.segments.find(s=>s.kind==='recent')!.content);assert.equal(messageSegment.message.length,30000);assert.equal(Object.hasOwn(memory,'recent'),false);assert.equal(recentSegment.items.length,3);assert.equal(recentSegment.items[0].message.length,20000);assert.equal(f.requests,0);
  }finally{f.close();}
 });

@@ -4,6 +4,7 @@ import { Outbox } from './outbox.js';
 import { normalizePublicText,validatePostingText } from './posting-policy.js';
 import type { PostingCapabilitiesService } from './posting-capabilities.js';
 import type { ReplyTriage } from './reply-triage.js';
+import { formatIssues } from './reply-style.js';
 
 export class FeedError extends Error {constructor(message:string,public statusCode=400,public current?:string){super(message);}}
 const parse=(value:any,fallback:any={})=>{try{return JSON.parse(value??'null')??fallback;}catch{return fallback;}};
@@ -42,7 +43,7 @@ export class ActivityFeed {
   if(filter==='pending')postWhere.push("o.status='unknown'");
   if(cursor){postWhere.push("(o.created_at<? OR (o.created_at=? AND ('post:'||o.id)<?))");postArgs.push(cursor.at,cursor.at,cursor.id);}
   const posts=['reply','dm'].includes(filter)?[]:this.store.db.prepare('SELECT o.*,t.id run_id,t.task_id FROM outbox o LEFT JOIN task_runs t ON t.id=(SELECT id FROM task_runs WHERE outbox_id=o.id ORDER BY started_at DESC,id DESC LIMIT 1) WHERE '+postWhere.join(' AND ')+' ORDER BY o.created_at DESC,o.id DESC LIMIT ?').all(...postArgs,limit+1) as any[];
-  const items=[...messages.map(r=>{const body=parse(r.body),draft=parse(r.draft),receipt=parse(r.receipt,null);return {id:'message:'+r.id,messageId:r.id,type:r.channel==='public'?'reply':'dm',at:r.created_at,status:r.status,revision:r.updated_at,expired:this.expired(r),handle:body.handle,userId:r.user_id,original:body.text,originalUrl:body.url,body,draft,text:draft.text??'',receipt,error:r.error,memory:{account:r.account_id,userId:r.user_id,channel:r.channel}};}),...posts.map(r=>({id:'post:'+r.id,outboxId:r.id,type:'post',at:r.created_at,status:r.status,revision:r.updated_at,expired:false,text:r.text,receipt:parse(r.receipt,null),validation:parse(r.validation_json,null),taskId:r.task_id,runId:r.run_id,memory:null}))].sort((a,b)=>b.at-a.at||(a.id<b.id?1:a.id>b.id?-1:0));
+  const items=[...messages.map(r=>{const body=parse(r.body),draft=parse(r.draft),receipt=parse(r.receipt,null);return {id:'message:'+r.id,messageId:r.id,type:r.channel==='public'?'reply':'dm',at:r.created_at,status:r.status,revision:r.updated_at,expired:this.expired(r),handle:body.handle,userId:r.user_id,original:body.text,originalUrl:body.url,body,draft,text:draft.text??'',receipt,error:r.error,memory:{account:r.account_id,userId:r.user_id,channel:r.channel}};}),...posts.map(r=>({id:'post:'+r.id,outboxId:r.id,type:'post',at:r.created_at,status:r.status,revision:r.updated_at,expired:false,text:r.text,receipt:parse(r.receipt,null),validation:parse(r.validation_json,null),taskId:r.task_id,runId:r.run_id,...(r.run_id?{format:parse(this.store.get('task-result:'+r.run_id),null)?.format}:{}),memory:null}))].sort((a,b)=>b.at-a.at||(a.id<b.id?1:a.id>b.id?-1:0));
   const page=items.slice(0,limit),last=page.at(-1);
   return {items:page,nextCursor:items.length>limit&&last?Buffer.from(JSON.stringify({at:last.at,id:last.id})).toString('base64url'):null,pending:this.summaryFor(account,pending).pending};
  }
@@ -59,7 +60,7 @@ export class ActivityFeed {
     const text=row.channel==='public'&&typeof body.text==='string'?normalizePublicText(body.text):body.text;
     const validation=validatePostingText(text,row.channel==='public'?'reply':'dm',{accountId:row.account_id,capability:this.capabilities?.get().reply});
     if(!validation.allowed)throw new FeedError(validation.reason??'正文校验失败');
-    next={...draft,text,action:'reply',edited:text!==draft.text,approvedAt:Date.now(),validation,waitReason:undefined};status='approved';
+    next={...draft,text,action:'reply',edited:text!==draft.text,approvedAt:Date.now(),validation,format:{issues:formatIssues(text)},waitReason:undefined};status='approved';
    }else {next={...draft,review:true,previous:{...draft,previous:undefined},waitReason:undefined};status='queued';}
   }
   // Outbox 初始化会执行迁移事务，必须在业务原子更新事务外完成。

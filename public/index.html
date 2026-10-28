@@ -21,12 +21,16 @@
   </div>
   <div class="top-actions">
     <span id="conn" class="conn" role="status"></span>
-    <span id="status-pill" class="pill">连接中</span>
+    <span class="run-status">
+      <span id="status-pill" class="pill">连接中</span>
+      <a id="takeover-link" href="#/settings/browser" hidden>浏览器接管中 →</a>
+    </span>
     <button id="primary-action" class="btn primary" type="button" disabled>…</button>
   </div>
 </header>
 <div id="notice" class="notice" role="status" hidden></div>
 <span id="billing-charge-hint" class="sr-only">此操作会调用模型，并计入实际用量与费用。</span>
+<span id="takeover-hint" class="sr-only">请先在浏览器接管分区释放接管</span>
 <main id="view"></main>
 <script type="module" src="/js/app.js"></script>
 </body>

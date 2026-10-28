@@ -15,6 +15,7 @@ import { beijingDayStart,type ReplyTriage } from './reply-triage.js';
 import type { PostingCapabilitiesService } from './posting-capabilities.js';
 import { normalizePublicText,validatePostingText,postingLimitPrompt,rpcResourceOK } from './posting-policy.js';
 import { recentReplySamples } from './reply-hints.js';
+import { formatIssues } from './reply-style.js';
 import { assembleReplyPrompt } from './reply-prompt.js';
 import { captureGenerationSnapshot,pruneReplayData } from './persona-replay.js';
 import { RoundBudget,WorkflowWatchdog,healthSettings,type RuntimeHealth } from './unattended-health.js';
@@ -124,6 +125,7 @@ export class Workflow {
   draft.meta={...assembled.meta,callId:result.callId};
   const validation=draft.action==='reply'?validatePostingText(draft.text,e.channel==='public'?'reply':'dm',{accountId:this.accountId(),capability:this.services.posting?.get().reply}):undefined;
   if(validation)draft.validation=validation;
+  draft.format={issues:formatIssues(draft.text)};
   return {draft,result,validation};
  }
  private async sendDraft(e:Event,text:string,handle:string,roundId:string,c:Config,callId?:string,approved=false){
@@ -197,8 +199,6 @@ export class Workflow {
     })():await this.stage('collect',roundId,async()=>{const result=await this.transport.collect(handle,{signal:this.abort!.signal,deadline:budget.collectionDeadline('public',c.health)});this.services.health?.recordCollectionResult(handle,roundId,result);return result;});
     for(const _warning of collected.warnings)this.store.log('collection-warning',JSON.stringify({roundId,accountId:handle,reason:'页面采集存在异常，请检查浏览器结构'}),'warn');
     await this.stage('queue',roundId,async()=>{for(const e of collected.events){
-     if(/^忘(了|记)?我吧[。！!\s]*$/.test(e.text.trim())){this.store.forget(e.userId,handle);continue;}
-     if(/^重新记住我[。！!\s]*$/.test(e.text.trim())){this.store.remember(e.userId,handle);continue;}
      if(this.services.triage)this.services.triage.ingest(e,handle,c.maxAgeHours);else this.store.ingest(e,handle);
     }});
     this.services.triage?.refreshQueued(handle,c.maxAgeHours);
