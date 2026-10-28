@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {Store} from '../src/store.js';
 import {RuntimeHealth} from '../src/unattended-health.js';
 import {normalizeCollectionDiagnostics,type CollectionDiagnostic} from '../src/collection-health.js';
-function fixture(){const path=mkdtempSync(tmpdir()+'/role-collection-health-'),store=new Store(path+'/workflow.sqlite');let now=Date.now();const health=new RuntimeHealth(store,()=>now);const report=(round:string,diagnostics:CollectionDiagnostic[],account='worker')=>{now+=1000;health.recordCollectionResult(account,round,{events:[],warnings:[],diagnostics});};const snapshot=(account='worker')=>health.evaluate({accountId:account,control:'running',mode:'auto'});return {store,health,report,snapshot,get now(){return now;},close(){store.db.close();rmSync(path,{recursive:true,force:true});}};}
+function fixture(){const path=mkdtempSync(tmpdir()+'/role-collection-health-'),store=new Store(path+'/workflow.sqlite');let now=Date.now();const health=new RuntimeHealth(store,()=>now);const report=(round:string,diagnostics:CollectionDiagnostic[],account='worker')=>{now+=1000;health.recordCollectionResult(account,round,{events:[],warnings:[],diagnostics});};const snapshot=(account='worker')=>health.evaluate({accountId:account,control:'running',mode:'auto'});return {store,health,report,snapshot,advance(ms:number){now+=ms;},get now(){return now;},close(){store.db.close();rmSync(path,{recursive:true,force:true});}};}
 const ok:CollectionDiagnostic={channel:'public',status:'ok',code:'public-ready',source:'mentions',eventCount:1,readyPages:1};
 const empty:CollectionDiagnostic={channel:'private',status:'empty',code:'private-inbox-empty',source:'inbox',eventCount:0,readyPages:1,emptyPages:1};
 const unsupported:CollectionDiagnostic={channel:'private',status:'unsupported',code:'chat-native-time-unverified',source:'chat',eventCount:0};
@@ -19,6 +19,31 @@ test('同轮多条诊断只计一个失败轮次，恢复后只收束本渠道�
 test('预算partial不累计失败，但failedPages不能被预算提示覆盖',()=>{const f=fixture();try{for(let i=0;i<3;i++)f.report('budget-'+i,[{channel:'public',status:'partial',code:'public-budget-exhausted',eventCount:1,failedPages:0}]);let snapshot=f.snapshot();assert.equal(snapshot.metrics.find(row=>row.key==='collection-public')?.level,'attention');assert.equal(snapshot.metrics.find(row=>row.key==='collection-public')?.value,0);for(let i=0;i<3;i++)f.report('real-partial-'+i,[{channel:'public',status:'partial',code:'public-budget-exhausted',eventCount:1,failedPages:1}]);snapshot=f.snapshot();assert.equal(snapshot.metrics.find(row=>row.key==='collection-public')?.level,'error');assert.equal(snapshot.metrics.find(row=>row.key==='collection-public')?.value,3);}finally{f.close();}});
 
 test('旧warning只能给范围未知注意提示，不变成全局连续三轮崩溃',()=>{const f=fixture();try{for(let i=0;i<3;i++)f.store.db.prepare('INSERT INTO logs(at,level,event,detail) VALUES(?,?,?,?)').run(f.now,'warn','collection-warning',JSON.stringify({accountId:'worker',roundId:'legacy-'+i}));let snapshot=f.snapshot();assert.equal(snapshot.metrics.find(row=>row.key==='collection-failures')?.level,'attention');assert.equal(snapshot.metrics.find(row=>row.key==='collection-public')?.level,'normal');for(let i=0;i<3;i++)f.report('new-structured-'+i,[ok,empty]);snapshot=f.snapshot();assert.equal(snapshot.metrics.find(row=>row.key==='collection-failures')?.level,'normal');}finally{f.close();}});
+
+test('历史告警按事件时间提供首末时间与去重轮次，后台健康复扫不改发生时间',()=>{const f=fixture();try{
+ const firstAt=f.now-7200000,lastAt=f.now-1800000,insert=f.store.db.prepare('INSERT INTO logs(at,level,event,detail) VALUES(?,?,?,?)');
+ for(const [at,roundId] of [[firstAt,'legacy-first'],[f.now-3600000,'legacy-last'],[lastAt,'legacy-first']] as const)insert.run(at,'warn','collection-warning',JSON.stringify({accountId:'worker',roundId}));
+ insert.run(f.now,'warn','collection-warning',JSON.stringify({accountId:'other',roundId:'other-account'}));
+ const before=f.snapshot(),legacy=before.metrics.find(row=>row.key==='collection-failures')!;
+ assert.equal(legacy.level,'attention');assert.equal(legacy.value,2);assert.deepEqual(legacy.detail,{kind:'legacy-warning',firstAt,lastAt,roundCount:2});
+ const previousScan=before.activeAlerts.find(row=>row.key==='collection-failures')!.lastSeenAt;
+ f.advance(600000);const after=f.snapshot();
+ assert.ok(after.activeAlerts.find(row=>row.key==='collection-failures')!.lastSeenAt>previousScan);
+ assert.deepEqual(after.metrics.find(row=>row.key==='collection-failures')!.detail,legacy.detail);
+ assert.equal((f.store.db.prepare("SELECT COUNT(*) n FROM logs WHERE event='collection-warning'").get() as {n:number}).n,4);
+}finally{f.close();}});
+
+test('暂无诊断不是已复验；仅单通道新诊断仍保留历史范围未知及当前真实故障',()=>{const f=fixture();try{
+ f.store.db.prepare('INSERT INTO logs(at,level,event,detail) VALUES(?,?,?,?)').run(f.now-60000,'warn','collection-warning',JSON.stringify({accountId:'worker',roundId:'legacy'}));
+ let snapshot=f.snapshot();
+ for(const key of ['collection-public','collection-private']){const metric=snapshot.metrics.find(row=>row.key===key)!;assert.match(metric.summary,/暂无诊断记录/);assert.equal(metric.detail,undefined);}
+ assert.match(snapshot.metrics.find(row=>row.key==='collection-failures')!.summary,/尚未复验.*范围仍待确认/);
+ for(let i=0;i<3;i++)f.report('private-'+i,[unsupported]);snapshot=f.snapshot();
+ assert.equal(snapshot.metrics.find(row=>row.key==='collection-failures')?.level,'attention');
+ assert.equal(snapshot.activeAlerts.find(row=>row.key==='collection-private')?.level,'error');
+ assert.match(snapshot.metrics.find(row=>row.key==='collection-private')!.summary,/尚未适配/);
+ assert.ok(!snapshot.metrics.some(row=>row.summary.includes('已恢复')));
+}finally{f.close();}});
 
 test('采集诊断账号隔离，另一个账号不继承失败',()=>{const f=fixture();try{for(let i=0;i<3;i++)f.report('round-'+i,[unsupported]);assert.equal(f.snapshot().metrics.find(row=>row.key==='collection-private')?.level,'error');assert.equal(f.snapshot('other').metrics.find(row=>row.key==='collection-private')?.level,'normal');}finally{f.close();}});
 

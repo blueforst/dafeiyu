@@ -40,7 +40,9 @@ export function recordCollectionResult(store:Store,accountId:string,roundId:stri
  return reports;
 }
 export type CollectionHealthDetail={channel:Channel;roundId:string;at:number;status:CollectionStatus;code:string;eventCount:number;failureStreak:number;failedPages:number};
-export type CollectionHealthMetric={key:string;level:'normal'|'attention'|'error';summary:string;value:number;detail?:CollectionHealthDetail};
+export type LegacyCollectionHealthDetail={kind:'legacy-warning';firstAt:number;lastAt:number;roundCount:number};
+export type CollectionMetricDetail=CollectionHealthDetail|LegacyCollectionHealthDetail;
+export type CollectionHealthMetric={key:string;level:'normal'|'attention'|'error';summary:string;value:number;detail?:CollectionMetricDetail};
 type Report=CollectionDiagnostic&{roundId:string;at:number};
 function realFailure(report:CollectionDiagnostic){return report.status==='failed'||report.status==='unsupported'||(report.status==='partial'&&(report.failedPages??0)>0);}
 function severity(report:CollectionDiagnostic){return realFailure(report)?5:report.status==='blocked'?4:report.status==='unknown'?3:report.status==='partial'?2:0;}
@@ -67,9 +69,9 @@ export function collectionHealthMetrics(store:Store,accountId:string,now=Date.no
   }
   metrics.push({key:'collection-'+channel,level,summary,value:streak,...(latest?{detail:{channel,roundId:latest.roundId,at:latest.at,status:latest.status,code:latest.code,eventCount:latest.eventCount,failureStreak:streak,failedPages:latest.failedPages??0}}:{})});
  }
- const oldWarnings=store.db.prepare("SELECT id,at,detail FROM logs WHERE event='collection-warning' AND at>=? AND json_valid(detail) AND json_extract(detail,'$.accountId')=? ORDER BY at DESC,id DESC LIMIT 100").all(now-86400000,accountId) as any[];
+ const oldWarnings=store.db.prepare("SELECT id,at,detail FROM logs WHERE event='collection-warning' AND at>=? AND json_valid(detail) AND json_extract(detail,'$.accountId')=? ORDER BY at DESC,id DESC LIMIT 100").all(now-86400000,accountId) as {id:number;at:number;detail:string}[];
  const latestByChannel=(['public','private'] as const).map(channel=>aggregated.filter(report=>report.channel===channel).sort((a,b)=>b.at-a.at)[0]);
- const unclassified=new Set<string>();for(const row of oldWarnings){const raw=parse(row.detail),round=raw?.roundId;const superseded=latestByChannel.every(report=>report&&report.at>row.at&&!report.code.startsWith('legacy-')&&report.code!=='unclassified');if(typeof round==='string'&&!knownRoundIds.has(round)&&!superseded)unclassified.add(round);}
- metrics.push({key:'collection-failures',level:unclassified.size?'attention':'normal',summary:unclassified.size?'旧采集告警缺少通道诊断，无法确认故障范围':'采集诊断按通道分别判定',value:unclassified.size});
+ const unclassified=new Set<string>(),warningTimes:number[]=[];for(const row of oldWarnings){const raw=parse(row.detail),round=raw?.roundId;const superseded=latestByChannel.every(report=>report&&report.at>row.at&&!report.code.startsWith('legacy-')&&report.code!=='unclassified');if(typeof round==='string'&&!knownRoundIds.has(round)&&!superseded){unclassified.add(round);warningTimes.push(row.at);}}
+ metrics.push({key:'collection-failures',level:unclassified.size?'attention':'normal',summary:unclassified.size?'历史采集告警缺少通道诊断，当前采集尚未复验，范围仍待确认':'采集诊断按通道分别判定',value:unclassified.size,...(unclassified.size?{detail:{kind:'legacy-warning' as const,firstAt:Math.min(...warningTimes),lastAt:Math.max(...warningTimes),roundCount:unclassified.size}}:{})});
  return metrics;
 }

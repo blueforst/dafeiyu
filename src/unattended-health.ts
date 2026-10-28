@@ -4,7 +4,7 @@ import type { Store } from './store.js';
 import { applyMigration } from './migrations.js';
 import type { Identity, Channel } from './types.js';
 import { redact } from './config.js';
-import {collectionHealthMetrics,recordCollectionResult as persistCollectionResult,type CollectionResult,type CollectionHealthDetail} from './collection-health.js';
+import {collectionHealthMetrics,recordCollectionResult as persistCollectionResult,type CollectionResult,type CollectionMetricDetail} from './collection-health.js';
 
 /** 加法迁移 v10；旧版忽略新增表，数据库备份保持现有边界。 */
 export const HEALTH_SCHEMA = `
@@ -14,7 +14,7 @@ export const HEALTH_SCHEMA = `
  CREATE TABLE IF NOT EXISTS daily_reports(date TEXT NOT NULL,account_id TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,body_json TEXT NOT NULL,PRIMARY KEY(date,account_id));
 `;
 export type HealthLevel = 'normal'|'attention'|'error';
-export type HealthMetric = {key:string;level:HealthLevel;summary:string;value?:number|string|null;detail?:CollectionHealthDetail};
+export type HealthMetric = {key:string;level:HealthLevel;summary:string;value?:number|string|null;detail?:CollectionMetricDetail};
 export type HealthAlert = {id:string;accountId:string;key:string;level:Exclude<HealthLevel,'normal'>;summary:string;startedAt:number;lastSeenAt:number;resolvedAt:number|null};
 export type HealthSettings = {softTimeoutMinutes:number;hardTimeoutMinutes:number;publicCollectionSeconds:number;privateCollectionSeconds:number;rpcTimeoutSeconds:number;memoryRatio:number;browserMaxAgeHours:number;requiredPhrases:string[]};
 export const DEFAULT_HEALTH_SETTINGS:HealthSettings={softTimeoutMinutes:8,hardTimeoutMinutes:12,publicCollectionSeconds:90,privateCollectionSeconds:90,rpcTimeoutSeconds:120,memoryRatio:.75,browserMaxAgeHours:24,requiredPhrases:['AI']};
