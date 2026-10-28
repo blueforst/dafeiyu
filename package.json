@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "node --import tsx --test test/*.test.ts",
+    "test": "node --import tsx --test --test-concurrency=2 --test-timeout=30000 test/*.test.ts",
     "start": "node dist/app.js",
     "browser": "node dist/browser.js",
     "check": "tsc --noEmit"

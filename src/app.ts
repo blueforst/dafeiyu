@@ -54,7 +54,7 @@ export async function startApp(){
  const persona=new PersonaService(store,generator),memory=new MemoryService(store,generator);
  let scheduler:TaskScheduler;
  const daily=new DailyStateService(store,generator,loadConfig,Date.now,()=>workflow.control()==='running'&&(scheduler?.plans()['daily-state'].enabled??true));
- const posting=new PostingCapabilitiesService(store,accountId),triage=new ReplyTriage(store,()=>normalizeTriageSettings(loadConfig().triage,loadConfig().maxAgeHours),Date.now,()=>workflow.replyHours().closures),health=new RuntimeHealth(store,Date.now,(at,account)=>workflow.replyHours(at,account));
+ const posting=new PostingCapabilitiesService(store,accountId),triage=new ReplyTriage(store,()=>normalizeTriageSettings(loadConfig().triage,loadConfig().maxAgeHours),Date.now,()=>{const window=workflow.replyHours();return window.agePolicy??window.closures;}),health=new RuntimeHealth(store,Date.now,(at,account)=>workflow.replyHours(at,account));
  persona.postingPolicy=()=>posting.get();
  workflow.services={program,outbox,persona,memory,daily,posting,triage,health};
  scheduler=new TaskScheduler(store,{account:accountId,control:()=>workflow.control(),mode:()=>loadConfig().mode,nextTick:()=>workflow.nextTick,businessBusy:()=>workflow.busy,...productionTaskHandlers(workflow)});

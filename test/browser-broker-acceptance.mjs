@@ -52,7 +52,8 @@ function nativeHTML(body,path){
 }
 function workflowFixture(onGenerate){
  const folder=root+'/workflow-'+(++sequence);mkdirSync(folder);const store=new Store(folder+'/workflow.sqlite'),outbox=new Outbox(store),program=new Program(store);
- const config={mode:'auto',pollSeconds:60,maxAgeHours:6,maxPerRound:1,publicPerHour:20,privatePerHour:20,publicPerDay:180,retentionDays:30,persona:'你是 AI 隔离测试角色。',dailyState:'隔离模拟',model:{provider:'custom',source:'config',api:'openai-completions',baseUrl:'https://model-never-open.invalid',id:'fixture-model',reasoning:false,reasoningLevel:'low',vision:false,maxTokens:256,timeoutMs:10000},health:{memoryRatio:.95,publicCollectionSeconds:15,privateCollectionSeconds:10,rpcTimeoutSeconds:30}};
+ // 本套核对浏览器提交与回查边界，显式排除夜间作息对生成路径的遮挡。
+ const config={mode:'auto',pollSeconds:60,maxAgeHours:6,maxPerRound:1,publicPerHour:20,privatePerHour:20,publicPerDay:180,replyHours:{enabled:false,closeDelayMinutes:30},retentionDays:30,persona:'你是 AI 隔离测试角色。',dailyState:'隔离模拟',model:{provider:'custom',source:'config',api:'openai-completions',baseUrl:'https://model-never-open.invalid',id:'fixture-model',reasoning:false,reasoningLevel:'low',vision:false,maxTokens:256,timeoutMs:10000},health:{memoryRatio:.95,publicCollectionSeconds:15,privateCollectionSeconds:10,rpcTimeoutSeconds:30}};
  const prompts=[],generator=new ModelService(store,async(_model,_key,system,user)=>{prompts.push({system,user});scenario.generated++;await onGenerate?.();return {text:JSON.stringify({action:'reply',text:'合成回复 '+scenario.event.platformId,reason:''}),input:8,output:8,cache:0,stopReason:'stop',latencyMs:1,pricingStatus:'unpriced'};});
  const workflow=new Workflow(store,transport,generator,()=>config);workflow.services={program,outbox};resources.push({workflow,store});
  const message=()=>store.getMessage(scenario.event.id,actor);

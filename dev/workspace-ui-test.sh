@@ -11,8 +11,12 @@ docker run --rm --network none -v "$candidate/dist:/app/dist:ro" -v "$artifacts/
 if ! docker inspect role-workflow-proposals-static >/dev/null 2>&1; then
  docker run -d --name role-workflow-proposals-static --network none --cpus 1 --memory 256m -e PUBLIC_DIR=/public -e PORT=8083 -v "$candidate/public:/public:ro" -v "$candidate/dev/proposals-static.mjs:/app/proposals-static.mjs:ro" role-workflow-proposals-builder:dev node /app/proposals-static.mjs
 fi
+# 每次保留上轮目录和日志；批次端到端会拒绝复用非空目录，不能用续跑绕过。
+history=$(mktemp -d "$artifacts/previous-run.XXXXXX")
 result=0
-for suite in workspace-shell-ui-acceptance persona-workspace-ui-acceptance settings-workspace-ui-acceptance feed-workspace-ui-acceptance five-pages-acceptance proposals-ui-acceptance model-library-ui-acceptance billing-charts-acceptance feed-alerts-acceptance fill-gaps-ui-acceptance persona-presets-ui-acceptance reply-style-ui-acceptance run-control-ui-acceptance persona-presets-e2e; do
+for suite in workspace-shell-ui-acceptance workspace-lifecycle-ui-acceptance persona-workspace-ui-acceptance settings-workspace-ui-acceptance feed-workspace-ui-acceptance five-pages-acceptance proposals-ui-acceptance model-library-ui-acceptance billing-charts-acceptance feed-alerts-acceptance fill-gaps-ui-acceptance persona-presets-ui-acceptance reply-style-ui-acceptance run-control-ui-acceptance persona-presets-e2e browser-health-acceptance browser-broker-acceptance; do
+ if [ -e "$artifacts/$suite" ]; then mv "$artifacts/$suite" "$history/$suite"; fi
+ if [ -e "$artifacts/$suite.log" ]; then mv "$artifacts/$suite.log" "$history/$suite.log"; fi
  mkdir -p "$artifacts/$suite"
  chown 1000:1000 "$artifacts/$suite"
  printf '运行 %s\n' "$suite"

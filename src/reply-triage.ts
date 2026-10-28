@@ -3,7 +3,7 @@ import type { Store } from './store.js';
 import { eventIdentity } from './store.js';
 import { applyMigration } from './migrations.js';
 import type { Event,Channel } from './types.js';
-import {effectiveAge,type ReplyClosure} from './reply-hours.js';
+import {effectiveAge,effectiveAgeSql,type ReplyAgeSource} from './reply-hours.js';
 
 export type TriageTier='priority'|'normal'|'skip'|'filtered';
 export type SkipCategory='harassment'|'spam'|'no_reply'|'other';
@@ -60,15 +60,11 @@ export class TriageError extends Error{constructor(message:string,public statusC
 
 /** 分级与调度只使用本地数据库，不触发模型或浏览器操作。 */
 export class ReplyTriage{
- constructor(public store:Store,public settings:()=>TriageSettings=()=>DEFAULT_TRIAGE_SETTINGS,public now:()=>number=Date.now,public closures:()=>ReplyClosure[]=()=>[]){applyMigration(store.db,9,'回复分级与公平调度',TRIAGE_MIGRATION);}
+ constructor(public store:Store,public settings:()=>TriageSettings=()=>DEFAULT_TRIAGE_SETTINGS,public now:()=>number=Date.now,public closures:()=>ReplyAgeSource=()=>[]){applyMigration(store.db,9,'回复分级与公平调度',TRIAGE_MIGRATION);}
  /** 与生产发送边界共享有效等待时间；独立试聊库默认没有关闭区间。 */
  age(receivedAt:number,at=this.now()){return effectiveAge(receivedAt,at,this.closures());}
  /** field 只能由内部只读查询提供，参数中保存时间边界，避免拼入外部输入。 */
- ageSql(field='m.created_at',at=this.now()):{sql:string;params:number[]}{
-  const intervals=this.closures().filter(x=>Number.isFinite(x.start)&&Number.isFinite(x.end)&&x.end>x.start&&x.start<at).map(x=>({start:x.start,end:Math.min(at,x.end)})).sort((a,b)=>a.start-b.start),merged:ReplyClosure[]=[];
-  for(const interval of intervals){const last=merged.at(-1);if(last&&interval.start<=last.end)last.end=Math.max(last.end,interval.end);else merged.push({...interval});}
-  return {sql:'MAX(0,(? - '+field+')'+merged.map(()=>'- MAX(0,? - MAX('+field+',?))').join('')+')',params:[at,...merged.flatMap(x=>[x.end,x.start])]};
- }
+ ageSql(field='m.created_at',at=this.now()):{sql:string;params:(number|string)[]}{return effectiveAgeSql(field,at,this.closures());}
  private transaction<T>(fn:()=>T):T{this.store.db.exec('BEGIN IMMEDIATE');try{const value=fn();this.store.db.exec('COMMIT');return value;}catch(error){this.store.db.exec('ROLLBACK');throw error;}}
  private manualKey(id:string){return 'triage:manual:'+id;}
  private terminal(row:any,status:string,reason:string,extra:{mergedInto?:string}={}){
@@ -126,8 +122,8 @@ export class ReplyTriage{
   this.transaction(()=>{const rows=this.store.db.prepare("SELECT * FROM messages WHERE status='queued' AND account_id=? ORDER BY created_at,id").all(accountId) as any[];for(const row of rows)this.hit(parseEvent(row),accountId,Math.min(this.now(),row.created_at));for(const row of rows)this.apply(row,maxAgeHours);});
  }
  private forgottenScopeSQL(){return "NOT EXISTS(SELECT 1 FROM account_users au WHERE au.account_id=m.account_id AND au.id=m.user_id AND au.forgot=1) AND (NOT EXISTS(SELECT 1 FROM users u WHERE u.id=m.user_id AND u.forgot=1) OR EXISTS(SELECT 1 FROM account_users au WHERE au.account_id=m.account_id AND au.id=m.user_id AND au.epoch>0 AND au.forgot=0))";}
- queuedEligibility(maxAgeHours:number,options:TriageAgeOptions={}){
-  const now=this.now(),settings=normalizeTriageSettings(this.settings(),maxAgeHours),age=this.ageSql();
+ queuedEligibility(maxAgeHours:number,options:TriageAgeOptions={},at=this.now()){
+  const now=at,settings=normalizeTriageSettings(this.settings(),maxAgeHours),age=this.ageSql('m.created_at',now);
   return {sql:"m.created_at>0 AND "+(options.ignoreAge?'':age.sql+"<=(CASE m.tier WHEN 'priority' THEN ? ELSE ? END) AND ")+"NOT EXISTS(SELECT 1 FROM triage_ignores i WHERE i.account_id=m.account_id AND i.user_id=m.user_id AND i.channel=m.channel AND i.until>? AND NOT EXISTS(SELECT 1 FROM runtime r WHERE r.key='triage:manual:'||m.id AND r.value='1') AND NOT (CASE WHEN json_valid(m.draft) THEN COALESCE(json_extract(m.draft,'$.review'),0) ELSE 0 END)) AND "+this.forgottenScopeSQL(),params:[...(options.ignoreAge?[]:[...age.params,maxAgeHours*hour,settings.normalMaxAgeHours*hour]),now]};
  }
  /** 健康观察只读相同可处理范围；不清理过期行、不重分级、不触发模型。 */

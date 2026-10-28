@@ -56,8 +56,8 @@
 
 纯函数 `replyWindow(input)`：
 
-- 输入：`now`、`enabled`、`closeDelayMinutes`、早安计划 `{enabled,time}`、晚安时间，以及 `morningRunEnded(scheduledAt)` 查询函数。
-- 输出：`{ open, reason, closedAt?, opensAt?, closesAt? }`，以及最近的关闭区间列表（供扣除时长使用）。
+- 输入：`now`、`enabled`、`closeDelayMinutes`、早安计划 `{enabled,time}`、晚安时间，以及早安实际终态。生产一次只读该账号已有终态记录，通过 `morningRunEnds` 传入；`morningRunEnded(scheduledAt)` 查询函数保留为兼容入口。
+- 输出：`{ open, reason, closedAt?, opensAt?, closesAt? }`、供原有展示使用的近期关闭区间列表，以及内部有效等待规则 `agePolicy`。内部规则不进入管理接口 DTO。
 
 规则：
 
@@ -78,10 +78,12 @@
 
 ### 4. 等待时长扣除关闭时长
 
-新增 `effectiveAge(receivedAt, now, closures)`：从 `now − receivedAt` 中减去与各关闭区间的重叠时长。
+`effectiveAge(receivedAt, now, source)` 与 `effectiveAgeSql(field, at, source)` 共享有效等待口径。`source` 可以是兼容的显式关闭区间数组，也可以是内部 `ReplyAgePolicy` 周期规则。
 
-- 只需要 `now` 之前 48 小时内的区间。分级时效最长为六小时，开放时段只要长于六小时，每条消息最多跨一个关闭区间；按 48 小时取，也覆盖开放时段很短的配置。
-- `queuedEligibility` 的 SQL 改为对每个区间扣除重叠，区间以参数传入，最多两到三个，用 `MAX(0, MIN(?, e) − MAX(created_at, s))` 累加。
+- 原“只需最近四十八小时关闭区间”的实现假设已由确定性红测证伪：配置允许四十八小时有效时效，每天只开放一分钟时，对应的日历跨度可以达到 2,880 天。不能把固定展示窗口用作历史计时边界，也不能换成另一个固定天数。
+- 近期 `closures` 仍用于原有状态展示；有效等待改用每日重复周期、关闭时刻、关闭时长和早安等待上限的数学原函数，两个端点之差不随历史跨度展开。实际早安终态以匹配当前计划时刻的例外补回提前开放时长，重复及交叠区间先合并，极短开放间隙也按真实并集计算。
+- SQL 与纯函数共用同一周期规则。周期项按数学 `floor` 计数，不依赖 SQLite 可选数学扩展；例外使用一个 JSON 参数读取，不能按历史天数生成上千个 SQL 参数。旧显式区间数组仍先合并再扣除重叠。
+- `queuedEligibility(maxAgeHours, options, at)` 支持显式历史时刻，未传入时沿用当前时刻。动态增量用同一规则比较上次水位和当前资格，自然过期也更新左栏徽标和优先状态，不以写入消息时间伪造变化。
 - `refreshQueued`／`apply` 和 `workflow.ts` 三处 `Date.now() − e.timestamp` 改用 `effectiveAge`。每处保持原来使用的时间字段（`created_at` 或平台时间），只改计算方式。
 - 关闭期间也不会把消息标记为超时，因为关闭时长不计入。
 
@@ -89,11 +91,11 @@
 
 - `Workflow` 把 `replyWindow` 结果传给 `health.evaluate`。关闭时，所有通道的 `sendableChannels` 视为不可发送，停滞指标保持正常；新增指标 `reply-hours`，关闭时为正常级别，说明“回复时段已关闭，HH:MM 开放”。
 - 开放后，停滞基线增加一项开放时刻：`max(最近确认发送, 可发送最早排队, 最近开放时刻)`。
-- 日报的 `responseLatencyMs` 对每条样本使用 `effectiveAge(收到, 确认, closures)`。日报统计前一自然日，只需要该日前后 48 小时内的区间。
+- 日报的 `responseLatencyMs` 对每条样本使用 `effectiveAge(收到, 确认, agePolicy)`；日报虽然统计前一自然日，样本可能在更早日期入队，因此仍扣除收到至确认之间的全部关闭时长，不作四十八小时截断。
 
 ### 6. 接口与界面
 
-- `GET /api/program` 返回 `settings.replyHours`，另加 `replyHours: { open, reason, opensAt, closesAt, closeTime, openTime }`。`closeTime` 和 `openTime` 是按当前任务时间算出的 `HH:MM`。
+- `GET /api/program` 返回 `settings.replyHours`，另加 `replyHours: { open, reason, opensAt, closesAt, closeTime, openTime }`。`closeTime` 和 `openTime` 是按当前任务时间算出的 `HH:MM`。已有近期 `closures` 展示保持兼容，内部 `agePolicy` 和全历史早安例外不得直接返回。
 - 设置页“发送限制”增加开关和“晚安后关闭延迟（分钟）”，下方显示“每天 23:30–08:00 不回复（早安 08:00、晚安 23:00 来自任务计划）”。
 - 动态页顶部在关闭时显示“回复时段已关闭，08:00 开放”。`feed.js` 的等待原因增加 `reply-hours-closed`（回复时段已关闭）和 `waiting-morning-post`（等待早安帖发出）。
 - 浅色、深色和 375px 宽度下不出现横向滚动。

@@ -40,13 +40,11 @@ export class Workflow {
  /** 只读任务计划与实例；不运行任务，也不访问浏览器。 */
  replyHours(at=Date.now(),accountId=this.accountId()):ReplyWindow{
   const c=this.config(),saved=readPanelSettings().tasks?.plans??{},plans=this.services.scheduler?.plans(),morning={...DEFAULT_TASK_PLANS['morning-post'],...(saved['morning-post']??{}),...(plans?.['morning-post']??{})},evening={...DEFAULT_TASK_PLANS['evening-post'],...(saved['evening-post']??{}),...(plans?.['evening-post']??{})};
-  return replyWindow({now:at,enabled:c.replyHours?.enabled??true,closeDelayMinutes:c.replyHours?.closeDelayMinutes??30,morning:{enabled:morning.enabled,time:morning.time??'08:00'},eveningTime:evening.time??'23:00',morningRunEnded:scheduledAt=>{
-   if(!accountId||!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_runs'").get())return null;
-   const run=this.store.db.prepare("SELECT status,finished_at,started_at FROM task_runs WHERE account_id=? AND task_id='morning-post' AND scheduled_at=?").get(accountId,scheduledAt) as any;
-   return run&&run.status!=='running'?Number(run.finished_at??run.started_at):null;
-  }});
+  const hasRuns=morning.enabled&&accountId&&this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_runs'").get();
+  const morningRunEnds=hasRuns?(this.store.db.prepare("SELECT scheduled_at,COALESCE(finished_at,started_at) ended_at FROM task_runs WHERE account_id=? AND task_id='morning-post' AND status<>'running'").all(accountId) as {scheduled_at:number;ended_at:number}[]).map(run=>({scheduledAt:run.scheduled_at,endedAt:run.ended_at})):[];
+  return replyWindow({now:at,enabled:c.replyHours?.enabled??true,closeDelayMinutes:c.replyHours?.closeDelayMinutes??30,morning:{enabled:morning.enabled,time:morning.time??'08:00'},eveningTime:evening.time??'23:00',morningRunEnds});
  }
- private replyAge(receivedAt:number,at=Date.now()){return effectiveAge(receivedAt,at,this.replyHours(at).closures);}
+ private replyAge(receivedAt:number,at=Date.now()){const window=this.replyHours(at);return effectiveAge(receivedAt,at,window.agePolicy??window.closures);}
  modelSession(userId:string,visibility:Channel){
   let namespace=this.store.get('model:sessionNamespace');if(!namespace){namespace=randomUUID();this.store.set('model:sessionNamespace',namespace);}
   return 'role-workflow-'+createHash('sha256').update(JSON.stringify([namespace,this.activeHandle,userId,visibility,this.store.epoch(userId,this.activeHandle)])).digest('hex');
@@ -188,7 +186,7 @@ export class Workflow {
     const identity=await this.stage('identity',roundId,()=>this.transport.identity());this.store.set('identity',JSON.stringify(identity));const handle=loggedInHandle(identity);
     if(!handle||(this.activeHandle&&handle!==this.activeHandle)){await this.safetyPause('登录状态或账号已变化，请检查浏览器后重新恢复');return;}
     this.activeHandle=handle;this.store.set('activeAccount',handle);
-    if(this.services.triage)this.services.triage.closures=()=>this.replyHours().closures;
+    if(this.services.triage)this.services.triage.closures=()=>{const window=this.replyHours();return window.agePolicy??window.closures;};
     const window=this.replyHours(startedAt,handle);
     if(this.services.scheduler){this.services.scheduler.recordMainStart(roundId,handle,startedAt);mainStarted=true;}
     const unsettledOutbox=!!this.store.db.prepare("SELECT 1 FROM messages WHERE account_id=? AND status IN ('sending','unknown') LIMIT 1").get(handle)||!!(this.services.outbox&&this.store.db.prepare("SELECT 1 FROM outbox WHERE account_id=? AND status IN ('submitting','unknown') LIMIT 1").get(handle));

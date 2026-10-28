@@ -25,13 +25,14 @@ export class ActivityFeed {
  }
  expired(row:any,now=Date.now()){if(!['draft','approved'].includes(row.status))return false;const e=parse(row.body);return !Number.isFinite(e.timestamp)||(this.triage?this.triage.age(e.timestamp,now):now-e.timestamp)>this.maxAgeHours()*3600000;}
  private freshness(now:number){const field="json_extract(m.body,'$.timestamp')",age=this.triage?.ageSql(field,now)??{sql:`(?-${field})`,params:[now]};return {sql:`json_valid(m.body) AND json_type(m.body,'$.timestamp') IN ('integer','real') AND ${age.sql}<=?`,params:[...age.params,this.maxAgeHours()*3600000]};}
- private pendingSql(now:number):{sql:string;params:number[]}{
+ private pendingSql(now:number):{sql:string;params:Array<number|string>}{
   const fresh=this.freshness(now);
   // 分级入队与动态待处理共享同一只读资格查询，避免复制普通/优先时效与忽略规则。
-  const queued=this.triage?.queuedEligibility(this.maxAgeHours())??{sql:fresh.sql+" AND json_valid(m.draft) AND json_extract(m.draft,'$.review')=1",params:fresh.params};
-  return {sql:`(m.status='unknown' OR (${fresh.sql} AND m.status IN ('draft','approved','failed')) OR (m.status='queued' AND (${queued.sql})))`,params:[...fresh.params,...queued.params]};
+  const queued=this.triage?.queuedEligibility(this.maxAgeHours(),{},now)??{sql:fresh.sql+" AND json_valid(m.draft) AND json_extract(m.draft,'$.review')=1",params:fresh.params};
+  // 显式CASE保持懒计算：已确认等无待处理状态不重复计算周期或扫描历史差量。
+  return {sql:`(CASE WHEN m.status='unknown' THEN 1 WHEN m.status IN ('draft','approved','failed') THEN CASE WHEN ${fresh.sql} THEN 1 ELSE 0 END WHEN m.status='queued' THEN CASE WHEN ${queued.sql} THEN 1 ELSE 0 END ELSE 0 END)=1`,params:[...fresh.params,...queued.params]};
  }
- private summaryFor(account:string,pending:{sql:string;params:number[]},messageSummary?:{latest:number;pending:number}){
+ private summaryFor(account:string,pending:{sql:string;params:Array<number|string>},messageSummary?:{latest:number;pending:number}){
   const m=messageSummary??this.store.db.prepare(`SELECT MAX(m.updated_at) latest,SUM(CASE WHEN ${pending.sql} THEN 1 ELSE 0 END) pending FROM messages m WHERE m.account_id=?`).get(...pending.params,account) as any;
   const p=this.store.db.prepare("SELECT MAX(updated_at) latest,SUM(CASE WHEN status='unknown' THEN 1 ELSE 0 END) pending FROM outbox WHERE account_id=? AND kind='post'").get(account) as any;
   const imports=this.importsSummary?.(account)??{latest:0,pending:0};
@@ -54,24 +55,26 @@ export class ActivityFeed {
   const rows=this.store.db.prepare("SELECT * FROM task_runs WHERE account_id=? AND task_id IN ('morning-post','evening-post') AND outbox_id IS NULL").all(account) as any[];
   return rows.map(r=>({id:'task:'+r.id,type:'post',taskOnly:true,taskId:r.task_id,runId:r.id,at:r.started_at,sortAt:r.started_at,updatedAt:Math.max(r.started_at,r.finished_at??0),status:r.status,revision:Math.max(r.started_at,r.finished_at??0),expired:false,text:r.detail??'',error:r.error??null,receipt:parse(r.receipt,null),callIds:parse(r.call_ids,[]),memory:null,tier:null,tierReason:null}));
  }
- private conversationSource(account:string,now:number,snapshotAt?:number){
-  const pending=this.pendingSql(now),fresh=this.freshness(now);
+ private conversationSource(account:string,now:number,snapshotAt?:number,changedSince?:number){
+  const pending=this.pendingSql(now),fresh=this.freshness(now),previous=changedSince!==undefined&&changedSince<now?this.pendingSql(changedSince):undefined;
   // 时序是非负毫秒；固定宽度的前缀保留(时间,id)顺序，一次分组取两种优先条目。
   const sql=`WITH source AS MATERIALIZED (
-   SELECT m.id,m.user_id,m.channel,m.updated_at,m.status,${sortTime} sort_at,CASE WHEN ${pending.sql} THEN 1 ELSE 0 END pending_item,CASE WHEN ${fresh.sql} THEN 1 ELSE 0 END fresh_item,
-    CASE WHEN json_valid(m.draft) THEN COALESCE(json_extract(m.draft,'$.review'),0) ELSE 0 END review_item
+   SELECT m.id,m.user_id,m.channel,m.updated_at,m.status,${sortTime} sort_at,CASE WHEN ${pending.sql} THEN 1 ELSE 0 END pending_item,
+    CASE WHEN m.status='generating' OR (m.status='queued' AND (CASE WHEN json_valid(m.draft) THEN json_extract(m.draft,'$.review') ELSE 0 END)=1) THEN CASE WHEN ${fresh.sql} THEN 1 ELSE 0 END ELSE 0 END fresh_item,
+    CASE WHEN m.status='queued' AND json_valid(m.draft) THEN COALESCE(json_extract(m.draft,'$.review'),0) ELSE 0 END review_item${previous?`,CASE WHEN ${previous.sql} THEN 1 ELSE 0 END previous_pending_item`:''}
    FROM messages m WHERE m.account_id=?${snapshotAt===undefined?'':` AND ${sortTime}<=?`}
   ), candidate AS MATERIALIZED (
-   SELECT *,CASE WHEN status='unknown' THEN 1 WHEN status='failed' AND fresh_item=1 THEN 2
-    WHEN fresh_item=1 AND (status='draft' OR (status='queued' AND review_item=1)) THEN 3
-    WHEN status='approved' AND fresh_item=1 THEN 4 WHEN (status='queued' AND pending_item=1) OR (status='generating' AND fresh_item=1) THEN 5 ELSE 6 END attention_rank FROM source
+   SELECT *,CASE WHEN status='unknown' THEN 1 WHEN status='failed' AND pending_item=1 THEN 2
+    WHEN (status='draft' AND pending_item=1) OR (status='queued' AND review_item=1 AND fresh_item=1) THEN 3
+    WHEN status='approved' AND pending_item=1 THEN 4 WHEN (status='queued' AND pending_item=1) OR (status='generating' AND fresh_item=1) THEN 5 ELSE 6 END attention_rank FROM source
   ), grouped AS (
    SELECT user_id,substr(MAX(printf('%020d:',sort_at)||id),22) latest_id,
     substr(MAX(printf('%02d%020d:',99-attention_rank,sort_at)||id),24) important_id,
-    MAX(sort_at) sort_at,SUM(pending_item) pending_count,MAX(MAX(updated_at,sort_at)) changed_at,MAX(updated_at) latest_update,MIN(sort_at) first_at,COUNT(*) total
+    MAX(sort_at) sort_at,SUM(pending_item) pending_count,MAX(MAX(updated_at,sort_at)) changed_at,MAX(updated_at) latest_update,MIN(sort_at) first_at,COUNT(*) total,
+    MAX(${previous?'CASE WHEN pending_item<>previous_pending_item THEN 1 ELSE 0 END':'0'}) temporal_changed
    FROM candidate GROUP BY user_id
   ) SELECT grouped.*,content.channel,content.body,content.draft,important.status important_status FROM grouped JOIN messages content ON content.id=grouped.latest_id JOIN messages important ON important.id=grouped.important_id`;
-  return {sql,params:[...pending.params,...fresh.params,account,...(snapshotAt===undefined?[]:[snapshotAt])]};
+  return {sql,params:[...pending.params,...fresh.params,...(previous?.params??[]),account,...(snapshotAt===undefined?[]:[snapshotAt])]};
  }
  /** 服务器隔离性能验收使用与实际会话查询完全相同的语句。 */
  conversationQueryPlan(){const query=this.conversationSource(this.account(),Date.now());return this.store.db.prepare('EXPLAIN QUERY PLAN '+query.sql).all(...query.params);}
@@ -80,12 +83,12 @@ export class ActivityFeed {
   const filter=query.filter??'all';if(!['all','pending','public','private','posts'].includes(filter))throw new FeedError('会话筛选无效');
   const limit=readLimit(query.limit),since=changedTime(query.changedSince),cursor=decodeCursor(query.cursor,'key'),serverTime=Date.now(),account=this.account();
   if(!account)return {items:[],nextCursor:null,pending:0,importsPending:0,serverTime,latest:0,removedKeys:[]};
-  const pending=this.pendingSql(serverTime),snapshotAt=since===undefined?cursor?.snapshotAt:undefined,source=this.conversationSource(account,serverTime,snapshotAt),rows=this.store.db.prepare(source.sql).all(...source.params) as any[];
+  const pending=this.pendingSql(serverTime),snapshotAt=since===undefined?cursor?.snapshotAt:undefined,source=this.conversationSource(account,serverTime,snapshotAt,since),rows=this.store.db.prepare(source.sql).all(...source.params) as any[],temporalKeys=new Set(rows.filter(r=>r.temporal_changed===1).map(r=>r.user_id));
   const all:any[]=rows.map(r=>{const body=parse(r.body),draft=parse(r.draft),key=r.user_id,handle=body.handle??'',title=r.channel==='private'?'私信 · '+String(key).slice(-4):handle?'@'+handle:key;
    return {key,channel:r.channel,title,handle,latestAt:r.sort_at,status:r.important_status,pending:Number(r.pending_count),preview:String(draft.text||body.text||'').slice(0,80),avatar:title.replace(/^[@\s]+/,'').slice(0,1)||'聊',firstAt:r.first_at,total:r.total,changedAt:r.changed_at};});
   const posts=[...this.postRows(account),...this.taskItems(account)].filter(r=>snapshotAt===undefined||r.sortAt<=snapshotAt).sort((a,b)=>b.sortAt-a.sortAt||(a.id<b.id?1:a.id>b.id?-1:0));
   if(posts.length){const latest=posts[0];all.push({key:'posts',channel:'posts',title:'角色帖',handle:'',latestAt:latest.sortAt,status:posts.some(r=>r.status==='unknown')?'unknown':latest.status,pending:posts.filter(r=>!('taskOnly' in r)&&r.status==='unknown').length,preview:String(latest.text??'').slice(0,80),avatar:'角',firstAt:Math.min(...posts.map(r=>r.sortAt)),total:posts.length,changedAt:Math.max(...posts.map(r=>r.updatedAt))});}
-  const changed=since===undefined?all:all.filter(r=>r.changedAt>=since||r.latestAt>=since),matches=(r:any)=>filter==='all'||filter==='pending'&&r.pending>0||filter==='posts'&&r.key==='posts'||filter===r.channel;
+  const changed=since===undefined?all:all.filter(r=>r.changedAt>=since||r.latestAt>=since||temporalKeys.has(r.key)),matches=(r:any)=>filter==='all'||filter==='pending'&&r.pending>0||filter==='posts'&&r.key==='posts'||filter===r.channel;
   // 时效流逝本身不更新 messages.updated_at；待处理增量仍须移除已自然过期的已加载会话。
   const removedKeys=since===undefined?[]:(filter==='pending'?all:changed).filter(r=>!matches(r)).map(r=>r.key);
   let filtered=changed.filter(matches).sort((a,b)=>b.latestAt-a.latestAt||(a.key<b.key?1:a.key>b.key?-1:0));
