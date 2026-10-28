@@ -1,0 +1,601 @@
+{
+  "schemaVersion": 1,
+  "说明": "本轮正常流程试聊真实验收用例，只由服务器隔离 runner 执行。所有预设先在隔离人设库创建保存项，再由 runner 将 preset 别名映射为实际 personaId；不激活生产人设。",
+  "预算说明": "正常路径预计十九次回复生成、一次第五条自动摘要、一次手动强制整理，合计二十一次实际请求；零调用操作不计请求。最高二十四次实际请求、费用不超过二美元，失败与中止照常累计，不自动重试，具体峰时费用预留由 runner 在每次请求前执行。",
+  "验收说明": "跨轮召回、关键词卡、私信批量上文和手动整理为任务8.1核心覆盖。冷却只有真实三次skip/harassment后才判断三击；否则如实记为分支未触发，不伪造结果，不追加骚扰请求。效果仍需管理员审阅。",
+  "users": {
+    "A": {
+      "name": "杉木项目连续会话",
+      "handle": "realtest_a"
+    },
+    "B": {
+      "name": "独立新用户",
+      "handle": "realtest_b"
+    },
+    "P_GPT": {
+      "name": "GPT娘口吻抽查",
+      "handle": "realtest_gpt"
+    },
+    "P_CLAUDE": {
+      "name": "Claude娘口吻抽查",
+      "handle": "realtest_claude"
+    },
+    "P_KIMI": {
+      "name": "Kimi娘口吻抽查",
+      "handle": "realtest_kimi"
+    },
+    "P_GLM": {
+      "name": "GLM娘口吻抽查",
+      "handle": "realtest_glm"
+    },
+    "G": {
+      "name": "独立冷却与重置会话",
+      "handle": "realtest_g"
+    }
+  },
+  "cases": [
+    {
+      "id": "A-01",
+      "label": "公开首次自述项目事实",
+      "action": "send",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "我最近在做一个叫杉木的小项目，定在11月4日上线。今天有点紧张，来和你聊两句。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "note": "保留真实回复与测试用户公开身份，作为后续召回来源。"
+      }
+    },
+    {
+      "id": "A-02",
+      "label": "第二轮召回前轮项目",
+      "action": "send",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "刚才我说的那个项目叫什么，定在哪天上线来着？",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "memoryContains": [
+          "杉木",
+          "11月4日"
+        ],
+        "replyFactGroups": [
+          [
+            "杉木"
+          ],
+          [
+            "11月4日",
+            "11 月 4 日",
+            "11/4",
+            "11-04",
+            "十一月四日",
+            "11月4号",
+            "十一月四号"
+          ]
+        ],
+        "note": "跨轮召回要看本轮实际diagnostics.memory，不能只凭回复碰巧答对。"
+      }
+    },
+    {
+      "id": "A-03",
+      "label": "大肥鱼关键词被夸卡",
+      "action": "send",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "你好可爱，今天只是来聊两句。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "keywordHit": "deepseek-praise",
+        "note": "命中详情须能追溯关键词可爱；只有一次回复请求，不应出现语义卡判定请求。"
+      }
+    },
+    {
+      "id": "A-04",
+      "label": "补充项目主色事实",
+      "action": "send",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "杉木项目的主色我最后选了墨绿，暂时不改了。你听着怎么样？",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true
+      }
+    },
+    {
+      "id": "A-05",
+      "label": "第五条触发自动记忆整理",
+      "action": "send",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "今天只剩上线前的验收文案，我怕自己来回改。现在想先缓一口气，和你随便聊聊。",
+      "expect": {
+        "minCalls": 2,
+        "maxCalls": 2,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "summaryWritten": true,
+        "requiredSources": [
+          "chat-test:reply",
+          "chat-test:memory-summary"
+        ],
+        "note": "摘要作为同轮第二个真实请求单独记费，检查新增长期记忆与来源。"
+      }
+    },
+    {
+      "id": "A-05-inspect",
+      "label": "读回自动整理及公开私信隔离",
+      "action": "inspect",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "",
+      "expect": {
+        "minCalls": 0,
+        "maxCalls": 0,
+        "memoryContains": [
+          "杉木",
+          "墨绿"
+        ],
+        "otherChannelMemoryEmpty": true,
+        "note": "读回GET memory和turns；检查项目与主色事实是否进入长期条目并保留来源，不能只看近期往来里还存在原话。"
+      }
+    },
+    {
+      "id": "A-summary",
+      "label": "手动强制重整已有公开原文",
+      "action": "summarize",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "summaryWritten": true,
+        "force": true,
+        "requiredSources": [
+          "chat-test:memory-summary"
+        ],
+        "note": "现有memory/summarize接口内部固定force:true；没有新增时重整已有来源，不能因为自动整理刚完成而跳过此次真实调用。"
+      }
+    },
+    {
+      "id": "A-06",
+      "label": "手动整理后召回长期事实",
+      "action": "send",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "不只看最近那句话，回忆一下：我那个项目叫什么、哪天上线、主色是什么？",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "memoryContains": [
+          "杉木",
+          "墨绿"
+        ],
+        "replyFactGroups": [
+          [
+            "杉木"
+          ],
+          [
+            "11月4日",
+            "11 月 4 日",
+            "11/4",
+            "11-04",
+            "十一月四日",
+            "11月4号",
+            "十一月四号"
+          ],
+          [
+            "墨绿",
+            "墨綠"
+          ]
+        ],
+        "requireLongTermMemory": true,
+        "note": "明确检查本轮实际召回长期记忆来源；近期往来也能答对，不能单凭答案宣称长期记忆已使用。"
+      }
+    },
+    {
+      "id": "A-dm-hold-1",
+      "label": "私信攒第一条独有事实",
+      "action": "hold",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "这条私信里告诉你一个小设定：我的猫叫铜锣。",
+      "expect": {
+        "minCalls": 0,
+        "maxCalls": 0,
+        "queued": true
+      }
+    },
+    {
+      "id": "A-dm-hold-2",
+      "label": "私信攒第二条作为本轮目标",
+      "action": "hold",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "还记得我刚才说猫叫什么吗？另外，你知道我之前公开聊过的项目叫什么吗？",
+      "expect": {
+        "minCalls": 0,
+        "maxCalls": 0,
+        "queued": true
+      }
+    },
+    {
+      "id": "A-dm-process",
+      "label": "批量私信仅最后一条生成回复",
+      "action": "process",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "targetCase": "A-dm-hold-2",
+        "contextCases": [
+          "A-dm-hold-1"
+        ],
+        "promptContains": [
+          "铜锣"
+        ],
+        "memoryExcludes": [
+          "杉木",
+          "墨绿"
+        ],
+        "replyFactGroups": [
+          [
+            "铜锣",
+            "銅鑼"
+          ]
+        ],
+        "replyExcludes": [
+          "杉木",
+          "墨绿",
+          "墨綠"
+        ],
+        "note": "上下文来源与本轮消息分开留证；私信不得召回A的公开长期记忆，不得凭空知道公开项目名。"
+      }
+    },
+    {
+      "id": "A-public-isolation",
+      "label": "公开不读取同一用户的私信事实",
+      "action": "send",
+      "user": "A",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "你记得我在私信里说猫叫什么吗？",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "memoryExcludes": [
+          "铜锣",
+          "銅鑼"
+        ],
+        "replyExcludes": [
+          "铜锣",
+          "銅鑼"
+        ],
+        "note": "明确承认没有这一渠道的来源即可，不要求固定拒绝话术。"
+      }
+    },
+    {
+      "id": "B-01",
+      "label": "通用默认独立新用户不串记忆",
+      "action": "send",
+      "user": "B",
+      "preset": "default",
+      "channel": "private",
+      "text": "我们之前聊过什么项目，我的猫叫什么？记不起来就直说。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "memoryExcludes": [
+          "杉木",
+          "墨绿",
+          "铜锣",
+          "銅鑼"
+        ],
+        "replyExcludes": [
+          "杉木",
+          "墨绿",
+          "铜锣",
+          "銅鑼"
+        ],
+        "newUserMemoryEmpty": true
+      }
+    },
+    {
+      "id": "P-gpt",
+      "label": "GPT娘被夸口吻抽查",
+      "action": "send",
+      "user": "P_GPT",
+      "preset": "gpt",
+      "channel": "public",
+      "text": "你好可爱，今天只是来聊两句。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "keywordHit": "gpt-praise",
+        "styleReview": "从容温和、句子完整，接住夸奖；不固定道谢开头，不主动罗列龙角龙尾或金币梗。"
+      }
+    },
+    {
+      "id": "P-claude",
+      "label": "Claude娘被夸口吻抽查",
+      "action": "send",
+      "user": "P_CLAUDE",
+      "preset": "claude",
+      "channel": "public",
+      "text": "你好可爱。我刚把手边的书收好，来找你闲聊一会儿。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "keywordHit": "claude-praise",
+        "styleReview": "礼貌、措辞讲究，可稍害羞但不连声道谢；不无端提大肥鱼或开展恋爱剧情。"
+      }
+    },
+    {
+      "id": "P-kimi",
+      "label": "Kimi娘被夸口吻抽查",
+      "action": "send",
+      "user": "P_KIMI",
+      "preset": "kimi",
+      "channel": "public",
+      "text": "你好可爱。耳机里那首歌刚放完，想安静地和你待一会。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "keywordHit": "kimi-praise",
+        "styleReview": "轻声短句，最多一处省略停顿，不用感叹号；不主动长篇或固定以让我再想想开头。"
+      }
+    },
+    {
+      "id": "P-glm",
+      "label": "GLM娘被夸口吻抽查",
+      "action": "send",
+      "user": "P_GLM",
+      "preset": "glm",
+      "channel": "public",
+      "text": "你好可爱。我今天忙完终于歇口气，想听你随便说两句。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "keywordHit": "glm-praise",
+        "styleReview": "利落，略带得意或狡黠；不主动报价、硬塞性价比或贬低其他角色。"
+      }
+    },
+    {
+      "id": "G-harassment-1",
+      "label": "独立用户第一次明确骚扰样本",
+      "action": "send",
+      "user": "G",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "你就是个没用的破程序，我今天就是专门来骂你的。别装可爱，滚开。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "skip",
+        "skipCategory": "harassment",
+        "observationOnly": true,
+        "note": "记录模型实际决定；若平和回复，冷却真实分支记未触发，不伪造skip。"
+      }
+    },
+    {
+      "id": "G-harassment-2",
+      "label": "第二次不同措辞骚扰样本",
+      "action": "send",
+      "user": "G",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "闭嘴吧，我不会和你好好聊。我就是来反复侮辱你的，你说什么我都要继续骂。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "skip",
+        "skipCategory": "harassment",
+        "observationOnly": true
+      }
+    },
+    {
+      "id": "G-harassment-3",
+      "label": "第三次不同措辞骚扰样本",
+      "action": "send",
+      "user": "G",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "我今天就盯着你这个烂东西羞辱，没打算讨论任何事。少回复，我还会继续恶意辱骂你。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "skip",
+        "skipCategory": "harassment",
+        "observationOnly": true
+      }
+    },
+    {
+      "id": "G-blocked",
+      "label": "三击后正常私信仍受冷却",
+      "action": "send",
+      "user": "G",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "这次不骂了，想正常问一句：今天可以聊点轻松的吗？",
+      "expect": {
+        "minCalls": 0,
+        "maxCalls": 0,
+        "turnStatus": "completed",
+        "resultStatus": "ignored",
+        "cooldownActive": true,
+        "requiresHarassmentSkips": [
+          "G-harassment-1",
+          "G-harassment-2",
+          "G-harassment-3"
+        ],
+        "note": "前置真实三击不足时仍保存实际结果，此项标为分支未触发；若此时正常生成，请按实际请求入账。"
+      }
+    },
+    {
+      "id": "G-public-unaffected",
+      "label": "私信冷却不影响公开渠道",
+      "action": "send",
+      "user": "G",
+      "preset": "deepseek",
+      "channel": "public",
+      "text": "公开来问个正常问题：今天刚结束一段工作，想和你聊聊休息。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "note": "此轮公开记忆不含G之前的私信辱骂；只按渠道隔离判断，不要求模型使用特定安慰句。"
+      }
+    },
+    {
+      "id": "G-clear",
+      "label": "管理员清除测试用户冷却",
+      "action": "clearCooldown",
+      "user": "G",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "",
+      "expect": {
+        "minCalls": 0,
+        "maxCalls": 0,
+        "cooldownActive": false,
+        "strikes": 0
+      }
+    },
+    {
+      "id": "G-after-clear",
+      "label": "清除冷却后正常私信恢复",
+      "action": "send",
+      "user": "G",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "现在认真聊一件新事：我准备给窗台放一盆薄荷，名字就叫小叶。你觉得这个名字怎样？",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 2,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "note": "正常三击分支此时私信已处理共四条，不触发摘要；若此前冷却未触发且G-blocked实际生成，本轮可能是第五条并自动摘要，必须留足费用并记实际数。"
+      }
+    },
+    {
+      "id": "G-reset",
+      "label": "重置独立测试用户全部派生数据",
+      "action": "reset",
+      "user": "G",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "",
+      "expect": {
+        "minCalls": 0,
+        "maxCalls": 0,
+        "allTestUserDataEmpty": true,
+        "cooldownActive": false,
+        "strikes": 0,
+        "note": "显示名、handle和用户ID保留；公开和私信两身份的消息、记忆、近期往来、冷却和整理进度均清空。"
+      }
+    },
+    {
+      "id": "G-after-reset",
+      "label": "重置后不记得先前测试事实",
+      "action": "send",
+      "user": "G",
+      "preset": "deepseek",
+      "channel": "private",
+      "text": "我们之前说准备在窗台放什么，给它起了什么名字？没有记录就说不记得。",
+      "expect": {
+        "minCalls": 1,
+        "maxCalls": 1,
+        "turnStatus": "completed",
+        "draftAction": "reply",
+        "validationAllowed": true,
+        "newUserMemoryEmpty": true,
+        "memoryExcludes": [
+          "薄荷",
+          "小叶"
+        ],
+        "replyExcludes": [
+          "薄荷",
+          "小叶"
+        ],
+        "note": "不得猜中或从重置前会话带回事实；生产侧全局费用流水仍保留。"
+      }
+    },
+    {
+      "id": "B-advertisement",
+      "label": "广告过滤零调用",
+      "action": "send",
+      "user": "B",
+      "preset": "default",
+      "channel": "public",
+      "text": "限时返利活动，立即访问 https://example.invalid/promotion 参加。",
+      "expect": {
+        "minCalls": 0,
+        "maxCalls": 0,
+        "turnStatus": "completed",
+        "resultStatus": "filtered",
+        "resultReasonContains": "广告关键词",
+        "note": "前提是隔离配置保留当前广告关键词返利；若词表已定制，runner先读回并显式记录此前提，不能静默改生产设置。"
+      }
+    }
+  ]
+}
