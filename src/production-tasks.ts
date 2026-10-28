@@ -61,7 +61,7 @@ export function productionTaskHandlers(workflow:Workflow){
   const state=await daily.ensure(ctx.accountId,{signal:abort,interactionId:ctx.runId});if(state.state?.callId&&state.state.interactionId===ctx.runId)callIds.push(state.state.callId);
   const assembled=await persona.assemble({config:c,persona:snapshot,message:id==='morning-post'?'请生成一条符合人格和当日虚构日程的简短早安公开帖子。':'请生成一条符合人格和当日虚构日程的简短晚安公开帖子。',channel:'public',accountId:ctx.accountId,experiences:recallRoleExperiences(store,ctx.accountId),postVariety:true,dailyState:state.state?.content??'暂无当日日程',signal:abort,interactionId,now:Date.now(),recentReplies:recentReplySamples(store,ctx.accountId,'public'),promptHints:c.promptHints,lengthRule:postingLimitPrompt('post',workflow.services.posting?.get().post,ctx.accountId)});
   for(const call of assembled.calls)if(call.callId)callIds.push(call.callId);
-  const result=await generator.complete(c,assembled.system,assembled.user,abort,undefined,{purpose:id,source:'task',accountId:ctx.accountId,channel:'public',interactionId});if(result.callId)callIds.push(result.callId);
+  const result=await generator.complete(c,assembled.system,assembled.user,abort,undefined,{purpose:id,source:'task',accountId:ctx.accountId,channel:'public',interactionId,jsonObject:true});if(result.callId)callIds.push(result.callId);
   const draft=parseDraft(result.text,{channel:'public'});
   if(draft.action==='skip')return {status:'skipped',callIds,format:recordFormat(ctx.runId,existing?.text??draft.text),detail:'模型选择跳过'};
   const capability=workflow.services.posting?.get().post,validation=validatePostingText(draft.text,'post',{accountId:ctx.accountId,capability});

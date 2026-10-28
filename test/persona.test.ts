@@ -61,7 +61,7 @@ test('一次路由覆盖全部启用条件，未知重复ID忽略并按配置顺
  try{
   const a=await f.service.assemble({persona:rules(),accountId:'worker-a',channel:'public',message:'谈谈阅读',sessionId:'stable-session',interactionId:'interaction-1'});
   assert.equal(f.requests,1);assert.deepEqual(a.hits.map(h=>h.id),['first','later']);assert.ok(a.user.indexOf('命中前序正文')<a.user.indexOf('命中后序正文'));assert.ok(!a.system.includes('命中前序正文'));assert.ok(!a.user.includes('禁止注入的关闭正文'));
-  const request=f.invocations[0],routing=JSON.parse(request.user);assert.deepEqual(routing.rules.map((r:any)=>r.id),['first','later']);assert.ok(!request.user.includes('命中前序正文'));assert.equal(request.meta.purpose,'semantic-trigger');assert.equal(request.meta.interactionId,'interaction-1');assert.equal(request.session,'stable-session');assert.equal(request.c.model.maxTokens,512);assert.equal(request.c.model.reasoning,false);
+  const request=f.invocations[0],routing=JSON.parse(request.user);assert.deepEqual(routing.rules.map((r:any)=>r.id),['first','later']);assert.ok(!request.user.includes('命中前序正文'));assert.equal(request.meta.purpose,'semantic-trigger');assert.equal(request.meta.jsonObject,true);assert.equal(request.meta.interactionId,'interaction-1');assert.equal(request.session,'stable-session');assert.equal(request.c.model.maxTokens,512);assert.equal(request.c.model.reasoning,false);
  }finally{f.close();}
 });
 
@@ -87,7 +87,7 @@ test('未保存的多轮试聊使用模拟记忆且不写消息、记忆或人�
  const f=fixture(async(n)=>({text:n===1?'{}':'{"action":"reply","text":"收到","reason":"试聊"}',input:10,output:10,cache:0}));try{
   const p=legacyPersona('未保存人格');const result=await f.service.preview({persona:p,channel:'private',messages:[{role:'user',text:'第一轮'},{role:'assistant',text:'你好'},{role:'user',text:'第二轮'}]});
   // 该人格无规则，因此只有最终生成；其格式失败也不能写入真实状态。
-  assert.equal(f.requests,1);assert.equal(result.draft,null);assert.ok(result.error);assert.ok(f.invocations[0].system.includes('未保存人格'));assert.ok(f.invocations[0].user.includes('第一轮'));assert.ok(f.invocations[0].user.includes('simulated'));
+  assert.equal(f.requests,1);assert.equal(result.draft,null);assert.ok(result.error);assert.equal(f.invocations[0].meta.jsonObject,true);assert.ok(f.invocations[0].system.includes('未保存人格'));assert.ok(f.invocations[0].user.includes('第一轮'));assert.ok(f.invocations[0].user.includes('simulated'));
   assert.equal(Number((f.store.db.prepare('SELECT COUNT(*) AS n FROM messages').get() as any).n),0);assert.equal(Number((f.store.db.prepare('SELECT COUNT(*) AS n FROM memory').get() as any).n),0);assert.equal(readPanelSettings().persona,undefined);
  }finally{f.close();}
 });

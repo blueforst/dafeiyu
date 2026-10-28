@@ -20,23 +20,34 @@ function fixture(mode:'draft'|'auto'='draft'){
  let sent:Receipt={status:'confirmed',id:'receipt-1'},lookedUp:Receipt={status:'unknown'};
  let output=JSON.stringify({action:'reply',text:'新的回复',reason:''});const sentIds:string[]=[];
  const transport:Transport={identity:async()=>identity,control:async()=>{},collect:async()=>({events:received,warnings:[]}),context:async()=> '对话资料',send:async e=>{sends++;sentIds.push(e.id);return sent;},lookup:async()=>{lookups++;return lookedUp;}};
- const generator={complete:async()=>{generations++;return {text:output,input:10,output:8,cache:0};}};
+ const callMetadata:any[]=[];
+ const generator={complete:async(_c:any,_system:string,_user:string,_signal?:AbortSignal,_session?:string,meta?:any)=>{generations++;callMetadata.push(meta);return {text:output,input:10,output:8,cache:0};}};
  const workflow=new Workflow(store,transport,generator,()=>c),outbox=new Outbox(store),memory=new MemoryService(store,generator,()=>c);
  workflow.services={outbox,memory};store.set('activeAccount','worker');
  const feed=new ActivityFeed(store,()=>workflow.accountId(),()=>c.maxAgeHours);
  const event=(id='100',extra:Partial<Event>={}):Event=>({id:'x:'+id,platformId:id,targetId:id,channel:'public',userId:'x:alice',handle:'alice',text:'关于这件事情，你怎么看？',url:'https://x.com/alice/status/'+id,conversationId:id,timestamp:Date.now(),timestampReliable:true,...extra});
  const add=(e:Event,status='draft',draft:Draft={action:'reply',text:'原来的草稿',reason:''})=>{store.ingest(e,'worker');const row=store.getMessage(e.id,'worker');store.update(row.id,status,{draft});return store.getMessage(row.id);};
  const approve=(row:any,text=JSON.parse(row.draft).text)=>feed.mutate(row.id,'approve',{text,revision:row.updated_at});
- return {dir,store,c,transport,generator,workflow,outbox,memory,feed,event,add,approve,counts:()=>({sends,generations,lookups}),sentIds,
+ return {dir,store,c,transport,generator,workflow,outbox,memory,feed,event,add,approve,callMetadata,counts:()=>({sends,generations,lookups}),sentIds,
   setEvents:(value:Event[])=>received=value,setIdentity:(value:Identity)=>identity=value,setOutput:(value:string)=>output=value,setReceipt:(value:Receipt)=>sent=value,setLookup:(value:Receipt)=>lookedUp=value,
   close(){workflow.stop();store.db.close();rmSync(dir,{recursive:true,force:true});if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;}};
 }
 const notSubmitted:Receipt={status:'not_submitted',reason:'编辑器限制已变化',validation:validatePostingText('中'.repeat(141),'reply')};
 
+test('旧记忆摘要 fallback 保留普通文本，不继承同用途的新 JSON 对象约束',async()=>{
+ const f=fixture();try{
+  delete f.workflow.services.memory;
+  await f.workflow.resume();f.add(f.event('908'),'confirmed');f.setOutput('只根据原文保留的纯文本摘要');
+  await f.workflow.summarize('x:alice','public');
+  assert.equal(f.counts().generations,1);assert.equal(f.callMetadata[0].purpose,'memory-summary');assert.equal(f.callMetadata[0].jsonObject,undefined);assert.equal(f.counts().sends,0);
+  assert.ok(f.store.context('x:alice','public','worker').memories.some(row=>row.summary==='只根据原文保留的纯文本摘要'));
+ }finally{f.close();}
+});
+
 test('未遗忘用户的遗忘措辞走普通分级和生成，不改变遗忘状态',async()=>{
  for(const text of ['忘了我吧','忘记我吧','忘我吧','忘了我吧。！','@worker 忘了我吧']){
   const f=fixture();try{await f.workflow.resume();f.workflow.services.triage=new ReplyTriage(f.store);const event=f.event('901',{text}),epoch=f.store.epoch(event.userId,'worker');f.setEvents([event]);
-   await f.workflow.tick();assert.equal(f.store.forgotten(event.userId,'worker'),false,text);assert.equal(f.store.epoch(event.userId,'worker'),epoch,text);const row=f.store.getMessage(event.id,'worker');assert.ok(row,text);assert.equal(row.status,'draft',text);assert.equal(row.tier,'priority');assert.equal(JSON.parse(row.draft).text,'新的回复');assert.equal(f.counts().generations,1);assert.equal(f.counts().sends,0);
+   await f.workflow.tick();assert.equal(f.store.forgotten(event.userId,'worker'),false,text);assert.equal(f.store.epoch(event.userId,'worker'),epoch,text);const row=f.store.getMessage(event.id,'worker');assert.ok(row,text);assert.equal(row.status,'draft',text);assert.equal(row.tier,'priority');assert.equal(JSON.parse(row.draft).text,'新的回复');assert.equal(f.counts().generations,1);assert.equal(f.callMetadata[0].jsonObject,true);assert.equal(f.counts().sends,0);
   }finally{f.close();}
  }
 });

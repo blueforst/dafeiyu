@@ -120,11 +120,11 @@ test('任务关联标识贯穿成功与失败日程调用，失败详情保留�
   const linked:Generator={async complete(c,system,user,signal,session,meta){observed=meta;return {text:JSON.stringify(content(JSON.parse(user).date)),input:1,output:1,cache:0,callId:'task-call-success'};}};
   const success=new DailyStateService(f.store,linked,()=>structuredClone(exampleConfig) as Config,()=>f.now);
   const ready=await success.ensure('worker-a',{interactionId:'task-run-success'});
-  assert.equal(observed.interactionId,'task-run-success');assert.equal(observed.purpose,'daily-state');assert.equal(ready.interactionId,'task-run-success');assert.equal(ready.state?.interactionId,'task-run-success');assert.equal(ready.callId,'task-call-success');
+  assert.equal(observed.interactionId,'task-run-success');assert.equal(observed.purpose,'daily-state');assert.equal(observed.jsonObject,true);assert.equal(ready.interactionId,'task-run-success');assert.equal(ready.state?.interactionId,'task-run-success');assert.equal(ready.callId,'task-call-success');
   const failing:Generator={async complete(c,system,user,signal,session,meta){observed=meta;throw Object.assign(new Error('模型失败'),{callId:'task-call-failed'});}};
   const service=new DailyStateService(f.store,failing,()=>structuredClone(exampleConfig) as Config,()=>f.now);
   const failed=await service.ensure('worker-b',{interactionId:'task-run-failure'});
-  assert.equal(observed.interactionId,'task-run-failure');assert.equal(failed.interactionId,'task-run-failure');assert.equal(failed.callId,'task-call-failed');assert.equal(service.describe('worker-b').interactionId,'task-run-failure');assert.equal(service.describe('worker-b').callId,'task-call-failed');
+  assert.equal(observed.interactionId,'task-run-failure');assert.equal(observed.jsonObject,true);assert.equal(failed.interactionId,'task-run-failure');assert.equal(failed.callId,'task-call-failed');assert.equal(service.describe('worker-b').interactionId,'task-run-failure');assert.equal(service.describe('worker-b').callId,'task-call-failed');
   await assert.rejects(service.ensure('worker-c',{interactionId:''}),/关联标识/);
  }finally{f.close();}
 });

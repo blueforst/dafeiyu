@@ -14,7 +14,8 @@ function fixture(){
  const path=mkdtempSync(tmpdir()+'/memory-test-'),prior=process.env.DATA_DIR;process.env.DATA_DIR=path;
  const store=new Store(path+'/workflow.sqlite');
  let at=Date.now(),calls=0,produce:(system:string,user:string)=>any=(_system,user)=>{const r=JSON.parse(user);return {items:r.incoming.map((x:any)=>({type:'fact',text:'事实'+x.id,sourceIds:[x.id]}))};};
- const generator:Generator={complete:async(_c,system,user)=>{calls++;return {text:JSON.stringify(await produce(system,user)),input:10,output:5,cache:0};}};
+ const metadata:any[]=[];
+ const generator:Generator={complete:async(_c,system,user,_signal,_session,meta)=>{calls++;metadata.push(meta);return {text:JSON.stringify(await produce(system,user)),input:10,output:5,cache:0};}};
  const memory=new MemoryService(store,generator,()=>exampleConfig as Config,()=>at);
  const add=(n:number,over:Partial<Event>={},accountId='work',status='confirmed')=>{
   const e:Event={id:'x:'+n,platformId:String(n),channel:'public',userId:'x:alice',handle:'alice',text:'用户自述'+n,url:'https://x.com/alice/status/'+n,conversationId:String(n),timestamp:at,...over};
@@ -22,7 +23,7 @@ function fixture(){
   if(row)store.update(row.id,status,{draft:{action:'reply',text:'角色回复'+n,reason:''}});
   return row?.id as string;
  };
- return {path,store,memory,add,generator,calls:()=>calls,setNow:(n:number)=>at=n,setProduce:(fn:typeof produce)=>produce=fn,close:()=>{store.db.close();if(prior===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=prior;rmSync(path,{recursive:true,force:true});}};
+ return {path,store,memory,add,generator,metadata,calls:()=>calls,setNow:(n:number)=>at=n,setProduce:(fn:typeof produce)=>produce=fn,close:()=>{store.db.close();if(prior===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=prior;rmSync(path,{recursive:true,force:true});}};
 }
 
 test('召回默认三次七天，草稿不冒充发送且公开不含私信',()=>{
@@ -47,7 +48,7 @@ test('旧摘要原文保留且来源不完整，未知归属不交给当前账�
 test('处理游标计入早平台时间，整理合并旧事实且无新增不调用',async()=>{
  const f=fixture();try{
   for(let i=1;i<=5;i++)f.add(i,{timestamp:Date.now()-86400000});
-  assert.equal(f.memory.due('work')[0].newCount,5);await f.memory.summarize('x:alice','public','work');assert.equal(f.calls(),1);assert.equal(f.memory.items('x:alice','public','work').length,5);
+  assert.equal(f.memory.due('work')[0].newCount,5);await f.memory.summarize('x:alice','public','work');assert.equal(f.calls(),1);assert.equal(f.metadata[0].jsonObject,true);assert.equal(f.memory.items('x:alice','public','work').length,5);
   assert.deepEqual(f.memory.due('work'),[]);assert.equal((await f.memory.summarize('x:alice','public','work')).written,false);assert.equal(f.calls(),1);
   f.add(6,{timestamp:Date.now()-2*86400000});assert.equal(f.memory.due('work',1)[0].newCount,1);
   f.setProduce((_s,user)=>{const p=JSON.parse(user);assert.equal(p.existing.length,5);return {items:[{type:'preference',text:'新的偏好',sourceIds:[p.incoming[0].id]}]};});

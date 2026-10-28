@@ -110,7 +110,7 @@ test('双版本回放复用组装并独立会话和计费，不改写消息、�
  const f=fixture();try{
   const event=f.add(1);captureGenerationSnapshot(f.store,event,{conversation:[{text:'当时对话'}],memory:{text:'不得复活的旧记忆'},personaRevision:0},f.now());
   const state=f.tableState(),estimate=f.estimate({baselineMode:'saved'}),run=f.replay.start(estimate.estimateId,true);await f.replay.waitIdle();
-  const detail=f.replay.detail(run.id);assert.equal(detail.status,'completed');assert.equal(detail.items[0].candidate.draft.text,'候选自然回应');assert.equal(f.calls.length,2);assert.ok(f.calls.every(x=>x.meta.purpose==='persona-replay'&&x.meta.source==='panel-replay'&&x.meta.interactionId===run.id));assert.equal(new Set(f.calls.map(x=>x.session)).size,2);assert.ok(f.calls.every(x=>x.session?.startsWith('replay-'+run.id)));assert.ok(f.calls.every(x=>x.user.includes('当时对话')&&!x.user.includes('不得复活的旧记忆')));assert.deepEqual(f.tableState(),state);assert.equal(detail.summary.fees.calls,2);assert.equal(f.store.get('control'),'paused');
+  const detail=f.replay.detail(run.id);assert.equal(detail.status,'completed');assert.equal(detail.items[0].candidate.draft.text,'候选自然回应');assert.equal(f.calls.length,2);assert.ok(f.calls.every(x=>x.meta.purpose==='persona-replay'&&x.meta.source==='panel-replay'&&x.meta.interactionId===run.id&&x.meta.jsonObject===true));assert.equal(new Set(f.calls.map(x=>x.session)).size,2);assert.ok(f.calls.every(x=>x.session?.startsWith('replay-'+run.id)));assert.ok(f.calls.every(x=>x.user.includes('当时对话')&&!x.user.includes('不得复活的旧记忆')));assert.deepEqual(f.tableState(),state);assert.equal(detail.summary.fees.calls,2);assert.equal(f.store.get('control'),'paused');
  }finally{await f.close();}
 });
 
@@ -126,7 +126,7 @@ test('实际回复基线不请求模型，旧消息标注上下文不完整，�
 test('回放语义判定与回复全部按persona-replay计费，不混入生产语义用途',async()=>{
  const f=fixture();try{
   f.add(1);const candidate=legacyPersona('未保存候选');candidate.triggers=[{id:'greet',title:'问候',condition:'对方问好',content:'自然问候',enabled:true,order:0}];
-  const run=f.replay.start(f.estimate({persona:candidate}).estimateId,true);await f.replay.waitIdle();assert.equal(f.calls.length,2);assert.ok(f.calls.some(x=>x.system.includes('语义路由器')));assert.ok(f.calls.every(x=>x.meta.purpose==='persona-replay'&&x.meta.source==='panel-replay'));assert.equal(f.ledger.calls({purpose:'semantic-trigger'}).items.length,0);assert.equal(f.replay.detail(run.id).summary.fees.calls,2);
+  const run=f.replay.start(f.estimate({persona:candidate}).estimateId,true);await f.replay.waitIdle();assert.equal(f.calls.length,2);assert.ok(f.calls.some(x=>x.system.includes('语义路由器')));assert.ok(f.calls.every(x=>x.meta.purpose==='persona-replay'&&x.meta.source==='panel-replay'&&x.meta.jsonObject===true));assert.equal(f.ledger.calls({purpose:'semantic-trigger'}).items.length,0);assert.equal(f.replay.detail(run.id).summary.fees.calls,2);
  }finally{await f.close();}
 });
 

@@ -274,7 +274,7 @@ export class ReplayRunner {
   this.ensureAccount(prepared.accountId);
   const current=this.store.getMessage(sample.id,prepared.accountId);
   if(!this.allowed(current,prepared.accountId)||sourceHash(current)!==sourceHash(sample)||memoryRevision()!==privacyRevision)throw new ReplayError('来源或记忆已变化或移除',410);
-  const result=await generator.complete(config,assembled.system,assembled.user,signal,sessionId,{purpose:'persona-replay',source:'panel-replay',side,accountId:prepared.accountId,channel:sample.channel,interactionId:runId});
+  const result=await generator.complete(config,assembled.system,assembled.user,signal,sessionId,{purpose:'persona-replay',source:'panel-replay',side,accountId:prepared.accountId,channel:sample.channel,interactionId:runId,jsonObject:true});
   const parsed=replayDraft(result.text,sample.channel),draft=parsed.draft,lengthViolation=draft.action==='reply'&&sample.channel==='public'&&twitterText.parseTweet(draft.text).weightedLength>280;
   return {draft,validationError:parsed.validationError,lengthViolation,contextIncomplete:!context.hasSnapshot||!!body.truncated,warning:assembled.warning,hits:assembled.hits,callId:result.callId??null};
  }

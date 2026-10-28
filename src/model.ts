@@ -39,7 +39,7 @@ export function requestMaxTokens(cap:number, model:Model<Api>, level:string):num
 
 export type CompletionResult = GenerationResult & { stopReason:string; errorMessage?:string; latencyMs:number; actualModel?:string };
 export type ResolvedCompletionModel=Awaited<ReturnType<typeof resolveRuntimeModel>>;
-export type CompletionOptions = {signal?:AbortSignal; maxTokens?:number; reasoning?:string; sessionId?:string;resolvedModel?:ResolvedCompletionModel};
+export type CompletionOptions = {signal?:AbortSignal; maxTokens?:number; reasoning?:string; sessionId?:string;resolvedModel?:ResolvedCompletionModel;jsonObject?:boolean};
 /** 内部回放冻结目录模型与真实 Pi 价格；Models 仅在内存使用，绝不序列化到配置。 */
 export async function freezeCompletionModel(model:Config['model']):Promise<ResolvedCompletionModel>{const resolved=await resolveRuntimeModel(model);return {...resolved,model:structuredClone(resolved.model)};}
 
@@ -50,8 +50,14 @@ export async function runCompletion(m:Config['model'], key:string, system:string
  const timeout = AbortSignal.timeout(m.timeoutMs);
  const context:Context = { systemPrompt: system, messages: [{ role: 'user', content: user, timestamp: Date.now() }] };
  const started = Date.now();
+ // 只有调用方明确要求对象JSON、且协议为Chat Completions时才使用原生格式约束。
+ // 其他协议保持已有行为；Chat端点拒绝参数时正常失败，不降级或重发。
+ const onPayload=opts.jsonObject===true&&model.api==='openai-completions'?(payload:unknown)=>{
+  if(!payload||typeof payload!=='object'||Array.isArray(payload))throw new Error('模型请求结构无法施加 JSON 输出约束');
+  return {...payload,response_format:{type:'json_object'}};
+ }:undefined;
  // 工作流传入稳定会话；独立连接测试使用新会话。pi 按服务商和地址添加对应会话头。
- const r = await models.completeSimple(model, context, { apiKey: key, sessionId: opts.sessionId || 'role-workflow-' + randomUUID(), identity: { userAgent: { custom: 'role-workflow/0.1' } }, headers: m.provider === 'commandcode' ? { Authorization: 'Bearer ' + key } : undefined, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout });
+ const r = await models.completeSimple(model, context, { apiKey: key, sessionId: opts.sessionId || 'role-workflow-' + randomUUID(), identity: { userAgent: { custom: 'role-workflow/0.1' } }, headers: m.provider === 'commandcode' ? { Authorization: 'Bearer ' + key } : undefined, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,onPayload,maxRetries:0 });
  // Pi 的错误占位 usage 可能全为零；没有实际返回的用量不视为免费。
  const meaningful=Object.entries(r.usage||{}).some(([k,v])=>k!=='cost'&&typeof v==='number'&&v>0);
  // Pi 在成功但上游没有 usage 时也保留初始化零值，无法以 stopReason 证明返回过用量。
@@ -71,7 +77,7 @@ export class ModelService implements Generator {
  async request(m:Config['model'],key:string,system:string,user:string,opts:CompletionOptions={},metadata:CallMetadata={}):Promise<CompletionResult>{
   const id=this.ledger?.start(m,metadata),started=Date.now();
   try{
-   const r=await this.run(m,key,system,user,{...opts,maxTokens:metadata.maxTokens??opts.maxTokens,reasoning:metadata.reasoning??opts.reasoning});
+   const r=await this.run(m,key,system,user,{...opts,maxTokens:metadata.maxTokens??opts.maxTokens,reasoning:metadata.reasoning??opts.reasoning,jsonObject:metadata.jsonObject??opts.jsonObject});
    // 注入的测试实现可只返回旧版三个 token 字段，未知分项保留 null。
    const partialUsage=r.usage??{input:r.input,output:r.output,cacheRead:r.cache};
    const meaningful=Object.values(partialUsage).some(v=>typeof v==='number'&&v>0);

@@ -162,7 +162,7 @@ export class DailyStateService {
     AND revision=(SELECT MAX(x.revision) FROM daily_revisions x WHERE x.account_id=d.account_id AND x.local_date=d.local_date)
     ORDER BY local_date DESC LIMIT 7`).all(accountId,historyStart,date) as any[]).map(row=>({date:row.local_date,content:JSON.parse(row.content)}));
    const system='根据给定的人格设定和近七日虚构日程，创作今天一致的虚构生活日程。所有内容均为角色虚构设定，不是已发生的真实事件或用户事实。不要把历史日期的往事照搬成今天真实发生的事情。只输出 JSON，结构为 {"date":"YYYY-MM-DD","fictional":true,"periods":[{"start":"06:00","end":"09:00","activity":"活动"}],"meals":{"breakfast":"早餐","lunch":"午餐","dinner":"晚餐"},"activities":["活动"],"mood":"心情"}。时段按顺序且不重叠，覆盖合理的当日生活。';
-   const response=await this.generator.complete(c,system,JSON.stringify({date,timezone:'Asia/Shanghai',persona,history}),opts.signal,'role-workflow-'+interactionId,{purpose:'daily-state',source:opts.manual?'panel':'task',accountId,interactionId});
+   const response=await this.generator.complete(c,system,JSON.stringify({date,timezone:'Asia/Shanghai',persona,history}),opts.signal,'role-workflow-'+interactionId,{purpose:'daily-state',source:opts.manual?'panel':'task',accountId,interactionId,jsonObject:true});
    this.store.db.prepare('UPDATE daily_attempts SET call_id=? WHERE account_id=? AND local_date=?').run(response.callId??null,accountId,date);
    const content=validateDailyContent(parseJSON(response.text),date);
    if(opts.signal?.aborted)throw new DailyStateError('日程生成已中止',409);

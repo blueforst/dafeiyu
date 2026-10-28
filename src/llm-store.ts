@@ -5,7 +5,7 @@ import type { Store } from './store.js';
 
 export type LlmPurpose = 'reply'|'semantic-trigger'|'daily-state'|'memory-summary'|'model-test'|'persona-preview'|'morning-post'|'evening-post'|string;
 export type ReplaySide='baseline'|'candidate'|'shared';
-export type CallMetadata = { purpose?:LlmPurpose; source?:string; accountId?:string; channel?:string; interactionId?:string; maxTokens?:number; reasoning?:string;side?:ReplaySide };
+export type CallMetadata = { purpose?:LlmPurpose; source?:string; accountId?:string; channel?:string; interactionId?:string; maxTokens?:number; reasoning?:string;jsonObject?:boolean;side?:ReplaySide };
 export type CostSnapshot = { input:number; output:number; cacheRead:number; cacheWrite:number; total:number };
 export type FullUsage = { input:number|null; output:number|null; cacheRead:number|null; cacheWrite:number|null; cacheWrite1h?:number|null; totalTokens:number|null; reasoning?:number|null };
 export type PricingStatus = 'priced'|'unpriced'|'unknown';
