@@ -7,7 +7,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {once} from 'node:events';
 import {launch} from '/opt/role-camoufox/launch.mjs';
-import {BrowserResourceGuard,assessCompliance,readBrowserMemory} from '../dist/unattended-health.js';
+import {BrowserResourceGuard,assessCompliance,readBrowserMemory,waitForIdentityReady} from '../dist/unattended-health.js';
 import {readCompliance,identity as browserIdentity,collectPublicWithBudget,collectPrivateWithBudget} from '../dist/browser.js';
 import {Store} from '../dist/store.js';
 import {Workflow} from '../dist/workflow.js';
@@ -51,6 +51,8 @@ try{
  const missing=await readCompliance(page,'fixture_worker',async(p,url)=>{await p.setContent(url.includes('/settings/')?'<main><label for="quality">Quality filter</label><input id="quality" type="checkbox"></main>':'<main><div data-testid="UserName">普通测试角色</div><div data-testid="UserDescription">缺少披露说明</div></main>');});const missingResult=assessCompliance(missing);assert.equal(missingResult.disclosure,'missing');assert.equal(missingResult.automatedLabel,'missing');assert.equal(missingResult.qualityFilter,'off');checks('合规合成DOM：缺披露、缺标签与过滤关闭分别呈现', {syntheticDOM:true});
  for(const [message,restriction] of [['Your account is suspended','suspended'],['Your account is locked','locked'],['Your account is read-only','read_only'],['Your account is restricted','limited']]){await page.setContent('<a data-testid="AppTabBar_Profile_Link" href="/fixture_worker"></a><main><div role="alert">'+message+'</div></main>');assert.equal((await browserIdentity(page)).restricted,restriction);}
  await page.setContent('<a data-testid="AppTabBar_Profile_Link" href="/fixture_worker"></a><main><article data-testid="tweet">Your account is suspended</article><div data-testid="UserDescription">Your account is restricted</div></main>');assert.equal((await browserIdentity(page)).restricted,undefined);checks('受限合成DOM：四类自身提示与引用／简介误判保护', {syntheticDOM:true});
+ await page.setContent('<main>合成 SPA 账号导航尚未水合</main>');let hydrationReads=0;
+ const hydrated=await waitForIdentityReady(async()=>{const current=await browserIdentity(page);hydrationReads++;if(hydrationReads===1){assert.equal(current.loggedIn,false);await page.evaluate(()=>{const a=document.createElement('a');a.dataset.testid='AppTabBar_Profile_Link';a.setAttribute('href','/fixture_worker');document.body.appendChild(a);});}return current;},'fixture_worker',{timeoutMs:3000,intervalMs:25});assert.equal(hydrated.loggedIn,true);assert.ok(hydrationReads>=2);checks('DOMContentLoaded后的实际合成SPA水合延迟等待，不误判登录丢失', {syntheticDOM:true,identityReads:hydrationReads});
  const stamp=new Date().toISOString(),article=(handle,id,text)=>'<article data-testid="tweet"><a href="/'+handle+'/status/'+id+'"><time datetime="'+stamp+'"></time></a><div data-testid="tweetText">'+text+'</div></article>';
  let publicClock=0;const publicNavigations=[];
  const partialPublic=await collectPublicWithBudget({page,handle:'fixture_worker',source:2,deadline:10,now:()=>publicClock,navigate:async(p,url)=>{publicNavigations.push(url);if(url==='https://x.com/fixture_worker')await p.setContent('<main>'+article('fixture_worker','101','合成原帖一')+article('fixture_worker','102','合成原帖二')+'</main>');else if(url==='https://x.com/fixture_worker/status/101'){await p.setContent('<main>'+article('alice','201','已读到的公开回复')+'</main>');publicClock=11;}else throw Error('超预算后不得开始第二个帖文读取');}});

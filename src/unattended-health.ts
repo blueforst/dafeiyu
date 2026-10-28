@@ -71,22 +71,56 @@ export class WorkflowWatchdog {
  private reset(){this.attempts=0;this.retryAfter=0;this.fault='';}
 }
 
-export type BrowserMemory={bytes:number|null;limitBytes:number|null;ratio:number|null;source:'cgroup'|'process-rss'|'unavailable'};
+export type BrowserMemory={bytes:number|null;limitBytes:number|null;ratio:number|null;source:'cgroup'|'process-rss'|'unavailable';rawBytes?:number;inactiveFileBytes?:number;measurement?:'working-set'|'cgroup-current'|'process-rss'};
 /** 只读取固定 cgroup 与 /proc，测试可注入只读文件系统；不执行宿主命令。 */
 export function readBrowserMemory(options:{cgroupRoot?:string;procRoot?:string;rootPid?:number;fallbackLimitBytes?:number;read?:(path:string)=>string;list?:(path:string)=>string[]}={}):BrowserMemory {
  const read=options.read??((path:string)=>readFileSync(path,'utf8')),list=options.list??((path:string)=>readdirSync(path));const cgroup=options.cgroupRoot??'/sys/fs/cgroup';
- try{const bytes=Number(read(cgroup+'/memory.current').trim()),raw=read(cgroup+'/memory.max').trim(),limit=raw==='max'?null:Number(raw);if(Number.isFinite(bytes)&&bytes>=0&&(limit===null||(Number.isFinite(limit)&&limit>0)))return {bytes,limitBytes:limit,ratio:limit===null?null:bytes/limit,source:'cgroup'};}catch{}
+ try{const current=Number(read(cgroup+'/memory.current').trim()),raw=read(cgroup+'/memory.max').trim(),limit=raw==='max'?null:Number(raw);if(Number.isFinite(current)&&current>=0&&(limit===null||(Number.isFinite(limit)&&limit>0))){
+   // 与 Linux 容器 working set 口径一致，只扣 inactive_file；活动映射与 shmem 仍计入压力。
+   let inactive:number|undefined;try{const match=read(cgroup+'/memory.stat').match(/^inactive_file\s+(\d+)$/m);if(match)inactive=Math.min(current,Number(match[1]));}catch{}
+   const bytes=Math.max(0,current-(inactive??0));return {bytes,rawBytes:current,...(inactive!==undefined?{inactiveFileBytes:inactive}:{}),measurement:inactive===undefined?'cgroup-current':'working-set',limitBytes:limit,ratio:limit===null?null:bytes/limit,source:'cgroup'};
+  }}catch{}
  try{
   const root=options.procRoot??'/proc',processes=new Map<number,{parent:number;rss:number;name:string}>();
   for(const pid of list(root).filter(v=>/^\d+$/.test(v))){try{const stat=read(root+'/'+pid+'/status');const name=stat.match(/^Name:\s*(.+)$/m)?.[1]??'';const parent=Number(stat.match(/^PPid:\s*(\d+)/m)?.[1]);const rss=Number(stat.match(/^VmRSS:\s*(\d+)\s+kB/m)?.[1])*1024;if(Number.isFinite(parent)&&Number.isFinite(rss))processes.set(Number(pid),{parent,rss,name});}catch{}}
   const selected=new Set<number>(options.rootPid?[options.rootPid]:[...processes].filter(([,p])=>/camoufox|firefox/i.test(p.name)).map(([pid])=>pid));
   for(let changed=true;changed;){changed=false;for(const [pid,p] of processes)if(selected.has(p.parent)&&!selected.has(pid)){selected.add(pid);changed=true;}}
   if(!selected.size)throw new Error('浏览器进程不可确认');const bytes=[...selected].reduce((sum,pid)=>sum+(processes.get(pid)?.rss??0),0),limit=options.fallbackLimitBytes??2*1024*1024*1024;
-  return {bytes,limitBytes:limit,ratio:limit?bytes/limit:null,source:'process-rss'};
+  return {bytes,limitBytes:limit,ratio:limit?bytes/limit:null,source:'process-rss',measurement:'process-rss'};
  }catch{return {bytes:null,limitBytes:null,ratio:null,source:'unavailable'};}
 }
-export type BrowserResourceHealth={sessionId?:string;stale?:boolean;at:number;startedAt:number;memory:BrowserMemory;lastRestartAt:number|null;lastRestartReason:string|null;restarts:number;restartError:string|null};
-export type BrowserGuardDeps={readMemory?:()=>BrowserMemory;clock?:()=>number;restart:()=>Promise<Identity>;identity:()=>Promise<Identity>;settings?:()=>Partial<HealthSettings>;onRestart?:(info:{at:number;reason:string;ok:boolean})=>void};
+export type BrowserResourceHealth={sessionId?:string;stale?:boolean;at:number;startedAt:number;memory:BrowserMemory;lastRestartAt:number|null;lastRestartReason:string|null;restarts:number;restartError:string|null;lastRestartAttemptAt?:number;lastRestartStage?:BrowserRecoveryStage;lastRestartFailureCode?:BrowserRecoveryCode|null;lastRestartDurationMs?:number};
+export type BrowserGuardDeps={readMemory?:()=>BrowserMemory;clock?:()=>number;restart:(stage?:(value:BrowserRecoveryStage)=>void,expectedHandle?:string)=>Promise<Identity>;identity:()=>Promise<Identity>;settings?:()=>Partial<HealthSettings>;onRestart?:(info:{at:number;reason:string;ok:boolean;stage?:BrowserRecoveryStage;failureCode?:BrowserRecoveryCode;durationMs?:number;memory?:BrowserMemory})=>void};
+export type BrowserRecoveryStage='precheck-identity'|'close-context'|'launch-context'|'navigate-home'|'wait-identity'|'verify-identity'|'completed';
+export type BrowserRecoveryCode='identity-not-ready'|'identity-mismatch'|'needs-human'|'account-restricted'|'identity-read-failed'|'timeout'|'page-closed'|'context-closed'|'launch-failed'|'navigation-failed'|'unexpected-error';
+export class BrowserRecoveryFailure extends Error {
+ constructor(readonly recoveryCode:BrowserRecoveryCode,readonly recoveryStage:BrowserRecoveryStage){super('浏览器恢复阶段未完成：'+recoveryStage+'／'+recoveryCode);}
+}
+/** 只产有界原因码；底层异常正文、页面文本、URL 与认证数据均不进入日志。 */
+export function browserRecoveryCode(error:unknown,stage:BrowserRecoveryStage):BrowserRecoveryCode {
+ if(error instanceof BrowserRecoveryFailure)return error.recoveryCode;
+ const value=String((error as any)?.message??''),name=String((error as any)?.name??'');
+ if(name==='TimeoutError'||/timed? out|timeout|超时/i.test(value))return 'timeout';
+ if(/target page|page has been closed|page.*closed/i.test(value))return 'page-closed';
+ if(/context.*closed|browser.*closed/i.test(value))return 'context-closed';
+ return stage==='launch-context'?'launch-failed':stage==='navigate-home'?'navigation-failed':stage==='wait-identity'||stage==='precheck-identity'?'identity-read-failed':'unexpected-error';
+}
+/** DOMContentLoaded 只代表文档已到达；SPA 身份必须有界等待后单独确认。 */
+export async function waitForIdentityReady(read:()=>Promise<Identity>,expectedHandle:string,options:{timeoutMs?:number;intervalMs?:number;clock?:()=>number;wait?:(ms:number)=>Promise<void>}={}):Promise<Identity>{
+ const now=options.clock??Date.now,wait=options.wait??(ms=>new Promise(resolve=>setTimeout(resolve,ms))),until=now()+Math.max(1,Math.min(60000,options.timeoutMs??30000)),interval=Math.max(1,Math.min(1000,options.intervalMs??250)),expected=expectedHandle.replace(/^@/,'').toLowerCase();
+ let lastCode:BrowserRecoveryCode='identity-not-ready';
+ for(;;){
+  try{let timer:ReturnType<typeof setTimeout>|undefined;let identity:Identity;
+   try{identity=await Promise.race([read(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new BrowserRecoveryFailure('timeout','wait-identity')),Math.max(1,until-now()));})]);}finally{clearTimeout(timer);}
+   const handle=String(identity.handle||'').replace(/^@/,'').toLowerCase();
+   if(identity.restricted)throw new BrowserRecoveryFailure('account-restricted','wait-identity');
+   if(identity.needsHuman)throw new BrowserRecoveryFailure('needs-human','wait-identity');
+   if(identity.loggedIn&&handle){if(expected&&handle!==expected)throw new BrowserRecoveryFailure('identity-mismatch','wait-identity');return identity;}
+   lastCode='identity-not-ready';
+  }catch(error){if(error instanceof BrowserRecoveryFailure)throw error;lastCode=browserRecoveryCode(error,'wait-identity');if(lastCode==='page-closed'||lastCode==='context-closed')throw new BrowserRecoveryFailure(lastCode,'wait-identity');}
+  const remaining=until-now();if(remaining<=0)throw new BrowserRecoveryFailure(lastCode,'wait-identity');await wait(Math.min(interval,remaining));
+ }
+}
 export class BrowserResourceGuard {
  private state:BrowserResourceHealth;private restarting=false;
  constructor(readonly deps:BrowserGuardDeps){const now=(deps.clock??Date.now)();this.state={sessionId:randomUUID(),at:now,startedAt:now,memory:{bytes:null,limitBytes:null,ratio:null,source:'unavailable'},lastRestartAt:null,lastRestartReason:null,restarts:0,restartError:null};}
@@ -95,14 +129,14 @@ export class BrowserResourceGuard {
  async before(operation:string,control:string,expectedHandle=''){
   const state=this.sample(),config=healthSettings(this.deps.settings?.()??{}),reason=state.memory.ratio!==null&&state.memory.ratio>=config.memoryRatio?'memory-threshold':state.at-state.startedAt>=config.browserMaxAgeHours*3600000?'runtime-threshold':null;
   if(!reason||this.restarting||control==='manual'||control==='draining'||['send','post','lookup','lookupPost','control','health'].includes(operation))return state;
-  this.restarting=true;
+  this.restarting=true;const started=(this.deps.clock??Date.now)();let stage:BrowserRecoveryStage='precheck-identity';this.state.lastRestartAttemptAt=started;this.state.lastRestartReason=reason;
   try{
-   const previous=expectedHandle||String((await this.deps.identity()).handle||'').replace(/^@/,'').toLowerCase();
-   if(!previous)throw new Error('重启前无法确认工作账号');
-   const identity=await this.deps.restart(),handle=String(identity.handle||'').replace(/^@/,'').toLowerCase();
-   if(!identity.loggedIn||identity.needsHuman||(identity as any).restricted||handle!==previous)throw new Error('浏览器重启后登录身份失效或改变');
-   const at=(this.deps.clock??Date.now)();this.state.startedAt=at;this.state.lastRestartAt=at;this.state.lastRestartReason=reason;this.state.restarts++;this.state.restartError=null;this.deps.onRestart?.({at,reason,ok:true});return this.sample();
-  }catch(error){this.state.restartError='浏览器资源恢复失败，需要人工检查';this.deps.onRestart?.({at:(this.deps.clock??Date.now)(),reason,ok:false});throw Object.assign(new Error(this.state.restartError),{code:'browser-recovery-failed'});}
+   const before=await this.deps.identity(),previous=String(before.handle||'').replace(/^@/,'').toLowerCase(),expected=expectedHandle.replace(/^@/,'').toLowerCase();
+   if(before.restricted)throw new BrowserRecoveryFailure('account-restricted',stage);if(before.needsHuman)throw new BrowserRecoveryFailure('needs-human',stage);if(!before.loggedIn||!previous)throw new BrowserRecoveryFailure('identity-not-ready',stage);if(expected&&expected!==previous)throw new BrowserRecoveryFailure('identity-mismatch',stage);
+   const identity=await this.deps.restart(value=>{stage=value;this.state.lastRestartStage=value;},previous),handle=String(identity.handle||'').replace(/^@/,'').toLowerCase();stage='verify-identity';
+   if(identity.restricted)throw new BrowserRecoveryFailure('account-restricted',stage);if(identity.needsHuman)throw new BrowserRecoveryFailure('needs-human',stage);if(!identity.loggedIn||!handle)throw new BrowserRecoveryFailure('identity-not-ready',stage);if(handle!==previous)throw new BrowserRecoveryFailure('identity-mismatch',stage);
+   const at=(this.deps.clock??Date.now)();this.state.startedAt=at;this.state.lastRestartAt=at;this.state.lastRestartStage='completed';this.state.lastRestartFailureCode=null;this.state.lastRestartDurationMs=Math.max(0,at-started);this.state.restarts++;this.state.restartError=null;this.deps.onRestart?.({at,reason,ok:true,stage:'completed',durationMs:this.state.lastRestartDurationMs,memory:state.memory});return this.sample();
+  }catch(error){const at=(this.deps.clock??Date.now)(),failureCode=browserRecoveryCode(error,stage);this.state.restartError='浏览器资源恢复失败，需要人工检查';this.state.lastRestartStage=error instanceof BrowserRecoveryFailure?error.recoveryStage:stage;this.state.lastRestartFailureCode=failureCode;this.state.lastRestartDurationMs=Math.max(0,at-started);this.deps.onRestart?.({at,reason,ok:false,stage:this.state.lastRestartStage,failureCode,durationMs:this.state.lastRestartDurationMs,memory:state.memory});throw Object.assign(new Error(this.state.restartError),{code:'browser-recovery-failed',recoveryStage:this.state.lastRestartStage,recoveryCode:failureCode});}
   finally{this.restarting=false;}
  }
 }

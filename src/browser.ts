@@ -11,7 +11,7 @@ import { readSecret,redact } from './config.js';
 import type { Event,Identity,Receipt } from './types.js';
 import { validatePostingText,type PostingValidation } from './posting-policy.js';
 import { BrowserPostingCapabilities } from './posting-capabilities.js';
-import { BrowserResourceGuard,detectAccountRestriction,classifyPlatformRejection,healthSettings,type ComplianceObservation } from './unattended-health.js';
+import { BrowserResourceGuard,detectAccountRestriction,classifyPlatformRejection,healthSettings,waitForIdentityReady,type ComplianceObservation } from './unattended-health.js';
 const exec=promisify(execFile);
 export function browserProxy(value?:string):{server:string}|undefined {
  if(!value?.trim())return undefined;
@@ -233,8 +233,12 @@ export async function startBrowserServer(){
  let publicPage=context.pages()[0]||await context.newPage();
  await publicPage.goto('https://x.com/home',{waitUntil:'domcontentloaded',timeout:30000}).catch(()=>{});
  let dmPage:Page|undefined;
- const resourceGuard=new BrowserResourceGuard({settings:()=>effectiveHealth,identity:()=>identity(publicPage),restart:async()=>{
-  internalRestart=true;try{await context.close();context=await launchBrowser(profile,proxy);supervise();publicPage=context.pages()[0]||await context.newPage();dmPage=undefined;capabilities.invalidate('浏览器上下文重启，旧能力证据失效');await publicPage.goto('https://x.com/home',{waitUntil:'domcontentloaded',timeout:30000});return await identity(publicPage);}finally{internalRestart=false;}
+ const resourceGuard=new BrowserResourceGuard({settings:()=>effectiveHealth,identity:()=>identity(publicPage),restart:async(reportStage,expectedHandle)=>{
+  internalRestart=true;try{
+   reportStage?.('close-context');await context.close();reportStage?.('launch-context');context=await launchBrowser(profile,proxy);supervise();publicPage=context.pages()[0]||await context.newPage();dmPage=undefined;capabilities.invalidate('浏览器上下文重启，旧能力证据失效');
+   reportStage?.('navigate-home');await publicPage.goto('https://x.com/home',{waitUntil:'domcontentloaded',timeout:30000});
+   reportStage?.('wait-identity');return await waitForIdentityReady(()=>identity(publicPage),expectedHandle??'',{timeoutMs:30000,intervalMs:250});
+  }finally{internalRestart=false;}
  },onRestart:info=>{console.log(JSON.stringify({event:'browser-restart',...info}));}});
  let timeoutPreviousMode='paused';
  async function operationTimeout(){timeoutPreviousMode=mode;mode='paused';capabilities.invalidate('浏览器操作超时');const pages=context.pages();await Promise.allSettled(pages.map(p=>p.close()));}
