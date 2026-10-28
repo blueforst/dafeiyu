@@ -13,7 +13,7 @@
 - `openspec/specs/` 只记录现有行为；尚未实现的需求保留在 change 的增量规格中，不能因规划完成就提前同步或归档。
 - Codex 项目技能位于 `.agents/skills/openspec-*/`。提案整理与业务实施分别记录，任务只有完成验证后才能勾选。
 
-- 正式 app／browser 为 0.1.18.6，正式导航仍为动态、人设、记忆、设置、计费五页；实际运行与真实验收边界看 README 和发布记录，不能把候选源码或 GitHub 推送当作生产发布。
-- 本轮五项候选为 `add-private-daily-limit`、`add-reply-hours`、`add-persona-workspace`、`redesign-settings-workspace`、`redesign-feed-workspace`。候选采用动态、人设、设置三页，人设库与独立正常流程试聊均按相应增量规格实现；一个试聊会话模拟一个用户，公开消息保留各自线程 ID，不跨线程合并。
+- 正式 app／browser 为 0.1.19，schema 13，来源 08a4c33；导航为动态、人设、设置三页，生产保持 paused／auto。已取得正式构建、生产只读和有限真实试聊证据；跨夜开放与既有平台收发边界看 README 和发布记录，不能把部署等同于所有真实业务验收。
+- 本轮五项已部署功能为 `add-private-daily-limit`、`add-reply-hours`、`add-persona-workspace`、`redesign-settings-workspace`、`redesign-feed-workspace`。采用动态、人设、设置三页，人设库与独立正常流程试聊均按相应增量规格实现；一个试聊会话模拟一个用户，公开消息保留各自线程 ID，不跨线程合并。
 - 新版界面总回归入口为 `dev/workspace-ui-test.sh`；保留原验收脚本的业务断言，迁移到新位置，不能以新冒烟用例取代原覆盖。真实模型效果与生产发布需要独立证据，未满足的任务继续留空。
 - 后续提案隔离验证使用 `dev/proposals-sync.sh` 与 `dev/proposals-test.sh`，目标为 `/srv/role-workflow-proposals`，不得覆盖已有七页开发副本或生产目录。验收结束清理本轮临时容器、镜像与工作目录，保留最终证据。

@@ -1,6 +1,6 @@
 # 设置页改版实施任务
 
-当前完成 15/16 项。实现、服务器 615 项回归与隔离界面验收通过；真实模型效果和生产发布按下列未完成项另行验收。证据见[本轮总记录](../../../docs/实施记录/2026-10-28-五项剩余提案候选.md)。规格见 [panel-navigation](specs/panel-navigation/spec.md) 和 [panel-design-system](specs/panel-design-system/spec.md)，实现边界见 [design.md](design.md)，版式见 [panel-redesign-mockup.html](../add-persona-workspace/panel-redesign-mockup.html) 的设置页。
+当前完成 16/16 项。实现、服务器 647 项回归与隔离界面验收通过；已随 0.1.19 发布并完成本提案生产验收。证据见[本轮总记录](../../../docs/实施记录/2026-10-28-五项剩余提案候选.md)。规格见 [panel-navigation](specs/panel-navigation/spec.md) 和 [panel-design-system](specs/panel-design-system/spec.md)，实现边界见 [design.md](design.md)，版式见 [panel-redesign-mockup.html](../add-persona-workspace/panel-redesign-mockup.html) 的设置页。
 
 执行约束：
 
@@ -61,12 +61,14 @@
 
 ## 4. 发布
 
-- [ ] 4.1 取得发布授权后随下一次发布上线，保持原有控制状态。验收：
+- [x] 4.1 取得发布授权后随下一次发布上线，保持原有控制状态。验收：
   - 生产面板导航为三项，十一个设置项均可打开并读回现有设置；
   - 保存任一设置不会恢复业务；
   - 发布记录写明旧地址跳转方式。
 
   提案创建不视为发布授权。
+
+生产发布证据见[0.1.19 发布记录](../../../docs/发布记录/2026-10-29-0.1.19.md)。
 
 ## Workflow follow-up
 

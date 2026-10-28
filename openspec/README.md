@@ -6,7 +6,7 @@
 
 ## 当前发布与验收边界
 
-截至 2026-10-28，正式 app／browser 为 **0.1.18.6**，来源 `6e20f56f0f9594d42182dd00ca91bd4f605b916e`，成对 healthy，schema **13**，正式构建 **553 项通过**，包含显式 JSON 生成及旧纯文本路径回归。当前导航为动态、人设、记忆、设置、计费五页，业务保持 **paused／auto**；未定制部署读回通用默认 v2、修订 0。
+截至 2026-10-29，正式 app／browser 为 **0.1.19**，构建来源 `08a4c33d362f98dd400cb824ed8fbfe4cd8a836c`，成对 healthy，schema **13**，正式构建 **647/647** 通过。生产导航为动态、人设、设置三页，十一设置项及旧路由兼容通过真实只读验收；业务保持 **paused／auto**。当前人设为虚拟 current／“当前人设”／使用中，内容与升级前一致、修订 0。见[本次发布](../docs/发布记录/2026-10-29-0.1.19.md)。
 
 下列提案的现有代码已进入生产，包括四项新增提案、参考帖子补齐和计费图表交互；**这不表示提案的所有任务已经验收**。真实长帖、模型效果、平台发送与双方回执、业务及长期观察仍按各自清单继续完成。部分 `tasks.md` 的发布勾选尚未随最新证据回填；发布事实看 [发布与实机修复记录](../docs/实施记录/2026-10-28-发布与实机修复.md)，逐项完成条件仍看对应任务，不在本次索引整理中代替验收勾选。
 
@@ -18,7 +18,7 @@
 
 修复后原计划 156 次的主组实际发出 **154 次**，其中 **153 次有效、1 次 GPT 娘解析失败**，该连续组后两轮因前轮失败而阻塞，未调用。另完成通用人设身份／危机边界点验 **2 次**，不混作原主组缺失轮次。加上冻结旧批 82 次与文风对比 10 次，本轮实际共 **248 次，不超过已授权的 250 次**；不能写成原 156 次全通过，也不能把旧批拼成新版完整 240 次验收。
 
-文风旧／新各五轮已完成且独立计量；本样本未证明文风改善，并有误接上文线索。2026-10-28 经逐条复核，用户明确同意“这批先通过吧，修八股以后再考虑”，本批模型与人设效果验收通过，八股文风作为后续非阻断改进；失败与缺轮事实不变。逐项结果、费用和审定范围见 [最新发布与实机记录](../docs/实施记录/2026-10-28-发布与实机修复.md)；Pi 估算不是供应商实际扣款或账单，本批批准不代表未测场景或平台收发已通过。
+文风旧／新各五轮已完成且独立计量；本样本未证明文风改善，并有误接上文线索。2026-10-28 经逐条复核，用户明确同意“这批先通过吧，修八股以后再考虑”，本批模型与人设效果验收通过，八股文风作为后续非阻断改进；失败与缺轮事实不变。逐项结果、费用和审定范围见 [上一批发布与实机记录](../docs/实施记录/2026-10-28-发布与实机修复.md)；Pi 估算不是供应商实际扣款或账单，本批批准不代表未测场景或平台收发已通过。
 
 ## 已部署代码所涵盖的提案
 
@@ -26,11 +26,11 @@
 
 | 提案与范围 | 设计 | 实施与验收 | 增量规格 |
 | --- | --- | --- | --- |
-| [七页生产工作流基线](changes/add-seven-page-production-bot/proposal.md)：账号归属、模型计量、人设、记忆、任务、持久出站；当前导航已由五页替代 | [设计](changes/add-seven-page-production-bot/design.md) | [任务](changes/add-seven-page-production-bot/tasks.md) | [规格](changes/add-seven-page-production-bot/specs/) |
+| [七页生产工作流基线](changes/add-seven-page-production-bot/proposal.md)：账号归属、模型计量、人设、记忆、任务、持久出站；当前导航已由三页工作区替代 | [设计](changes/add-seven-page-production-bot/design.md) | [任务](changes/add-seven-page-production-bot/tasks.md) | [规格](changes/add-seven-page-production-bot/specs/) |
 | [按账号权限校验 X 发帖字数](changes/add-account-aware-post-limits/proposal.md)：统一生成与发送字数校验；真实长帖权限与完整回执仍待验证 | [设计](changes/add-account-aware-post-limits/design.md) | [任务](changes/add-account-aware-post-limits/tasks.md) | [规格](changes/add-account-aware-post-limits/specs/) |
 | [动态首页与五页面板](changes/simplify-panel-activity-feed/proposal.md)：动态、草稿审核、模型库与计费页；原七页入口兼容跳转 | [设计](changes/simplify-panel-activity-feed/design.md) | [任务](changes/simplify-panel-activity-feed/tasks.md) | [规格](changes/simplify-panel-activity-feed/specs/) |
 | [回复提示词结构与动态提醒](changes/improve-reply-prompt-context/proposal.md)：稳定前缀、动态上下文及迟到／语言／表情等提醒 | [设计](changes/improve-reply-prompt-context/design.md) | [任务](changes/improve-reply-prompt-context/tasks.md) | [规格](changes/improve-reply-prompt-context/specs/) |
-| [消息分级、过滤与公平调度](changes/add-reply-triage/proposal.md)：广告与刷量过滤、同人合并、骚扰冷却、公开每日额度及公平出队 | [设计](changes/add-reply-triage/design.md) | [任务](changes/add-reply-triage/tasks.md) | [规格](changes/add-reply-triage/specs/) |
+| [消息分级、过滤与公平调度](changes/add-reply-triage/proposal.md)：广告与刷量过滤、同平台会话合并、骚扰冷却、公开每日额度及公平出队 | [设计](changes/add-reply-triage/design.md) | [任务](changes/add-reply-triage/tasks.md) | [规格](changes/add-reply-triage/specs/) |
 | [无人值守健康、日报与账号合规](changes/add-unattended-health/proposal.md)：轮次看门狗、浏览器自愈、健康和账号只读检查；实际可靠性与长期观察继续验收 | [设计](changes/add-unattended-health/design.md) | [任务](changes/add-unattended-health/tasks.md) | [规格](changes/add-unattended-health/specs/) |
 | [人设回放与回复质量统计](changes/add-persona-replay/proposal.md)：样本比较、费用确认、人工标注与确定性指标；不替代真实模型效果审定 | [设计](changes/add-persona-replay/design.md) | [任务](changes/add-persona-replay/tasks.md) | [规格](changes/add-persona-replay/specs/) |
 | [参考帖子遗漏补齐](changes/fill-reference-post-gaps/proposal.md)：引用／卡片、目标上下文、关键词卡、角色经历、链接补录及模型对比；通知“全部”仍待样本且关闭 | [设计](changes/fill-reference-post-gaps/design.md) | [任务](changes/fill-reference-post-gaps/tasks.md) | [规格](changes/fill-reference-post-gaps/specs/) |
@@ -49,27 +49,27 @@
 
 记录中的旧版本、模拟调用数和当时的“未发布”表述属于历史快照。当前发布以最近记录和运行读回为准，真实验收仍须有相应证据。
 
-## 本轮候选：实现与隔离验收完成，尚未发布
+## 本轮五项：已发布，跨夜开放观察待完成
 
-本轮五项共 **66/72** 项任务完成；其余为五项生产发布和一次真实模型效果验收，尚未执行。首轮推送后完成鲁棒性修复，最终服务器构建与 **647/647** 回归通过，十七套界面与调用链验收共 **169** 组通过，另保留首轮未改 CSS 的 16 组兼容证据；详见[总实施与证据](../docs/实施记录/2026-10-28-五项剩余提案候选.md)。未同步主规格或归档。
+本轮五项共 **71/72** 项任务完成；五项均已随 0.1.19 部署，真实试聊取得核心证据且用户随后明确要求发布。仅回复时段次日实际开放后的生产观察仍待完成，不因当前夜间关闭和零提交就勾选。首轮推送后完成鲁棒性修复，最终服务器构建与 **647/647** 回归通过，十七套界面与调用链验收共 **169** 组通过，另保留首轮未改 CSS 的 16 组兼容证据；详见[总实施与证据](../docs/实施记录/2026-10-28-五项剩余提案候选.md)。未同步主规格或归档。
 
 ### 私信每日额度
 
 [提案](changes/add-private-daily-limit/proposal.md) · [设计](changes/add-private-daily-limit/design.md) · [任务](changes/add-private-daily-limit/tasks.md) · [增量规格](changes/add-private-daily-limit/specs/)
 
-当前 **7/8**，代码及服务器隔离验收完成，生产发布待授权。候选新增私信 `privatePerDay`，默认 **400**，管理员可设 **1–500**；按最近二十四小时滚动计数，为接管时的手动发送预留余量。达到额度后私信继续排队，不触发四小时平台拒绝退避，也不影响公开通道。设置页、队列摘要和健康提示同步显示近二十四小时计数。
+当前 **8/8**，已发布并完成生产读回。新增私信 `privatePerDay`，默认 **400**，管理员可设 **1–500**；按最近二十四小时滚动计数，为接管时的手动发送预留余量。达到额度后私信继续排队，不触发四小时平台拒绝退避，也不影响公开通道。设置页、队列摘要和健康提示同步显示近二十四小时计数。
 
-现有生产私信只有小时额度，不能把计划值当成已生效保护。该提案是在私信自动回复启用前补齐额度；不改公开自然日额度、出站回执或 unknown 只回查语义。平台限制的来源与统计口径见原提案。
+生产现已启用小时与最近二十四小时双层额度，当前读回 0/400；不为验收制造私信。该提案在私信自动回复启用前补齐额度；不改公开自然日额度、出站回执或 unknown 只回查语义。平台限制的来源与统计口径见原提案。
 
 ### 回复时段跟随早晚安帖
 
 [提案](changes/add-reply-hours/proposal.md) · [设计](changes/add-reply-hours/design.md) · [任务](changes/add-reply-hours/tasks.md) · [增量规格](changes/add-reply-hours/specs/)
 
-当前 **9/10**，代码及服务器隔离验收完成，生产发布待授权。候选默认开启回复时段：从晚安计划时间加关闭延迟，到次日早安计划时间，公开回复与私信均不生成、不提交。关闭延迟默认 **30 分钟**，范围 **0–180**；以任务计划时间为准，任务停用、错过或未发成功不改变开关时间。早安任务启用时先等当天任务结束，最迟计划时间后 **15 分钟**开放回复。
+当前 **9/10**，0.1.19 已发布、当前关闭状态已读回；仅次日实际开放后的观察未完成。生产默认开启回复时段：从晚安计划时间加关闭延迟，到次日早安计划时间，公开回复与私信均不生成、不提交。关闭延迟默认 **30 分钟**，范围 **0–180**；以任务计划时间为准，任务停用、错过或未发成功不改变开关时间。早安任务启用时先等当天任务结束，最迟计划时间后 **15 分钟**开放回复。
 
-关闭期间仍采集排队，排队时效暂停计时；unknown 回查、日程、记忆等任务沿用各自规则，人工接管不受限制。健康停滞与日报延迟扣除关闭时长。生产早晚安任务目前停用；本提案若按默认计划实施，对应 **23:30–08:00** 关闭区间，当前尚无此限制。
+关闭期间仍采集排队，排队时效暂停计时；unknown 回查、日程、记忆等任务沿用各自规则，人工接管不受限制。健康停滞与日报延迟扣除关闭时长。生产早晚安任务目前停用；已核对默认计划，对应 **23:30–08:00** 关闭区间，当前限制已生效但业务仍暂停。
 
-这两项提案不新增数据库迁移或模型请求。实现已在独立服务器验证，候选默认值尚未进入生产；发布仍按原任务另行验收。
+这两项提案没有新增数据库迁移或模型请求。默认值已进入生产，时段跨夜观察按原任务继续保留；不会为了验收恢复自动处理。
 
 ### 面板改版（三份，以下为依赖顺序）
 
@@ -78,7 +78,7 @@
 1. **人设工作区、多人设与正常流程试聊**
    [提案](changes/add-persona-workspace/proposal.md) · [设计](changes/add-persona-workspace/design.md) · [任务](changes/add-persona-workspace/tasks.md) · [增量规格](changes/add-persona-workspace/specs/)
 
-   当前 **24/26**，代码及服务器隔离验收完成，真实模型效果和生产发布待授权。主要内容：
+   当前 **26/26**，有限真实试聊样本及生产发布验收完成。未测边界保留，主要内容：
    - 统一设计的外壳与组件；
    - 人设页分人设、日程、试聊三种模式；
    - 可保存多个人设，其中一个“使用中”；
@@ -87,7 +87,7 @@
 2. **设置页改版**
    [提案](changes/redesign-settings-workspace/proposal.md) · [设计](changes/redesign-settings-workspace/design.md) · [任务](changes/redesign-settings-workspace/tasks.md) · [增量规格](changes/redesign-settings-workspace/specs/)
 
-   当前 **15/16**，代码及服务器隔离验收完成，生产发布待授权。主要内容：
+   当前 **16/16**，生产三页、十一设置项及原值保存不恢复业务均已验收。主要内容：
    - 左栏一项一页，共四组十一项；
    - 记忆页和计费页并入设置，顶部导航改为动态、人设、设置三项；
    - 不改任何设置的含义和接口。
@@ -95,7 +95,7 @@
 3. **动态页改版**
    [提案](changes/redesign-feed-workspace/proposal.md) · [设计](changes/redesign-feed-workspace/design.md) · [任务](changes/redesign-feed-workspace/tasks.md) · [增量规格](changes/redesign-feed-workspace/specs/)
 
-   当前 **11/12**，代码及服务器隔离验收完成，生产发布待授权。主要内容：
+   当前 **12/12**，生产会话列表及待处理计数读回通过，未增加索引迁移。主要内容：
    - 用户即会话：左栏按身份列出会话，主区显示往来，草稿在对话中审核，右栏显示详情；
    - 新增两个只读的会话查询接口；
    - 草稿审核与出站规则不变。

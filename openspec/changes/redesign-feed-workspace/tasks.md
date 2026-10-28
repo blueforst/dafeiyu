@@ -1,6 +1,6 @@
 # 动态页改版实施任务
 
-当前完成 11/12 项。实现、服务器 615 项回归与隔离界面验收通过；真实模型效果和生产发布按下列未完成项另行验收。证据见[本轮总记录](../../../docs/实施记录/2026-10-28-五项剩余提案候选.md)。规格见 [activity-feed](specs/activity-feed/spec.md)，实现边界见 [design.md](design.md)，版式见 [panel-redesign-mockup.html](../add-persona-workspace/panel-redesign-mockup.html) 的动态页。
+当前完成 12/12 项。实现、服务器 647 项回归与隔离界面验收通过；已随 0.1.19 发布并完成本提案生产验收。证据见[本轮总记录](../../../docs/实施记录/2026-10-28-五项剩余提案候选.md)。规格见 [activity-feed](specs/activity-feed/spec.md)，实现边界见 [design.md](design.md)，版式见 [panel-redesign-mockup.html](../add-persona-workspace/panel-redesign-mockup.html) 的动态页。
 
 执行约束：
 
@@ -61,12 +61,14 @@
 ## 3. 回归、文档与发布
 
 - [x] 3.1 服务器类型检查、全量回归和构建通过；更新 `docs/前端接口.md`、README 动态页说明和 `docs/设计规范.md`。验收：日志存入证据目录，失败、取消、跳过均为零；文档与实现一致。
-- [ ] 3.2 取得发布授权后随下一次发布上线，保持原有控制状态。验收：
+- [x] 3.2 取得发布授权后随下一次发布上线，保持原有控制状态。验收：
   - 生产动态页按会话显示，待处理数量与改版前一致；
   - 在生产中只做只读核对，不为验收而批准或发送草稿；
   - 发布记录写明是否新增了索引迁移。
 
   提案创建不视为发布授权。
+
+生产发布证据见[0.1.19 发布记录](../../../docs/发布记录/2026-10-29-0.1.19.md)。
 
 ## Workflow follow-up
 

@@ -1,0 +1,100 @@
+// 真实生产三页纯只读验收；不拦截成 mock，不发送控制/保存/模型请求，不连接桌面。
+import {observer} from '/opt/role-camoufox/launch.mjs';
+import assert from 'node:assert/strict';
+import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+
+if(process.env.READ_ONLY_ACCEPTANCE!=='1')throw new Error('必须显式设置 READ_ONLY_ACCEPTANCE=1；此脚本仅支持纯只读生产验收');
+const BASE=(process.env.PANEL_URL||'https://43.133.80.237').replace(/\/$/,''),OUT=process.env.ARTIFACT_DIR||'/artifacts';
+let baseURL;try{baseURL=new URL(BASE);}catch{throw new Error('PANEL_URL 不是有效面板地址');}
+const credentialFile=process.env.ADMIN_ACCESS_FILE||'/run/test/admin-access.txt',headerFile=process.env.HEADER_FILE;
+let extraHTTPHeaders={};if(headerFile)try{extraHTTPHeaders=JSON.parse(readFileSync(headerFile,'utf8'));}catch{throw new Error('HEADER_FILE 无法读取或不是有效JSON');}
+if(!extraHTTPHeaders||typeof extraHTTPHeaders!=='object'||Array.isArray(extraHTTPHeaders)||Object.values(extraHTTPHeaders).some(v=>typeof v!=='string'))throw new Error('HEADER_FILE 必须为字符串值的 JSON 请求头对象');
+if(Object.keys(extraHTTPHeaders).some(key=>key.toLowerCase()==='x-workflow-control'))throw new Error('纯只读验收不接受控制请求标记');
+if(baseURL.username||baseURL.password||baseURL.search||baseURL.hash||baseURL.pathname!=='/')throw new Error('PANEL_URL 必须是无凭据、查询、片段和路径的面板 origin');
+const loopback=baseURL.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(baseURL.hostname)&&process.env.ALLOW_LOOPBACK_HTTP==='1';
+if(baseURL.protocol!=='https:'&&!loopback)throw new Error('生产面板必须使用 HTTPS；直连回环 HTTP 需另设 ALLOW_LOOPBACK_HTTP=1');
+let httpCredentials,password='',basic='';
+if(existsSync(credentialFile)){
+ const lines=readFileSync(credentialFile,'utf8').split(/\r?\n/),field=index=>{const value=lines[index]||'',at=value.indexOf('：');return at<0?'':value.slice(at+1).trim();};
+ password=field(2);if(!password)throw new Error('临时生产凭据文件缺少密码');const username=field(1)||'operator';httpCredentials={username,password};basic=Buffer.from(username+':'+password).toString('base64');
+}else if(!Object.keys(extraHTTPHeaders).some(key=>key.toLowerCase()==='x-ingress-key'))throw new Error('需要 ADMIN_ACCESS_FILE 临时 Basic 凭据或 HEADER_FILE 中的入口 Key');
+const secrets=[password,basic,...Object.values(extraHTTPHeaders)].filter(Boolean),redact=value=>{let text=String(value);for(const secret of secrets)text=text.split(secret).join('[已隐藏]');return text.replace(/(?:Basic|Bearer)\s+[^\s"']+/gi,'[认证已隐藏]').replace(/(?:sk-|buf_|ghp_)[A-Za-z0-9_-]{8,}/g,'[已隐藏]').slice(0,1600);};
+const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const IDS=['run','model','tasks','triage','memory','billing','browser','sources','health','logs','history'];
+const NUMBERS=['publicPerHour','privatePerHour','publicPerDay','privatePerDay','maxPerRound','maxAgeHours'];
+const ALIASES=[['overview','feed'],['model','settings/model'],['program','settings/logs'],['tasks','settings/tasks'],['browser','settings/browser'],['memory?view=policy','settings/memory?view=policy'],['billing','settings/billing'],['settings/limits','settings/run']];
+const result={target:'production',mock:false,readOnly:true,evidence:'真实生产面板与鉴权只读接口；不替换业务响应、不调用模型、不保存配置、不接管或连接桌面',startedAt:new Date().toISOString(),checks:[],errors:[],apiReads:[],browserRequests:[],blockedWrites:[],forbiddenConnections:[],externalAttempts:[],scopedUnavailable:[],settingsItems:[],screenshots:[]};
+mkdirSync(OUT,{recursive:true,mode:0o700});let browser,context,page,initial,final,activePersona;
+function persist(){writeFileSync(OUT+'/workspace-production-acceptance.json',JSON.stringify(result,null,2),{mode:0o600});}
+function forbidden(path){return path==='/desktop'||path.startsWith('/desktop/')||path.startsWith('/api/control/')||path.startsWith('/api/chat-test/');}
+async function read(path,{scoped=false}={}){
+ if(!path.startsWith('/api/')||forbidden(path.split('?')[0]))throw new Error('不允许的只读验收路径');
+ const response=await context.request.get(BASE+path,{timeout:30000,maxRedirects:0}),status=response.status();result.apiReads.push({method:'GET',path:path.split('?')[0],status});
+ if(scoped&&status===409&&!initial?.accountId){result.scopedUnavailable.push({path:path.split('?')[0],status,reason:'当前工作账号未确认，保留范围限制'});return null;}
+ assert.equal(status,200,path.split('?')[0]+' HTTP '+status);const data=await response.json();assert.ok(data&&typeof data==='object','只读接口没有返回对象');return data;
+}
+function personaSummary(library){return {activeId:library.activeId,libraryRevision:library.libraryRevision,items:(library.items||[]).map(item=>({id:item.id,name:item.name,revision:item.revision,origin:item.origin,characters:item.characters}))};}
+async function snapshot(){
+ const status=await read('/api/status'),model=await read('/api/model'),library=await read('/api/personas'),persona=await read('/api/persona'),program=await read('/api/program'),tasks=await read('/api/tasks'),policy=await read('/api/memory/policy'),triage=await read('/api/triage/settings'),health=await read('/api/health/settings'),hints=await read('/api/persona/prompt-hints'),usage=await read('/api/billing/activity?weeks=52');
+ return {control:status.control,busy:status.busy,accountId:status.accountId||'',mode:status.config?.mode,configHash:hash(status.config),modelHash:hash({library:model.library,settings:model.settings,effective:model.effective,source:model.source}),personaLibraryHash:hash(personaSummary(library)),personaHash:hash({persona:persona.persona,revision:persona.revision}),settingsHash:hash({program:program.settings,programRevision:program.revision,tasks:{revision:tasks.revision,plans:(tasks.tasks||[]).map(t=>({id:t.id,enabled:t.enabled,time:t.time,intervalSeconds:t.intervalSeconds}))},policy,triage,health,hints}),messageCountsHash:hash(status.stats?.messages||[]),llmCalls:Number(usage.totals?.calls||0),settings:program.settings,personaLibrary:personaSummary(library)};
+}
+async function step(name,run){console.log('[开始] '+name);try{await run();result.checks.push(name);console.log('[通过] '+name);return true;}catch(error){const message=redact(error?.message||error);result.errors.push({name,error:message});console.log('[失败] '+name+' '+message);return false;}finally{persist();}}
+async function safeDOM(){
+ assert.equal(await page.locator('iframe,#view script,#view object,#view embed,#view img').count(),0,'正文出现可执行外部节点或桌面 iframe');
+ assert.equal(await page.locator('#view *').evaluateAll(nodes=>nodes.some(el=>[...el.attributes].some(a=>/^on/i.test(a.name)))),false,'正文出现内联事件属性');
+ assert.equal(await page.locator('#view a[href]').evaluateAll(nodes=>nodes.some(a=>{try{const value=new URL(a.href);return !['https:','http:'].includes(value.protocol)||!!value.username||!!value.password;}catch{return true;}})),false,'页面存在不安全地址');
+ const alerts=await page.locator('#view [role="alert"]').evaluateAll(nodes=>nodes.filter(el=>!el.hidden&&el.getClientRects().length&&el.textContent.trim()&&!el.classList.contains('confirm')).length);assert.equal(alerts,0,'页面存在读取错误提示');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,'页面整体横向溢出');
+ assert.equal(await page.locator('#desktop-frame').count(),0,'只读验收中出现桌面连接');
+}
+async function navigation(){assert.deepEqual(await page.locator('.tabs a').evaluateAll(nodes=>nodes.map(a=>a.dataset.route)),['feed','persona','settings'],'一级导航必须恰好三项');}
+async function ready(path){
+ const [name,id]=path.split('?')[0].split('/');await page.locator('.ws-shell[data-page="'+name+'"]').waitFor({timeout:30000});
+ if(name==='persona')await page.locator('#persona-section-0').waitFor({timeout:30000});
+ if(name==='feed')await page.waitForFunction(()=>{const node=document.querySelector('.feed-conversations');return node&&(node.querySelector('.feed-conversation')||node.textContent.includes('暂无会话'));},null,{timeout:30000});
+ if(name==='settings'){
+  const item=id||'run';await page.locator('[data-settings-view="'+item+'"]:not([hidden])').waitFor({timeout:30000});
+  const markers={run:'input[data-setting="privatePerDay"]',model:'#provider-add',tasks:'[data-task-id="main"]',triage:'textarea',memory:'.settings-memory',billing:'.usage-heatmap',browser:'.settings-browser',sources:'.collection-source,.empty-state',health:'.settings-metric',logs:'#program-logs',history:'details,.empty-state'};
+  const root=page.locator('[data-settings-view="'+item+'"]');await root.locator(markers[item]).first().waitFor({state:'attached',timeout:30000});
+  if(item==='memory'&&!path.includes('view=policy'))await page.waitForFunction(()=>{const node=document.getElementById('memory-users');return node&&(node.querySelector('.memory-user')||node.textContent.includes('没有符合筛选条件'));},null,{timeout:30000});
+  if(item==='memory'&&path.includes('view=policy'))await page.locator('#memory-policy-save').waitFor({timeout:30000});
+  if(item==='logs')await page.waitForFunction(()=>{const node=document.getElementById('program-logs');return node&&!node.textContent.includes('正在读取日志');},null,{timeout:30000});
+  if(item==='history')await page.waitForFunction(()=>{const node=document.querySelector('[data-settings-view="history"]');return node&&(node.querySelector('details')||node.textContent.includes('暂无执行历史'));},null,{timeout:30000});
+  if(item==='browser')assert.equal(await page.locator('#desktop-frame').count(),0);
+ }
+ await navigation();await safeDOM();
+}
+async function go(path){await page.goto(BASE+'/#/'+path,{waitUntil:'domcontentloaded'});await ready(path);}
+async function shot(label){const name='production-workspace-'+label+'.png';await page.screenshot({path:OUT+'/'+name,fullPage:true,mask:[page.locator('.feed-conversations,.feed-thread,.feed-inspector,.feed-memory'),page.locator('#memory-users,#memory-detail,#program-logs'),page.locator('.ws-shell[data-page="persona"] textarea,.ws-shell[data-page="persona"] .ws-rule-list')]});result.screenshots.push(name);}
+async function assertRunValues(){
+ const current=await read('/api/program');for(const key of NUMBERS){assert.ok(Number.isInteger(current.settings[key]),'运行配置缺少整数 '+key);assert.equal(Number(await page.locator('input[data-setting="'+key+'"]').inputValue()),current.settings[key],key+' 页面值与只读接口不一致');}
+ assert.ok(current.settings.privatePerDay>=1&&current.settings.privatePerDay<=500);assert.equal(await page.locator('#program-mode-'+current.settings.mode).isChecked(),true);
+ assert.equal(await page.locator('#reply-hours-enabled').isChecked(),current.settings.replyHours.enabled);assert.equal(Number(await page.locator('#reply-hours-delay').inputValue()),current.settings.replyHours.closeDelayMinutes);
+ assert.ok(Number.isInteger(current.settings.replyHours.closeDelayMinutes)&&current.settings.replyHours.closeDelayMinutes>=0&&current.settings.replyHours.closeDelayMinutes<=180);
+ const window=current.replyHours;if(window){await page.waitForFunction(value=>{const node=document.getElementById('reply-hours-state');if(!node)return false;if(value.open)return node.textContent.includes('已开放');return Number.isFinite(value.opensAt)?node.textContent.includes('开放 ')&&!node.textContent.includes('下次开放待定'):node.textContent.includes('下次开放待定');},window,{timeout:15000});}
+ result.runDisplay={values:Object.fromEntries(NUMBERS.map(key=>[key,current.settings[key]])),replyHours:current.settings.replyHours,state:await page.locator('#reply-hours-state').textContent()};
+}
+try{
+ browser=await observer();context=await browser.newContext({httpCredentials,extraHTTPHeaders,serviceWorkers:'block',viewport:{width:1440,height:1000}});
+ await context.route('**/*',async route=>{const request=route.request(),url=new URL(request.url()),method=request.method();if(request.isNavigationRequest()&&request.frame().parentFrame()){result.forbiddenConnections.push({kind:'iframe-navigation',method,path:url.pathname});result.errors.push({name:'禁止连接',error:'已阻止iframe文档连接'});await route.abort('blockedbyclient');return;}if(!['GET','HEAD'].includes(method)){result.blockedWrites.push({method,path:url.pathname});result.errors.push({name:'只读请求防线',error:'已阻止 '+method+' '+url.pathname});await route.abort('blockedbyclient');return;}if(url.origin!==baseURL.origin){result.externalAttempts.push({method,origin:url.origin,path:url.pathname});result.errors.push({name:'同源限制',error:'已阻止外部请求'});await route.abort('blockedbyclient');return;}if(forbidden(url.pathname)){result.forbiddenConnections.push({method,path:url.pathname});result.errors.push({name:'禁止连接',error:'已阻止桌面、控制或试聊存储访问'});await route.abort('blockedbyclient');return;}await route.continue();});
+ assert.equal(typeof context.routeWebSocket,'function','观察浏览器需要支持WebSocket事前拦截；不支持时停止验收');await context.routeWebSocket('**/*',socket=>{result.forbiddenConnections.push({kind:'websocket'});result.errors.push({name:'禁止连接',error:'已阻止WebSocket'});socket.close({code:1008,reason:'纯只读验收禁止WebSocket'});});
+ initial=await snapshot();result.initial=initial;assert.ok(['paused','manual'].includes(initial.control),'需要初始暂停或已有接管的只读验收窗口；脚本不会改变控制状态');assert.equal(initial.busy,false,'当前仍有业务进行中，不能据此验收无新增模型调用');
+ page=await context.newPage();page.on('pageerror',error=>result.errors.push({name:'页面脚本异常',error:redact(error.message)}));page.on('request',request=>{const url=new URL(request.url());result.browserRequests.push({method:request.method(),path:url.pathname});});page.on('response',response=>{const url=new URL(response.url());if(url.origin===baseURL.origin&&url.pathname.startsWith('/api/')&&response.status()>=400)result.errors.push({name:'页面读取失败',error:response.request().method()+' '+url.pathname+' HTTP '+response.status()});});page.on('websocket',()=>{result.forbiddenConnections.push({kind:'page-websocket'});result.errors.push({name:'禁止连接',error:'页面尝试建立WebSocket'});});
+ await step('真实生产只读API、人设current兼容与使用中镜像',async()=>{
+  const library=await read('/api/personas');assert.ok(Array.isArray(library.items)&&library.items.length>=1&&library.items.length<=20);assert.ok(library.items.some(item=>item.id===library.activeId));activePersona=await read('/api/personas/'+encodeURIComponent(library.activeId));const legacy=await read('/api/persona');assert.equal(activePersona.active,true);assert.equal(hash(activePersona.persona),hash(legacy.persona),'使用中人设与旧接口镜像不同');
+  result.personaIdentity={id:activePersona.id,name:activePersona.name,revision:activePersona.revision,origin:activePersona.origin,libraryRevision:library.libraryRevision,currentCompatibility:activePersona.id==='current',currentExplanation:activePersona.id==='current'?'兼容current项；不据此推断设置文件是否已持久化':'使用已保存的人设标识'};
+  const feed=await read('/api/feed/conversations?limit=10');assert.ok(Array.isArray(feed.items)&&Number.isInteger(feed.pending));result.feed={conversations:feed.items.length,pending:feed.pending};
+  const triage=await read('/api/triage/summary',{scoped:true});if(triage){assert.equal(triage.privatePerDay,initial.settings.privatePerDay);assert.ok(Number.isInteger(triage.privateRecent));result.privateQuota={recent:triage.privateRecent,limit:triage.privatePerDay};}
+ });
+ await step('动态与当前人设真实页面只读显示',async()=>{await go('feed');assert.equal(await page.locator('.tabs a.active').getAttribute('data-route'),'feed');await go('persona');assert.ok(activePersona,'缺少使用中人设读回');assert.equal(hash(await page.locator('[id^="persona-section-"]').evaluateAll(nodes=>nodes.sort((a,b)=>Number(a.id.split('-').at(-1))-Number(b.id.split('-').at(-1))).map(node=>node.value))),hash(activePersona.persona.sections.map(section=>section.content)),'人设编辑器没有显示使用中内容');assert.ok((await page.locator('.ws-main .ws-header').textContent()).includes(activePersona.name));assert.ok((await page.locator('.ws-main .ws-header').textContent()).includes('使用中'));});
+ await step('四组十一设置项全部只读打开并读回数值',async()=>{for(const id of IDS){await go('settings/'+id);assert.equal(await page.locator('.settings-nav-group').count(),4);assert.equal(await page.locator('[data-settings-item]').count(),11);assert.equal(await page.locator('[data-settings-item="'+id+'"]').getAttribute('aria-current'),'page');if(id==='run')await assertRunValues();if(id==='model'){const key=page.locator('#api-key');if(await key.count())assert.equal(await key.inputValue(),'','Key输入框不应回填明文');}if(id==='tasks'){assert.equal(await page.locator('[data-task-id]').count(),9);assert.equal(await page.locator('[data-task-id="main"] input[type="checkbox"]').count(),0);}if(id==='billing'){assert.equal(await page.locator('.usage-heatmap .heat-cell').count(),364);assert.equal(await page.locator('.usage-calls').getAttribute('open'),null);}result.settingsItems.push({id,loaded:true});persist();}});
+ await step('旧地址与三页路由兼容，不自动连接桌面',async()=>{for(const[old,target]of ALIASES){await page.goto(BASE+'/#/'+old,{waitUntil:'domcontentloaded'});await page.waitForFunction(expected=>location.hash==='#/'+expected,target,{timeout:30000});await ready(target);}assert.equal(await page.locator('#desktop-frame').count(),0);});
+ await step('1440、1280、860、375浅深关键页面只读截图',async()=>{for(const scheme of ['light','dark'])for(const width of [1440,1280,860,375]){await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:1000});for(const path of ['feed','persona','settings/run']){await go(path);if(path==='settings/run')await assertRunValues();await shot(path.replace('/','-')+'-'+scheme+'-'+width);}}});
+ await step('验收前后配置、人设库、控制与模型调用保持一致',async()=>{final=await snapshot();result.final=final;for(const key of ['control','mode','accountId','configHash','modelHash','personaLibraryHash','personaHash','settingsHash','messageCountsHash','llmCalls'])assert.equal(final[key],initial[key],key+' 在只读验收期间发生变化');assert.equal(final.busy,false);assert.deepEqual(result.blockedWrites,[]);assert.deepEqual(result.forbiddenConnections,[]);assert.deepEqual(result.externalAttempts,[]);assert.ok(result.browserRequests.every(request=>['GET','HEAD'].includes(request.method)));assert.equal(result.settingsItems.length,11);});
+}catch(error){result.errors.push({name:'生产只读验收中止',error:redact(error?.message||error)});}
+finally{
+ if(context&&initial&&!final)try{result.final=await snapshot();}catch(error){result.errors.push({name:'最终只读状态',error:redact(error?.message||error)});}
+ if(context)await context.close().catch(error=>result.errors.push({name:'关闭只读观察上下文',error:redact(error?.message||error)}));if(browser)await browser.close().catch(error=>result.errors.push({name:'关闭观察浏览器',error:redact(error?.message||error)}));result.finishedAt=new Date().toISOString();persist();console.log(JSON.stringify(result));
+}
+process.exitCode=result.errors.length?1:0;

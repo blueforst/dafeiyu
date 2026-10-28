@@ -1,6 +1,6 @@
 # 回复时段跟随早晚安帖实施任务
 
-当前完成 9/10 项。服务器最终构建与 615 项回归通过，三工作区界面通过，发布另行验收；证据见[本轮总记录](../../../docs/实施记录/2026-10-28-五项剩余提案候选.md)。规格见 [reply-hours](specs/reply-hours/spec.md)、[reply-triage](specs/reply-triage/spec.md) 和 [runtime-health](specs/runtime-health/spec.md)，实现边界见 [design.md](design.md)。构建和测试只在服务器隔离环境执行，不使用生产 profile；生产发布需要另行授权。实施前确认本机工作副本中涉及的源码、测试和前端文件没有其他人的未提交改动；如果 `add-private-daily-limit` 同时实施，需协调 `workflow.ts`、`reply-triage.ts`、`program.ts` 和设置页的改动。
+当前完成 9/10 项。服务器正式构建与 647 项回归通过，0.1.19 已部署并读回当前关闭状态；仅跨夜实际开放后的观察仍待完成，3.1 保持未勾选；证据见[本轮总记录](../../../docs/实施记录/2026-10-28-五项剩余提案候选.md)。规格见 [reply-hours](specs/reply-hours/spec.md)、[reply-triage](specs/reply-triage/spec.md) 和 [runtime-health](specs/runtime-health/spec.md)，实现边界见 [design.md](design.md)。构建和测试只在服务器隔离环境执行，不使用生产 profile；生产发布需要另行授权。实施前确认本机工作副本中涉及的源码、测试和前端文件没有其他人的未提交改动；如果 `add-private-daily-limit` 同时实施，需协调 `workflow.ts`、`reply-triage.ts`、`program.ts` 和设置页的改动。
 
 ## 1. 实现
 
@@ -27,6 +27,8 @@
 ## 3. 发布
 
 - [ ] 3.1 取得发布授权后随下一次发布上线，保持原有控制状态，发布记录写明功能默认开启、当晚起 23:30–08:00 不回复。验收：读回 `GET /api/program` 的 `replyHours`；当晚关闭后的日志里没有新的回复提交；次日开放后夜间消息被处理，或队列为空时有日志说明。提案创建不视为发布授权。
+
+发布步骤及待观察边界见[0.1.19 发布记录](../../../docs/发布记录/2026-10-29-0.1.19.md)。
 
 ## Workflow follow-up
 
