@@ -1,118 +1,107 @@
 # 项目 OpenSpec 使用说明
 
-本项目使用 OpenSpec `spec-driven` 工作流管理需求、规格、技术设计和实施任务。规划、服务器隔离实现与生产发布分别记录，CLI 规划状态不代表业务已经上线。
+本项目用 OpenSpec `spec-driven` 管理需求、增量规格、设计与验收任务。使用产品先看 [项目 README](../README.md)；修改需求先读 [项目约定](../AGENTS.md)、[OpenSpec 配置](config.yaml) 和对应提案的全部产物。
 
-## 当前提案
+**规划结构完成、代码提交、服务器测试、生产发布、真实业务验收是不同状态。** `specs/` 只记录已验证的现有行为；尚未完成的需求保留在 `changes/`，不得因代码已部署而提前同步主规格或归档。
 
-- [七页面板与生产角色工作流](changes/add-seven-page-production-bot/proposal.md)：动机、范围与能力清单。
-- [技术设计](changes/add-seven-page-production-bot/design.md)：接口、数据流、互斥、迁移、失败与回退。
-- [实施任务](changes/add-seven-page-production-bot/tasks.md)：按依赖排序、逐项包含验证方式；进展和证据见[实施记录](../docs/实施记录/2026-10-28-七页提案.md)。
-- [增量规格](changes/add-seven-page-production-bot/specs/)：八项能力及可验收场景。
+## 当前发布与验收边界
 
-`specs/` 当前只登记已存在的导航、记忆及模型配置基线；未实现能力只在 `changes/` 中。CLI 显示规划产物完成只代表可进入实施，不代表业务任务完成，也不应据此归档。
+截至 2026-10-28，正式 app／browser 为 **0.1.18.2**，来源 `9d69f92`，成对 healthy，schema **13**，正式构建 **533 项通过**。当前导航为动态、人设、记忆、设置、计费五页，业务保持 **paused／auto**；未定制部署读回通用默认 v2、修订 0。
 
-## 本轮后续提案候选
+下列提案的现有代码已进入生产，包括四项新增提案、参考帖子补齐和计费图表交互；**这不表示提案的所有任务已经验收**。真实长帖、模型效果、平台发送与双方回执、业务及长期观察仍按各自清单继续完成。部分 `tasks.md` 的发布勾选尚未随最新证据回填；发布事实看 [发布与实机修复记录](../docs/实施记录/2026-10-28-发布与实机修复.md)，逐项完成条件仍看对应任务，不在本次索引整理中代替验收勾选。
 
-六项提案已有 83/105 项按完整条件验收。服务器 325 项回归和 40 组界面／浏览器检查通过；真实长帖、模型费用、生产发布和观察等 22 项继续保留，详见[最终实施记录](../docs/实施记录/2026-10-28-后续提案.md)。
+公开提及、搜索与自己帖子下回复已真实只读读通；私信界面就绪、原生结构和账号质量过滤仍在修复／实机复验。原生 X Chat 仍缺可靠时间与入站归属，自动事件为零，不声明自动收发可用。通知“全部”栏继续待真实样本、未启用。
 
-- [按账号权限校验 X 发帖字数](changes/add-account-aware-post-limits/proposal.md)：分别识别原创和公开回复的长帖能力，统一生成与发送校验；包含设计、增量规格与实施任务，本轮已进入实现与服务器隔离验证，进度以 tasks.md 和[本轮记录](../docs/实施记录/2026-10-28-后续提案.md)为准。
-- [动态首页与面板精简](changes/simplify-panel-activity-feed/proposal.md)：五页面板、草稿处理、多服务商模型库，以及按 ZCode 用量统计样式重做的计费页；本轮已进入实现与服务器隔离验证，进度以 tasks.md 和[本轮记录](../docs/实施记录/2026-10-28-后续提案.md)为准。
-- [回复提示词结构与动态提醒](changes/improve-reply-prompt-context/proposal.md)：稳定前缀分层、命中规则靠近生成位置、迟到／语言／开头去重／表情节制提醒；本轮已进入实现与服务器隔离验证，进度以 tasks.md 和[本轮记录](../docs/实施记录/2026-10-28-后续提案.md)为准。
-- [消息分级、过滤与公平调度](changes/add-reply-triage/proposal.md)：入队分级、广告与刷量过滤、同一用户合并、骚扰冷却、公开每日额度，受限通道不占名额；本轮已进入实现与服务器隔离验证，进度以 tasks.md 和[本轮记录](../docs/实施记录/2026-10-28-后续提案.md)为准。
-- [无人值守健康、日报与账号合规](changes/add-unattended-health/proposal.md)：轮次超时与看门狗、浏览器内存自愈、健康告警、每日日报、账号受限识别与合规只读检查；不含外部推送，本轮已进入实现与服务器隔离验证，进度以 tasks.md 和[本轮记录](../docs/实施记录/2026-10-28-后续提案.md)为准。
-- [人设回放对比与回复质量统计](changes/add-persona-replay/proposal.md)：真实样本新旧人设批量对比、人工标注与确定性质量指标；本轮已进入实现与服务器隔离验证，进度以 tasks.md 和[本轮记录](../docs/实施记录/2026-10-28-后续提案.md)为准。
+六预设 **240 次**与文风前后对比 **10 次**真实模型调用已获授权，按用户最新要求等待问题全部修好并完成实机复验后执行。当前新增真实模型调用为 **0**，原生产 completed 三条不变；不能写成缺授权，也不能把模拟结果当作已跑完真实批量。
 
-后四项来自对参考帖子的第二轮扫描，逐条对照见 [参考帖子对照](../docs/参考帖子对照.md)。
+## 已部署代码所涵盖的提案
 
-## 第三轮扫描提案
+下表是入口与范围摘要，不是完成清单。每项设计、任务和完整增量规格均保留在原目录。
 
-- [参考帖子第三轮遗漏补齐](changes/fill-reference-post-gaps/proposal.md)：包括以下几项：
-  - 引用帖与链接卡片、以目标帖为中心的上下文、自己帖子扫描跳过置顶
-  - 关键词触发卡片（不调用模型）、不可见资料说明
-  - 角色经历只召回发帖，并支持人工登记
-  - 按链接补录漏掉的消息
-  - 回放比较模型设置
-  - 通知“全部”栏引用来源（取得样本后才启用）
+| 提案与范围 | 设计 | 实施与验收 | 增量规格 |
+| --- | --- | --- | --- |
+| [七页生产工作流基线](changes/add-seven-page-production-bot/proposal.md)：账号归属、模型计量、人设、记忆、任务、持久出站；当前导航已由五页替代 | [设计](changes/add-seven-page-production-bot/design.md) | [任务](changes/add-seven-page-production-bot/tasks.md) | [规格](changes/add-seven-page-production-bot/specs/) |
+| [按账号权限校验 X 发帖字数](changes/add-account-aware-post-limits/proposal.md)：统一生成与发送字数校验；真实长帖权限与完整回执仍待验证 | [设计](changes/add-account-aware-post-limits/design.md) | [任务](changes/add-account-aware-post-limits/tasks.md) | [规格](changes/add-account-aware-post-limits/specs/) |
+| [动态首页与五页面板](changes/simplify-panel-activity-feed/proposal.md)：动态、草稿审核、模型库与计费页；原七页入口兼容跳转 | [设计](changes/simplify-panel-activity-feed/design.md) | [任务](changes/simplify-panel-activity-feed/tasks.md) | [规格](changes/simplify-panel-activity-feed/specs/) |
+| [回复提示词结构与动态提醒](changes/improve-reply-prompt-context/proposal.md)：稳定前缀、动态上下文及迟到／语言／表情等提醒 | [设计](changes/improve-reply-prompt-context/design.md) | [任务](changes/improve-reply-prompt-context/tasks.md) | [规格](changes/improve-reply-prompt-context/specs/) |
+| [消息分级、过滤与公平调度](changes/add-reply-triage/proposal.md)：广告与刷量过滤、同人合并、骚扰冷却、公开每日额度及公平出队 | [设计](changes/add-reply-triage/design.md) | [任务](changes/add-reply-triage/tasks.md) | [规格](changes/add-reply-triage/specs/) |
+| [无人值守健康、日报与账号合规](changes/add-unattended-health/proposal.md)：轮次看门狗、浏览器自愈、健康和账号只读检查；实际可靠性与长期观察继续验收 | [设计](changes/add-unattended-health/design.md) | [任务](changes/add-unattended-health/tasks.md) | [规格](changes/add-unattended-health/specs/) |
+| [人设回放与回复质量统计](changes/add-persona-replay/proposal.md)：样本比较、费用确认、人工标注与确定性指标；不替代真实模型效果审定 | [设计](changes/add-persona-replay/design.md) | [任务](changes/add-persona-replay/tasks.md) | [规格](changes/add-persona-replay/specs/) |
+| [参考帖子遗漏补齐](changes/fill-reference-post-gaps/proposal.md)：引用／卡片、目标上下文、关键词卡、角色经历、链接补录及模型对比；通知“全部”仍待样本且关闭 | [设计](changes/fill-reference-post-gaps/design.md) | [任务](changes/fill-reference-post-gaps/tasks.md) | [规格](changes/fill-reference-post-gaps/specs/) |
+| [计费图表交互](changes/add-billing-chart-interaction/proposal.md)：即时提示、日期列悬停、环图联动、触屏与键盘操作 | [设计](changes/add-billing-chart-interaction/design.md) | [任务](changes/add-billing-chart-interaction/tasks.md) | [规格](changes/add-billing-chart-interaction/specs/) |
+| [人设预设与默认人设](changes/add-persona-presets/proposal.md)：六个原创 v2 预设、通用默认、关键词卡（含“不给步骤”“被夸”）、编辑器填入与统一人设；240 次真实模型及效果审定未完成 | [设计](changes/add-persona-presets/design.md) | [任务](changes/add-persona-presets/tasks.md) | [规格](changes/add-persona-presets/specs/) |
+| [取消消息里的遗忘指令](changes/remove-message-forget-command/proposal.md)：消息不能执行遗忘或恢复，管理员操作与独立账本保留；真实回复抽查待完成 | [设计](changes/remove-message-forget-command/design.md) | [任务](changes/remove-message-forget-command/tasks.md) | [规格](changes/remove-message-forget-command/specs/) |
+| [运行状态与浏览器接管分离](changes/separate-run-control-from-takeover/proposal.md)：顶部启动／暂停，设置页接管／释放，释放后继续暂停 | [设计](changes/separate-run-control-from-takeover/design.md) | [任务](changes/separate-run-control-from-takeover/tasks.md) | [规格](changes/separate-run-control-from-takeover/specs/) |
+| [回复文风与格式标记](changes/improve-reply-style/proposal.md)：同人近期往来、角色帖去重与格式只标记；真实前后五轮比较及发布后观察待完成 | [设计](changes/improve-reply-style/design.md) | [任务](changes/improve-reply-style/tasks.md) | [规格](changes/improve-reply-style/specs/) |
 
-  已完成 **21/25** 项实现与服务器隔离验收：引用／卡片字段与提示词、目标中心上下文与置顶跳过、关键词卡片、角色经历及迁移 13、按链接补录、模型比较回放均已接入。最终服务器类型检查、**468/468** 全量回归和构建通过，失败／取消／跳过为零；Camoufox DOM **24/24**、实际 HTTP broker→BrowserTransport→Workflow **9/9**、新增界面 **22/22**（补齐界面 12＋图表 10）、健康 **15/15** 通过。日志与各项完成条件见[实施任务](changes/fill-reference-post-gaps/tasks.md)，接口见[前端接口](../docs/前端接口.md)，现状见[参考帖子对照](../docs/参考帖子对照.md)。
+使用说明与证据：
 
-  通知“全部”栏继续为 `awaiting-samples` 且未启用；6.1、6.2 的真实样本与启用，7.3 的生产发布和 7.4 的真实补录收发四项继续未完成。上述 HTTP 验收使用本地合成模型响应与隔离平台夹具，不等于真实 X 或供应商调用。生产保持暂停，既有三条模型调用、一条 unknown 消息和一条 unknown 出站保持不变。原生 Chat 仍需可靠时间与入站身份验收，自动事件为零，不声明自动可用。本提案修改了七页、回复提示词和人设回放三项提案中的能力，归档时需要排在它们之后。
+- [五页与后续提案使用说明](../docs/后续提案实施.md)、[模型库](../docs/模型库.md)、[前端接口](../docs/前端接口.md)
+- [七页基线实施记录](../docs/实施记录/2026-10-28-七页提案.md)、[六项后续提案实施记录](../docs/实施记录/2026-10-28-后续提案.md)
+- [参考帖子逐条对照](../docs/参考帖子对照.md)、[第三轮补齐与采集修复](../docs/实施记录/2026-10-28-新提案与采集修复.md)、[计费图表交互记录](../docs/实施记录/2026-10-28-计费图表交互.md)
+- [四项新增提案隔离验收](../docs/实施记录/2026-10-28-新增提案实现.md)、[最新发布与实机修复](../docs/实施记录/2026-10-28-发布与实机修复.md)、[原生 Chat 只读边界](../docs/新Chat只读适配.md)
 
-## 计费图表交互
+记录中的旧版本、模拟调用数和当时的“未发布”表述属于历史快照。当前发布以最近记录和运行读回为准，真实验收仍须有相应证据。
 
-- [计费图表鼠标与键盘交互](changes/add-billing-chart-interaction/proposal.md)：0.1.17 的计费图表只有浏览器原生 `title` 提示，没有可用的鼠标交互。本提案补上以下几项：
-  - 即时提示框；
-  - 趋势图按日期整列悬停，显示各模型数值；
-  - 环形图扇区与明细联动；
-  - 触屏轻点；
-  - 每张图只占一个 Tab 停留点，用方向键浏览。
+## 仅规划，尚未实现
 
-  已完成 7/8 项：鼠标、键盘与触屏交互均已实现；服务器纯函数 9/9、Camoufox 10/10 通过，十四张截图已验收。生产发布与生产计费页读回仍未完成，见[实施记录](../docs/实施记录/2026-10-28-计费图表交互.md)。本提案修改的需求来自 `simplify-panel-activity-feed`，归档时需要排在它之后。
+### 私信每日额度
 
-## 人设预设
+[提案](changes/add-private-daily-limit/proposal.md) · [设计](changes/add-private-daily-limit/design.md) · [任务](changes/add-private-daily-limit/tasks.md) · [增量规格](changes/add-private-daily-limit/specs/)
 
-- [人设预设与默认人设](changes/add-persona-presets/proposal.md)：人设页可以直接选用六个内置人设：通用（默认）、大肥鱼、GPT 娘、Claude 娘、Kimi 娘、GLM 娘。本提案还包括以下几项：
-  - 按参考帖分“始终生效”和“被问到才用”两类分区；
-  - 只用关键词卡，每个预设带“不给步骤”卡和“被夸”卡；
-  - 说话风格先写六个预设相同的通用写法，再写各自的口吻；角色梗按“聊到才用、近期往来里用过就不用”约束；
-  - 角色预设写明非官方，并提醒修改 X 名称和简介；
-  - 没有在面板保存过人设时，用通用默认替代自相矛盾的旧一句话；
-  - 回复、试聊、早晚安帖和日程使用同一份生效人设。
+当前 **0/8**，只创建规划文件。计划新增私信 `privatePerDay`，默认 **400**，管理员可设 **1–500**；按最近二十四小时滚动计数，为接管时的手动发送预留余量。达到额度后私信继续排队，不触发四小时平台拒绝退避，也不影响公开通道。设置页、队列摘要和健康提示同步显示近二十四小时计数。
 
-  当前完成 12/15 项：六个原创预设 v2、默认解析、统一日程、接口与编辑器，以及追加的口吻分离和“被夸”卡均已实现。服务器类型检查、508 项全量与构建、预设界面 13/13、真实应用＋模拟模型全链 6/6 通过；题库扩为 180 条独立题＋60 轮连续对话，共 240 次模拟预览，后轮只使用本预设本组的前轮实际回复。真实模型批量、管理员审定和发布三项保持未完成；必须先发布关键词卡片。详见[本批实施记录](../docs/实施记录/2026-10-28-新增提案实现.md)。
+现有生产私信只有小时额度，不能把计划值当成已生效保护。该提案是在私信自动回复启用前补齐额度；不改公开自然日额度、出站回执或 unknown 只回查语义。平台限制的来源与统计口径见原提案。
 
-## 取消消息里的遗忘指令
+### 回复时段跟随早晚安帖
 
-- [取消消息里的遗忘指令](changes/remove-message-forget-command/proposal.md)：用户发“忘了我吧”“重新记住我”不再改变遗忘状态，按普通消息处理；遗忘和恢复只在记忆页由管理员操作。固定系统约束增加一句，被要求删除记录时不声称已经删除。
+[提案](changes/add-reply-hours/proposal.md) · [设计](changes/add-reply-hours/design.md) · [任务](changes/add-reply-hours/tasks.md) · [增量规格](changes/add-reply-hours/specs/)
 
-  当前完成 4/6 项：已移除消息指令并加入删除记录诚实约束（先升至 v3，本批文风改动再升至 v4且固定约束原文保留）；修改前 3 项回归全部失败，修改后相关 26 项及最终全量 508 项通过。遗忘账本与管理员接口不变，真实模型抽查和发布仍未完成；归档需排在 `add-seven-page-production-bot` 之后。
+当前 **0/10**，只创建规划文件。计划默认开启回复时段：从晚安计划时间加关闭延迟，到次日早安计划时间，公开回复与私信均不生成、不提交。关闭延迟默认 **30 分钟**，范围 **0–180**；以任务计划时间为准，任务停用、错过或未发成功不改变开关时间。早安任务启用时先等当天任务结束，最迟计划时间后 **15 分钟**开放回复。
 
-## 顶部运行状态与浏览器接管分离
+关闭期间仍采集排队，排队时效暂停计时；unknown 回查、日程、记忆等任务沿用各自规则，人工接管不受限制。健康停滞与日报延迟扣除关闭时长。生产早晚安任务目前停用；本提案若按默认计划实施，对应 **23:30–08:00** 关闭区间，当前尚无此限制。
 
-- [顶部运行状态与浏览器接管分离](changes/separate-run-control-from-takeover/proposal.md)：顶部栏只显示运行中、已暂停或正在暂停，并提供启动和暂停。发起接管、接管状态和释放接管都放到设置页“浏览器接管”分区；接管期间顶部只显示一个指向该分区的链接，“启动”不可用。
+这两项提案不新增数据库迁移或模型请求。实施与发布各按原任务验证，不因提案进入仓库自动执行。
 
-  当前完成 6/7 项：前端已实现并通过隔离 6 组／二十张截图验收；旧面板脚本已迁移，实际应用面板回归 25/25、真实隔离 noVNC 6/6 通过。生产脚本只做语法检查，发布仍未完成。归档需排在 `add-seven-page-production-bot` 和 `simplify-panel-activity-feed` 之后。
+## 依赖与维护规则
 
-## 回复文风
+- 七页基线提案和原计划保留为来源；后续修改以相应 change 的提案、完整增量规格、设计和任务为准，避免设计分叉。
+- `fill-reference-post-gaps` 修改七页基线、回复提示词和回放中的能力；归档应在这些来源提案之后。`add-billing-chart-interaction` 应在 `simplify-panel-activity-feed` 之后。
+- `remove-message-forget-command` 应在七页基线之后；运行／接管分离应在七页与五页面板之后；文风提案应在七页与回复提示词提案之后。
+- `add-private-daily-limit` 应在 `add-reply-triage` 之后；`add-reply-hours` 应在分级、健康及私信日额度提案之后。两项都修改分级能力，并行实施时需协调共享源码与设置入口。
+- 未完成任务不得归档。同步主规格前核对实际行为和全部验收证据；CLI 显示规划产物完成只表示可进入实施。
+- 修改需求时同步提案、规格、设计和任务；任务只在完整验收条件通过后勾选。构建、自动化测试、批量模型及界面验收只在服务器独立环境运行，不使用生产 profile 跑模拟测试。
 
-- [回复文风：近期往来、帖子去重与格式标记](changes/improve-reply-style/proposal.md)：
-  - 和当前这个人的近期往来单独成段，要求不重复其中用过的梗、口癖、开头和收尾；
-  - 去掉跨人的开头去重提醒，跨人重复不控制；
-  - 早晚安帖带上角色经历，不重复最近帖子的开头、句式和切入点；
-  - 回复或帖子含列表、步骤或 Markdown 时只做标记，不改变发送流程：自动模式照常发送，草稿模式照常审批。
-
-  当前完成 6/8 项：近期往来独立成段、去除跨人开头提醒、早晚安帖经历与去重，以及回复／帖子／试聊格式标记均已实现；类型检查、最终全量 508 项与构建、文风界面 7/7 组通过。格式只标记，不新增发送条件。真实模型连续五轮前后比较、发布后数日观察仍未完成。各人设口吻和梗的写法已在 `add-persona-presets` v2 中调整。归档需排在 `add-seven-page-production-bot` 和 `improve-reply-prompt-context` 之后。
-
-## 目录与维护方式
+## 目录与工作流
 
 ```text
 openspec/
-  config.yaml                         # 中文约定、技术背景与各产物规则
-  specs/                              # 已实现行为基线
-  changes/add-seven-page-production-bot/
-    .openspec.yaml                    # change 元数据
-    proposal.md                       # 为什么改、改什么
-    design.md                         # 如何实现
-    tasks.md                          # 业务实施与验收
-    specs/<capability>/spec.md         # 新增或修改的行为
-.agents/skills/openspec-*/             # 官方生成的 Codex 集成
+  config.yaml                       # 中文约定、技术背景与产物规则
+  specs/                            # 已验证的现有行为基线
+  changes/<change>/
+    .openspec.yaml                  # change 元数据
+    proposal.md                     # 为什么改、改什么
+    design.md                       # 数据流、状态、兼容、验证与回退
+    tasks.md                        # 实施步骤及各项验收条件
+    specs/<capability>/spec.md       # 新增或修改的行为
+.agents/skills/openspec-*/           # Codex 工作流集成
 ```
 
-项目产物正文使用中文；`Purpose`、`Requirement`、`Scenario`、`MUST`、`WHEN/THEN` 等保留 OpenSpec 格式关键字。Codex 技能保留官方生成结构，其执行产物遵循项目中文配置。
+主规格入口：[导航](specs/panel-navigation/spec.md)、[记忆](specs/conversation-memory/spec.md)、[模型配置](specs/model-configuration/spec.md)。它们尚未吸收所有 change 的增量，不能把主规格目录视为当前全部功能清单。
 
-修改需求时先同步提案、增量规格、设计与相应任务，避免仅修改旧计划。主规格在实现并验证后才同步新行为。各模块测试和文档随任务完成，不集中拖到发布阶段。
+项目产物正文使用中文；保留 OpenSpec 所需的 `Purpose`、`Requirement`、`Scenario`、`MUST/SHALL` 和 `WHEN/THEN` 关键字。配置中的旧版本上下文属于历史来源，实施前须与当前发布和实际账号核对。
 
-## CLI 与服务器校验
+Codex 集成位于 `.agents/skills/`，包含提出变更、探索、实施、更新、同步规格和归档六个流程。例如 `$openspec-propose` 用于规划，`$openspec-apply-change <change>` 用于实施。技能入口不代表自动取得模型调用、发布或恢复业务的授权；沿用当前会话已确认的范围和顺序。
 
-本次采用官方 npm 包 `@fission-ai/openspec@1.15.0`，安装在服务器独立工具目录 `/srv/role-workflow-openspec-tools`；不加入业务 package.json，不修改服务运行依赖。服务器校验镜像目录为 `/srv/role-workflow-openspec-authoring`，其内容由当前工作副本的 `openspec/` 单向同步。
+## 服务器 CLI 校验
 
-本机同步规划文档到该隔离目录：
+既有独立校验工具使用 `@fission-ai/openspec@1.15.0`，位于服务器 `/srv/role-workflow-openspec-tools`，不加入业务运行依赖。规划文件同步到隔离目录 `/srv/role-workflow-openspec-authoring`，不向生产目录初始化或同步：
 
 ```sh
 rsync -az --delete openspec/ dsh:/srv/role-workflow-openspec-authoring/openspec/
 ```
 
-在服务器执行：
+以下命令在服务器执行：
 
 ```sh
 cd /srv/role-workflow-openspec-authoring
@@ -125,15 +114,6 @@ OPENSPEC=/srv/role-workflow-openspec-tools/node_modules/.bin/openspec
 "$OPENSPEC" instructions apply --change add-seven-page-production-bot --json
 ```
 
-单独校验提案可使用 `validate add-seven-page-production-bot --strict --no-interactive`。需要在其他开发机安装 CLI 时使用同版本官方包，再在本项目目录运行对应命令；不要针对生产运行目录初始化或镜像同步。
-
-## Codex 使用
-
-项目集成由官方 `openspec init --tools codex --profile core --language zh-CN` 生成，位于 `.agents/skills/`。当前包含提出变更、探索、实施、更新、同步规格和归档六个流程；新会话可选择相应技能，也可以直接说明要处理的提案和操作。
-
-- 整理提案：`$openspec-propose`。
-- 实施当前提案：`$openspec-apply-change add-seven-page-production-bot`。
-- 按实现进展更新任务；没有完成证据不得勾选。
-- 未实施完不执行规格同步和归档，不把设计文档误作上线状态。
+单项校验可用 `validate <change> --strict --no-interactive`。校验通过只证明规划结构有效，不替代业务测试、真实平台验收或任务完成。
 
 参考：[OpenSpec 官方入门](https://github.com/Fission-AI/OpenSpec/blob/main/docs/getting-started.md)、[CLI 说明](https://github.com/Fission-AI/OpenSpec/blob/main/docs/cli.md)。
