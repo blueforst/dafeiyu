@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>合成新 Chat 原生外层契约镜像</title><body>
+<!-- 结构来自已取得的native outerHTML契约；身份、UUID和正文替换为合成值。 -->
+<!-- document同名诱饵、Accept/Block按钮只用作负向测试，不作为平台结构证据。 -->
+<span id="native-message-sender">You</span><span id="native-message-content">document诱饵正文</span>
+<div data-testid="xchatEmbedRoute"></div>
+<script>
+const root=document.querySelector('[data-testid="xchatEmbedRoute"]').attachShadow({mode:'open'});
+root.innerHTML=`<main>
+ <button onclick="window.__requestActions=(window.__requestActions||0)+1">Accept fixture trap</button><button onclick="window.__requestActions=(window.__requestActions||0)+1">Block fixture trap</button>
+ <div role="listbox" aria-label="Conversations">
+  <div data-testid="dm-conversation-item-111:222"><a id="dm-conversation-option-111:222" href="/i/chat/111-222" role="option">合成一对一会话</a></div>
+  <a href="/i/chat/requests">Requests</a><a href="/i/chat/other">Other</a>
+  <a href="/i/chat/unverified">未经验证会话结构</a>
+  <a href="https://evil.example/i/chat/111-222">外部诱饵</a>
+ </div>
+ <div role="log" aria-label="Messages" data-testid="dm-message-scroller">
+  <div data-dm-item-key="dateBoundary-11111111-1111-4111-8111-111111111111">Today</div>
+  <div data-dm-message-row="11111111-1111-4111-8111-111111111111" data-testid="message-11111111-1111-4111-8111-111111111111" data-send-status="sent">
+   <div role="article" data-dm-message-focus-target="11111111-1111-4111-8111-111111111111:content" aria-labelledby="self-message-sender self-message-time" aria-describedby="self-message-content">
+    <span hidden id="self-message-sender">You</span><span hidden id="self-message-time">1:10 PM</span>
+    <div id="self-message-content" data-testid="message-text-11111111-1111-4111-8111-111111111111"><span dir="auto">合成已发送正文 1:10 PM</span><span style="opacity:0" aria-hidden="true">1:10 PM</span><div style="position:absolute" aria-hidden="true">1:10 PM</div></div>
+   </div>
+  </div>
+  <div data-dm-message-row="22222222-2222-4222-8222-222222222222" data-testid="message-22222222-2222-4222-8222-222222222222" data-send-status="sent">
+   <div role="article" data-dm-message-focus-target="22222222-2222-4222-8222-222222222222:content" aria-labelledby="native-message-sender peer-message-time" aria-describedby="native-message-content">
+    <span hidden id="native-message-sender">Peer not yet verified</span><span hidden id="peer-message-time">1:11 PM</span>
+    <div id="native-message-content" data-testid="message-text-22222222-2222-4222-8222-222222222222"><span dir="auto">正文中的 You 不能证明出站</span><span style="opacity:0" aria-hidden="true">1:11 PM</span><div style="position:absolute" aria-hidden="true">1:11 PM</div></div>
+   </div>
+  </div>
+ </div>
+</main>`;
+</script></body></html>

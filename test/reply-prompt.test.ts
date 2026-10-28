@@ -153,7 +153,7 @@ test('正常生产草稿保存提醒meta并关联原调用cacheRead，旧草稿�
   await workflow.resume();await workflow.tick();const row=f.store.getMessage(event.id,'prompt_bot')!;assert.equal(row.status,'draft');assert.equal(calls,1);
   const response=await app.inject('/api/messages/'+encodeURIComponent(row.id));assert.equal(response.statusCode,200,response.body);const detail=response.json(),meta=detail.message.draft.meta;
   assert.equal(meta.promptVersion,REPLY_PROMPT_VERSION);assert.ok(meta.hintKinds.includes('late'));assert.ok(meta.hintKinds.includes('language'));assert.equal(detail.calls.find((call:any)=>call.id===meta.callId).usage.cacheRead,4);assert.equal((f.store.db.prepare('SELECT COUNT(*) n FROM llm_calls').get() as any).n,1);
-  const old={...event,id:'old-draft',platformId:'2345678'};f.store.ingest(old,'prompt_bot');f.store.update(old.id,'draft',{draft:{action:'reply',text:'旧版草稿',reason:''}},'prompt_bot');const oldRow=f.store.getMessage(old.id,'prompt_bot')!;
+  const old={...event,id:'old-draft',platformId:'2345678',url:'https://x.com/visitor/status/2345678'};f.store.ingest(old,'prompt_bot');f.store.update(old.id,'draft',{draft:{action:'reply',text:'旧版草稿',reason:''}},'prompt_bot');const oldRow=f.store.getMessage(old.id,'prompt_bot')!;
   const oldResponse=await app.inject('/api/messages/'+encodeURIComponent(oldRow.id));assert.equal(oldResponse.statusCode,200);assert.equal(oldResponse.json().message.draft.meta,undefined);
   const logs=JSON.stringify(f.store.logs());assert.ok(!logs.includes(event.text));assert.ok(!logs.includes('祝你今天顺利'));assert.equal(workflow.control(),'running');
  }finally{workflow.stop();await app.close();f.close();}

@@ -136,7 +136,8 @@ test('角色经历必须有明确来源，不把虚构活动自动转为经历',
   assert.throws(()=>f.memory.recordExperience({accountId:'work',userId:'x:alice',channel:'public',text:'虚构外出'}),/缺少明确来源/);
   const source=f.add(1);f.memory.recordExperience({accountId:'work',userId:'x:alice',channel:'public',text:'有原文依据的互动',sourceMessageId:source});
   f.memory.recordExperience({accountId:'work',userId:'x:alice',channel:'private',text:'私信互动',receipt:{status:'confirmed',id:'receipt-private'}});
-  assert.equal(f.memory.context('x:alice','public','work').experiences.length,1);assert.equal(f.memory.context('x:alice','private','work').experiences.length,2);
+  assert.equal(f.memory.context('x:alice','public','work').experiences.length,0);assert.equal(f.memory.context('x:alice','private','work').experiences.length,0);
+  assert.equal(f.memory.detail('x:alice','public','work').experiences.length,1);assert.equal(f.memory.detail('x:alice','private','work').experiences.length,2);
   assert.deepEqual(f.memory.context('x:alice','private','another').experiences,[]);
  }finally{f.close();}
 });

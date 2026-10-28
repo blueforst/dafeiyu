@@ -22,6 +22,7 @@ import { validatePostingText } from '../src/posting-policy.js';
 import type { Config,Event } from '../src/types.js';
 import type { Generator } from '../src/model.js';
 import { exampleConfig } from './config-fixture.js';
+import { ensureReferenceGapMigration } from '../src/reference-gap-schema.js';
 
 const helper=resolve('deploy/prepare-proposals-rollback.py');
 const generator:Generator={complete:async()=>{throw new Error('回退演练不调用模型');}};
@@ -34,9 +35,9 @@ function fixture(){
  writeFileSync(root+'/panel/settings.json',JSON.stringify(settings));writeFileSync(root+'/panel/model-keys.json','{"custom@rollback-fixture.invalid":"fixture-only-key"}');
  const externals=['forget-ledger.json','forget-history.json','forgotten-sources.json','memory-mutations.json'];for(const name of externals)writeFileSync(root+'/'+name,name==='memory-mutations.json'?'[]':'{}');
  writeFileSync(profile+'/transport-journal.json','{}');writeFileSync(profile+'/posting-preflight-v1.json','{"version":1,"entries":{}}');
- let closed=false;const stop=()=>{if(!closed){store.db.close();closed=true;}};
+ let closed=false,messageSequence=900000;const stop=()=>{if(!closed){store.db.close();closed=true;}};
  const message=(id:string,status='draft',text='待复核正文',review=false)=>{
-  const event:Event={id,platformId:'platform-'+id,userId:'user-'+id,channel:'public',handle:'visitor',text:'原始消息',url:'https://x.com/visitor/status/123',conversationId:'thread',timestamp:Date.now(),timestampReliable:true};
+  const platformId=String(++messageSequence);const event:Event={id,platformId,userId:'user-'+id,channel:'public',handle:'visitor',text:'原始消息',url:'https://x.com/visitor/status/'+platformId,conversationId:'thread',timestamp:Date.now(),timestampReliable:true};
   store.ingest(event,'worker');const row=store.getMessage(id,'worker');store.update(row.id,status,{draft:{action:'reply',text,reason:'来源保留',...(review?{review:true,previous:{action:'reply',text:'上一次草稿',reason:'此前草稿'}}:{})}});return store.getMessage(row.id,'worker');
  };
  const invoke=(apply=false,stopped=true)=>{stop();const args=[helper,'--db',path,'--browser-profile',profile,...(apply?['--apply']:['--check']),...(stopped?['--confirm-stopped']:[])];const result=spawnSync('python3',args,{encoding:'utf8',timeout:30000,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'}});assert.equal(result.error,undefined,result.error?.message);assert.ok(result.stdout.trim(),result.stderr);return {code:result.status,report:JSON.parse(result.stdout)};};
@@ -111,5 +112,34 @@ test('兼容转换中途失败回滚全部状态，外部设置及新日志从�
   f.message('approved','approved');f.outbox.prepare({accountId:'worker',kind:'post',sourceId:'long',text:'x'.repeat(281)});f.stop();const before=state(f.path),files=f.files();
   const code='import importlib.util,json,sys; s=importlib.util.spec_from_file_location("prepare_rollback",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); original=m.prepare; m.prepare=lambda connection,actions:(original(connection,actions),(_ for _ in ()).throw(RuntimeError("注入转换后异常"))); report,status=m.run(sys.argv[2],sys.argv[3],True,True); print(json.dumps(report,ensure_ascii=False)); sys.exit(status)';
   const result=spawnSync('python3',['-c',code,helper,f.path,f.profile],{encoding:'utf8',timeout:30000,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'}});assert.equal(result.status,1,result.stderr);assert.equal(JSON.parse(result.stdout).applied,false);assert.deepEqual(state(f.path),before);assert.deepEqual(f.files(),files);
+ }finally{f.close();}
+});
+
+test('版本13仅安全空或默认发帖元信息窗口可移除两张新表，保留原发帖且能再次升级',()=>{
+ for(const defaults of [false,true]){
+  const f=fixture();try{
+   ensureReferenceGapMigration(f.store.db);
+   if(defaults){f.store.db.prepare('INSERT INTO role_experiences VALUES(?,?,?,?,?,?,?,?,?,?)').run('automatic','worker','role','public','post','原发帖正文','receipt:default',null,'{"status":"confirmed","id":"default"}',100);f.store.db.prepare('INSERT INTO role_experience_meta VALUES(?,?,?,?,?,?,?,?,?,?)').run('automatic','worker','automatic',100,null,null,'verified',null,0,100);}
+   f.stop();const before=state(f.path),files=f.files();const checked=f.invoke();assert.equal(checked.code,0,JSON.stringify(checked.report));assert.deepEqual(state(f.path),before);assert.ok(checked.report.versions.includes(13));
+   const applied=f.invoke(true);assert.equal(applied.code,0,JSON.stringify(applied.report));const after=state(f.path);assert.deepEqual(after.rows.role_experiences,before.rows.role_experiences);assert.equal(after.rows.role_experience_meta,undefined);assert.equal(after.rows.manual_imports,undefined);assert.equal(after.rows.schema_migrations.some(row=>row.version===13),false);assert.deepEqual(f.files(),files);
+   const upgraded=new Store(f.path);try{ensureReferenceGapMigration(upgraded.db);assert.equal((upgraded.db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE version=13').get() as any).n,1);assert.equal((upgraded.db.prepare('SELECT COUNT(*) n FROM role_experience_meta').get() as any).n,0);assert.equal((upgraded.db.prepare('SELECT COUNT(*) n FROM role_experiences').get() as any).n,defaults?1:0);}finally{upgraded.db.close();}
+  }finally{f.close();}
+ }
+});
+
+test('版本13人工经历、隐藏/核对/日期约束及任何补录记录拒绝有损回退并原样保留',()=>{
+ const variants:Array<{name:string;change:(f:ReturnType<typeof fixture>)=>void}>=[
+  {name:'人工经历',change:f=>{f.store.db.prepare('INSERT INTO role_experiences VALUES(?,?,?,?,?,?,?,?,?,?)').run('manual','worker','role','public','manual','人工登记原文','manual:manual',null,null,100);}},
+  ...[['hidden',1],['verify_status','pending'],['verify_status','failed'],['verify_reason','已核对'],['declared_at',100],['occurred_at',200],['updated_at',200],['url','https://x.com/worker/status/1']].map(([key,value])=>({name:'元信息 '+key,change:(f:ReturnType<typeof fixture>)=>{f.store.db.prepare('UPDATE role_experience_meta SET '+key+'=?').run(value);}})),
+  ...['pending','imported','duplicate','rejected','failed'].map(status=>({name:'补录 '+status,change:(f:ReturnType<typeof fixture>)=>{f.store.db.prepare('INSERT INTO manual_imports VALUES(?,?,?,?,?,?,?,?,?)').run('import','worker','https://x.com/user/status/1','1',status,'原结果',null,100,100);}})),
+ ];
+ for(const variant of variants){const f=fixture();try{ensureReferenceGapMigration(f.store.db);f.store.db.prepare('INSERT INTO role_experiences VALUES(?,?,?,?,?,?,?,?,?,?)').run('automatic','worker','role','public','post','真实发帖','receipt:auto',null,'{"status":"confirmed","id":"auto"}',100);f.store.db.prepare('INSERT INTO role_experience_meta VALUES(?,?,?,?,?,?,?,?,?,?)').run('automatic','worker','automatic',100,null,null,'verified',null,0,100);variant.change(f);f.stop();const before=state(f.path),files=f.files();const result=f.invoke(true);assert.equal(result.code,2,variant.name+':'+JSON.stringify(result.report));assert.equal(result.report.applied,false);assert.deepEqual(state(f.path),before);assert.deepEqual(f.files(),files);}finally{f.close();}}
+});
+
+test('版本13删表后的故障也整笔回滚，两表和迁移登记均恢复',()=>{
+ const f=fixture();try{
+  ensureReferenceGapMigration(f.store.db);f.stop();const before=state(f.path),files=f.files();
+  const code='import importlib.util,json,sys; s=importlib.util.spec_from_file_location("prepare_rollback",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); original=m.prepare; m.prepare=lambda connection,actions:(original(connection,actions),(_ for _ in ()).throw(RuntimeError("删除13后注入异常"))); report,status=m.run(sys.argv[2],sys.argv[3],True,True); print(json.dumps(report,ensure_ascii=False)); sys.exit(status)';
+  const result=spawnSync('python3',['-c',code,helper,f.path,f.profile],{encoding:'utf8',timeout:30000,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'}});assert.equal(result.status,1,result.stderr);assert.deepEqual(state(f.path),before);assert.deepEqual(f.files(),files);
  }finally{f.close();}
 });

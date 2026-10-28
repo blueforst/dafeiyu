@@ -11,6 +11,7 @@ export function registerReplayRoutes(app:FastifyInstance,deps:{store:Store;repla
  const filter=(query:any)=>({from:query?.from,to:query?.to,channel:query?.channel,tier:query?.tier,includePrivate:query?.includePrivate===true||query?.includePrivate==='true',order:query?.order,limit:query?.limit===undefined?undefined:Number(query.limit)});
  app.get('/api/persona/replay/samples',handle(req=>deps.replay.samples(filter(req.query))));
  app.post('/api/persona/replay/estimate',{bodyLimit:128*1024},handle(req=>deps.replay.estimate(req.body)));
+ app.delete('/api/persona/replay/estimates/:id',handle(req=>deps.replay.cancelEstimate(req.params.id)));
  app.post('/api/persona/replay/runs',handle(req=>deps.replay.start(req.body?.estimateId,req.body?.confirmed)));
  app.get('/api/persona/replay/runs',handle(()=>({...deps.replay.list(),issues:REPLAY_ISSUES})));
  app.get('/api/persona/replay/runs/:id',handle(req=>deps.replay.detail(req.params.id)));

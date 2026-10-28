@@ -15,6 +15,7 @@ import { Program } from '../src/program.js';
 import type { Config,Event } from '../src/types.js';
 import type { Generator } from '../src/model.js';
 import { exampleConfig } from './config-fixture.js';
+import { ensureReferenceGapMigration } from '../src/reference-gap-schema.js';
 
 const helper=resolve('deploy/rollback-schema.py');
 const generator:Generator={complete:async()=>{throw new Error('逆迁移测试不得调用模型');}};
@@ -105,6 +106,16 @@ test('当前提案 v8 新增校验元数据后，原七页初始窗口工具继�
   const before=content(f.path);const result=invoke(f.path,true);
   assert.equal(result.code,2);assert.equal(result.report.applied,false);assert.ok(result.report.reasons.some((reason:string)=>reason.includes('未知迁移版本：8')));assert.deepEqual(content(f.path),before);
  }finally{f.close();}
+});
+
+test('初始窗口工具识别版本13空表，但拒绝任何经历元信息或补录数据',()=>{
+ for(const populated of [false,true]){
+  const f=fixture();try{
+   const store=migrate(f.path);ensureReferenceGapMigration(store.db);if(populated)store.db.prepare('INSERT INTO manual_imports VALUES(?,?,?,?,?,?,?,?,?)').run('pending','worker','https://x.com/visitor/status/1','1','pending',null,null,100,100);store.db.close();const before=content(f.path);
+   const checked=invoke(f.path);assert.equal(checked.code,populated?2:0,JSON.stringify(checked.report));assert.ok(checked.report.versions.includes(13));assert.deepEqual(content(f.path),before);
+   const result=invoke(f.path,true);assert.equal(result.code,populated?2:0,JSON.stringify(result.report));if(populated){assert.equal(result.report.applied,false);assert.deepEqual(content(f.path),before);}else {const db=new DatabaseSync(f.path,{readOnly:true});try{assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name IN ('role_experience_meta','manual_imports','schema_migrations')").all().length,0);}finally{db.close();}}
+  }finally{f.close();}
+ }
 });
 
 test('DDL中途失败时完整回滚全部扩展表与消息列，没有半逆迁移',()=>{

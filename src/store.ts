@@ -9,6 +9,31 @@ type ForgetHandler=(userId:string,accountId:string,before?:number)=>void;
 export function eventIdentity(accountId:string,channel:Channel,platformId:string):string {
  return 'event:'+encodeURIComponent(accountId)+':'+channel+':'+encodeURIComponent(platformId);
 }
+/** 同一原生ID出现冲突证据时停止，不选一行自动归并。 */
+export class NativeIdentityConflictError extends Error {
+ readonly statusCode=409;readonly code='native-identity-conflict';
+ constructor(){super('平台消息身份存在冲突，未自动去重或归并');}
+}
+const PUBLIC_NATIVE_ID=/^\d{1,32}$/;
+const PRIVATE_NATIVE_ID=/^[A-Za-z0-9:_-]{1,250}$/;
+const nativeId=(value:unknown,channel:Channel):string|undefined=>typeof value==='string'&&(channel==='public'?PUBLIC_NATIVE_ID:PRIVATE_NATIVE_ID).test(value)?value:undefined;
+/** 只从明确字段或规范公开帖子URL取证；私信会话URL不是消息ID。 */
+function nativeEvidence(row:{account_id:string;channel:Channel;platform_id?:unknown;body:unknown}):{ids:string[];platformId?:string;conflict:boolean}{
+ let body:any=row.body,malformed=false;
+ try{if(typeof body==='string')body=JSON.parse(body);if(!body||typeof body!=='object'||Array.isArray(body)){body={};malformed=true;}}catch{body={};malformed=true;}
+ const ids=new Set<string>();for(const value of [row.platform_id,body.platformId]){const id=nativeId(value,row.channel);if(id)ids.add(id);}
+ if(row.channel==='public'&&typeof body.url==='string')try{
+  const url=new URL(body.url),match=url.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,32})\/?$/);
+  if(url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['x.com','www.x.com','twitter.com','www.twitter.com','mobile.x.com','mobile.twitter.com'].includes(url.hostname.toLowerCase())&&match)ids.add(match[2]);
+ }catch{}
+  const accountHandle=(value:unknown)=>{if(typeof value!=='string')return;const handle=value.trim().replace(/^@/,'');return /^[A-Za-z0-9_]{1,15}$/.test(handle)?handle.toLowerCase():undefined;};
+ const declaresAccount=body.accountId!==undefined&&body.accountId!==null&&body.accountId!=='';
+ const bodyAccount=accountHandle(body.accountId),rowAccount=accountHandle(row.account_id);
+ const scopeConflict=(declaresAccount&&(!bodyAccount||!rowAccount||bodyAccount!==rowAccount))||(body.channel!==undefined&&body.channel!==row.channel);
+ const invalidTypedField=[row.platform_id,body.platformId].some(value=>value!==undefined&&value!==null&&value!==''&&!nativeId(value,row.channel));
+ const conflict=ids.size>1||scopeConflict||(ids.size>0&&(malformed||invalidTypedField));
+ return {ids:[...ids],platformId:!conflict&&ids.size===1?[...ids][0]:undefined,conflict};
+}
 export class Store {
  db:DatabaseSync;ledgerPath:string;
  private forgetHandlers:ForgetHandler[]=[];
@@ -57,9 +82,13 @@ export class Store {
  }
  private sourceKey(accountId:string,channel:string,platformId:string,sourceId:string){return JSON.stringify([accountId,channel,platformId?'platform':'source',platformId||sourceId]);}
  private ignoreForgottenSources(userId:string,accountId:string){
-  const rows=this.db.prepare('SELECT account_id,channel,platform_id,source_id,id FROM messages WHERE user_id=?'+(accountId?' AND account_id=?':'')).all(...(accountId?[userId,accountId]:[userId])) as any[];
+  const rows=this.db.prepare('SELECT account_id,channel,platform_id,source_id,id,body FROM messages WHERE user_id=?'+(accountId?' AND account_id=?':'')).all(...(accountId?[userId,accountId]:[userId])) as any[];
   if(!rows.length)return;
-  const ledger=this.sourceLedger();for(const row of rows){ledger[this.sourceKey(row.account_id,row.channel,row.platform_id,row.source_id||row.id)]=true;ledger[this.sourceKey(row.account_id,row.channel,'',row.source_id||row.id)]=true;}
+  const ledger=this.sourceLedger();for(const row of rows){
+   ledger[this.sourceKey(row.account_id,row.channel,row.platform_id,row.source_id||row.id)]=true;ledger[this.sourceKey(row.account_id,row.channel,'',row.source_id||row.id)]=true;
+   // 删除旧空platform列之前保留已验证的原生来源键；不回填或修改历史消息。
+   const evidence=nativeEvidence(row);if(evidence.platformId)ledger[this.sourceKey(row.account_id,row.channel,evidence.platformId,row.source_id||row.id)]=true;
+  }
   const file=dirname(this.ledgerPath)+'/forgotten-sources.json',tmp=file+'.'+randomUUID()+'.tmp';writeFileSync(tmp,JSON.stringify(ledger),{mode:0o600});renameSync(tmp,file);
  }
  nextTimestamp(now=Date.now()):number{const at=Math.max(now,Number(this.get('ingestionClock','0'))+1);this.set('ingestionClock',String(at));return at;}
@@ -110,8 +139,11 @@ export class Store {
  ingest(e:Event,accountId=e.accountId??''){
   if(this.forgotten(e.userId,accountId))return false;
   const after=this.recordingAfter(e.userId,accountId);if(after&&(e.timestampReliable===false||!Number.isFinite(e.timestamp)||e.timestamp<=after))return false;
-  const platformId=e.platformId??'',sourceId=e.id;
-  const ignored=this.sourceLedger();if(ignored[this.sourceKey(accountId,e.channel,platformId,sourceId)]||ignored[this.sourceKey(accountId,e.channel,'',sourceId)]||(accountId&&(ignored[this.sourceKey('',e.channel,platformId,sourceId)]||ignored[this.sourceKey('',e.channel,'',sourceId)])))return false;
+  const platformId=e.platformId??'',sourceId=e.id,evidence=nativeEvidence({account_id:accountId,channel:e.channel,platform_id:platformId,body:e});
+  if(evidence.conflict)return false;
+  if(evidence.platformId)try{if(this.findByPlatformId(accountId,e.channel,evidence.platformId))return false;}catch(error){if(error instanceof NativeIdentityConflictError)return false;throw error;}
+  const ignored=this.sourceLedger(),keys=[platformId,...(evidence.platformId&&evidence.platformId!==platformId?[evidence.platformId]:[])];
+  if(keys.some(id=>ignored[this.sourceKey(accountId,e.channel,id,sourceId)]||(accountId&&ignored[this.sourceKey('',e.channel,id,sourceId)]))||ignored[this.sourceKey(accountId,e.channel,'',sourceId)]||(accountId&&ignored[this.sourceKey('',e.channel,'',sourceId)]))return false;
   const id=accountId?eventIdentity(accountId,e.channel,platformId||sourceId):e.id;
   const body={...e,id,accountId,...(platformId?{platformId}:{} )};const ingestedAt=this.nextTimestamp();
   if(accountId)this.db.prepare('INSERT OR IGNORE INTO account_users(account_id,id) VALUES(?,?)').run(accountId,e.userId);
@@ -125,6 +157,17 @@ export class Store {
   const processed=['confirmed','draft','skipped','failed'].includes(status)&&!row.processed_seq?Math.max(Number(this.get('processedSequence','0')),Number((this.db.prepare('SELECT MAX(processed_seq) AS n FROM messages').get() as any).n??0))+1:row.processed_seq;
   if(processed>Number(this.get('processedSequence','0')))this.set('processedSequence',String(processed));
   this.db.prepare('UPDATE messages SET status=?,draft=COALESCE(?,draft),receipt=COALESCE(?,receipt),error=?,updated_at=?,processed_seq=? WHERE id=?').run(status,values.draft?JSON.stringify(values.draft):null,values.receipt?JSON.stringify(values.receipt):null,values.error||null,Math.max(Date.now(),row.updated_at+1),processed,row.id);
+ }
+ /** 只读历史兼容查找：不从内部id/source_id或正文散列推平台ID，不改变归属或回填列。 */
+ findByPlatformId(accountId:string,channel:Channel,platformId:string):any|undefined {
+  if(typeof accountId!=='string'||!['public','private'].includes(channel)||!nativeId(platformId,channel))return;
+  const rows=this.db.prepare(`SELECT * FROM messages WHERE account_id=? AND channel=? AND (
+   platform_id=? OR (CASE WHEN json_valid(body) THEN json_extract(body,'$.platformId') END)=?
+   OR (?='public' AND (CASE WHEN json_valid(body) THEN json_extract(body,'$.url') END) LIKE ?)
+  ) ORDER BY id`).all(accountId,channel,platformId,platformId,channel,'%/status/'+platformId+'%') as any[];
+  const matches:any[]=[];
+  for(const row of rows){const evidence=nativeEvidence(row);if(!evidence.ids.includes(platformId))continue;if(evidence.conflict)throw new NativeIdentityConflictError();matches.push(row);}
+  if(matches.length>1)throw new NativeIdentityConflictError();return matches[0];
  }
  getMessage(id:string,accountId?:string){
   const exact=this.db.prepare('SELECT * FROM messages WHERE id=?'+(accountId===undefined?'':' AND account_id=?')).get(...(accountId===undefined?[id]:[id,accountId])) as any;if(exact)return exact;

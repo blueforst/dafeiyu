@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { loadConfig } from './config.js';
 import { mergePanelSettings, readPanelSettings } from './settings.js';
 import { LlmStore } from './llm-store.js';
+import {failureDetail} from './failure-summary.js';
 
 export type StageMeta = { roundId?:string; messageId?:string; callId?:string; taskId?:string; channel?:string; accountId?:string };
 export class Program {
@@ -15,16 +16,17 @@ export class Program {
  begin(name:string,meta:StageMeta={}) {
   const id=randomUUID();this.store.db.prepare('INSERT INTO program_stages(id,name,status,started_at,round_id,message_id,call_id,task_id,channel,account_id) VALUES(?,?,\'running\',?,?,?,?,?,?,?)').run(id,name,Date.now(),meta.roundId??null,meta.messageId??null,meta.callId??null,meta.taskId??null,meta.channel??null,meta.accountId??null);return id;
  }
- end(id:string,status='completed',error?:string) { this.store.db.prepare("UPDATE program_stages SET status=?,ended_at=?,error=? WHERE id=? AND status='running'").run(status,Date.now(),error? '阶段执行失败，请检查关联记录':null,id); }
+ end(id:string,status='completed',error?:unknown) { this.store.db.prepare("UPDATE program_stages SET status=?,ended_at=?,error=? WHERE id=? AND status='running'").run(status,Date.now(),error?failureDetail(error):null,id); }
  async run<T>(name:string,meta:StageMeta,fn:()=>Promise<T>,signal?:AbortSignal):Promise<T> {
-  const id=this.begin(name,meta);try { const value=await fn();const result=value as any,callId=result?.callId??result?.calls?.[0]?.callId;if(typeof callId==='string')this.store.db.prepare('UPDATE program_stages SET call_id=? WHERE id=?').run(callId,id);this.end(id,signal?.aborted?'aborted':'completed');return value; } catch(e) {if(typeof (e as any)?.callId==='string')this.store.db.prepare('UPDATE program_stages SET call_id=? WHERE id=?').run((e as any).callId,id);this.end(id,signal?.aborted?'aborted':'failed',String(e));throw e;}
+  const id=this.begin(name,meta);try { const value=await fn();const result=value as any,callId=result?.callId??result?.calls?.[0]?.callId;if(typeof callId==='string')this.store.db.prepare('UPDATE program_stages SET call_id=? WHERE id=?').run(callId,id);this.end(id,signal?.aborted?'aborted':'completed');return value; } catch(e) {if(typeof (e as any)?.callId==='string')this.store.db.prepare('UPDATE program_stages SET call_id=? WHERE id=?').run((e as any).callId,id);this.end(id,signal?.aborted?'aborted':'failed',e);throw e;}
  }
  list(limit=60) {return (this.store.db.prepare('SELECT * FROM program_stages ORDER BY started_at DESC,rowid DESC LIMIT ?').all(limit) as any[]).map(r=>({id:r.id,name:r.name,status:r.status,startedAt:r.started_at,endedAt:r.ended_at,durationMs:(r.ended_at??Date.now())-r.started_at,roundId:r.round_id,messageId:r.message_id,callId:r.call_id,taskId:r.task_id,channel:r.channel,accountId:r.account_id,error:r.error}));}
 }
 
 function pageSize(raw:any) {const n=Number(raw??50);return Number.isInteger(n)?Math.min(100,Math.max(1,n)):50;}
-export function registerProgramRoutes(app:FastifyInstance,deps:{store:Store;program:Program;workflow:{control:()=>string;busy:boolean;lastTick:number;nextTick:number;accountId:()=>string;sentCount:(channel:'public'|'private')=>number}}) {
+export function registerProgramRoutes(app:FastifyInstance,deps:{store:Store;program:Program;accountId?:()=>string;manualImports?:{forMessage:(id:string)=>unknown[]};workflow:{control:()=>string;busy:boolean;lastTick:number;nextTick:number;accountId:()=>string;sentCount:(channel:'public'|'private')=>number}}) {
  const {store,program,workflow}=deps;
+ const currentAccount=()=>deps.accountId?.()??workflow.accountId();
  const settings=()=>{const c=loadConfig();return {mode:c.mode,maxAgeHours:c.maxAgeHours,maxPerRound:c.maxPerRound,publicPerHour:c.publicPerHour,privatePerHour:c.privatePerHour,publicPerDay:c.publicPerDay??180};};
  app.get('/api/program',async()=>{
   const c=settings(),accountId=workflow.accountId(),stages=program.list();
@@ -42,14 +44,14 @@ export function registerProgramRoutes(app:FastifyInstance,deps:{store:Store;prog
   try {const r=mergePanelSettings('program',value,b.revision);return {ok:true,settings:settings(),revision:r.revision};}catch(e:any){return reply.code(e.statusCode===409?409:400).send({error:e.message});}
  });
  app.get('/api/messages',async(req:any)=>{
-  const q=req.query??{},args:any[]=[workflow.accountId()],where=['account_id=?'];
+  const q=req.query??{},args:any[]=[currentAccount()],where=['account_id=?'];
   for(const k of ['status','channel'])if(q[k]){where.push(k+'=?');args.push(String(q[k]));}
   if(q.cursor){where.push('rowid<?');args.push(Number(q.cursor)||0);}
   const limit=pageSize(q.limit);args.push(limit+1);
   const rows=store.db.prepare('SELECT rowid AS cursor,id,channel,user_id,status,created_at,updated_at,error FROM messages WHERE '+where.join(' AND ')+' ORDER BY rowid DESC LIMIT ?').all(...args) as any[];
   return {items:rows.slice(0,limit),nextCursor:rows.length>limit?String(rows[limit-1].cursor):null};
  });
- app.get('/api/messages/:id',async(req:any,reply)=>{const row=store.getMessage(String(req.params.id));if(!row||row.account_id!==workflow.accountId())return reply.code(404).send({error:'消息不存在'});const calls=new LlmStore(store).calls({interactionId:row.id,limit:100}).items;const outbox=store.db.prepare('SELECT id,kind,status,receipt,created_at,submitted_at,validation_json FROM outbox WHERE source_id=? AND account_id=?').all(row.id,row.account_id);return {message:{...row,body:JSON.parse(row.body),draft:row.draft?JSON.parse(row.draft):null,receipt:row.receipt?JSON.parse(row.receipt):null},calls,outbox};});
+ app.get('/api/messages/:id',async(req:any,reply)=>{const row=store.getMessage(String(req.params.id),currentAccount());if(!row)return reply.code(404).send({error:'消息不存在'});const calls=new LlmStore(store).calls({interactionId:row.id,limit:100}).items;const outbox=store.db.prepare('SELECT id,kind,status,receipt,created_at,submitted_at,validation_json FROM outbox WHERE source_id=? AND account_id=?').all(row.id,row.account_id);return {message:{...row,body:JSON.parse(row.body),draft:row.draft?JSON.parse(row.draft):null,receipt:row.receipt?JSON.parse(row.receipt):null},calls,outbox,manualImports:deps.manualImports?.forMessage(row.id)??[]};});
  app.get('/api/program/logs',async(req:any)=>{
   const q=req.query??{},where:string[]=[],args:any[]=[];
   if(q.level){where.push('level=?');args.push(String(q.level));}

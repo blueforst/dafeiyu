@@ -9,7 +9,7 @@ export class FeedError extends Error {constructor(message:string,public statusCo
 const parse=(value:any,fallback:any={})=>{try{return JSON.parse(value??'null')??fallback;}catch{return fallback;}};
 /** 读写均以当前工作账号为边界；时间游标不受后来入库的条目影响。 */
 export class ActivityFeed {
- constructor(public store:Store,public account:()=>string,public maxAgeHours:()=>number,public capabilities?:PostingCapabilitiesService,public triage?:ReplyTriage){
+ constructor(public store:Store,public account:()=>string,public maxAgeHours:()=>number,public capabilities?:PostingCapabilitiesService,public triage?:ReplyTriage,public importsSummary?:(account:string)=>{latest:number;pending:number}){
   applyMigration(store.db,12,'动态时间线索引',`CREATE INDEX IF NOT EXISTS messages_account_created ON messages(account_id,created_at,id); CREATE INDEX IF NOT EXISTS messages_account_channel_updated ON messages(account_id,channel,updated_at); CREATE INDEX IF NOT EXISTS outbox_account_created ON outbox(account_id,kind,created_at,id);`);
  }
  expired(row:any,now=Date.now()){if(!['draft','approved'].includes(row.status))return false;const e=parse(row.body);return !Number.isFinite(e.timestamp)||now-e.timestamp>this.maxAgeHours()*3600000;}
@@ -22,7 +22,8 @@ export class ActivityFeed {
  private summaryFor(account:string,pending:{sql:string;params:number[]}){
   const m=this.store.db.prepare(`SELECT MAX(m.updated_at) latest,SUM(CASE WHEN ${pending.sql} THEN 1 ELSE 0 END) pending FROM messages m WHERE m.account_id=?`).get(...pending.params,account) as any;
   const p=this.store.db.prepare("SELECT MAX(updated_at) latest,SUM(CASE WHEN status='unknown' THEN 1 ELSE 0 END) pending FROM outbox WHERE account_id=? AND kind='post'").get(account) as any;
-  return {latest:Math.max(Number(m.latest??0),Number(p.latest??0)),pending:Number(m.pending??0)+Number(p.pending??0)};
+  const imports=this.importsSummary?.(account)??{latest:0,pending:0};
+  return {latest:Math.max(Number(m.latest??0),Number(p.latest??0),imports.latest),pending:Number(m.pending??0)+Number(p.pending??0)+imports.pending};
  }
  summary(){const account=this.account();return account?this.summaryFor(account,this.pendingSql(Date.now())):{latest:0,pending:0};}
  list(query:{filter?:string;cursor?:string;limit?:number}={}){

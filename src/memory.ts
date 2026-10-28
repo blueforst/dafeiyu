@@ -8,6 +8,7 @@ import type { Store } from './store.js';
 import type { Generator } from './model.js';
 import type { Channel, Config, Receipt } from './types.js';
 import { invalidateReplayMemory } from './persona-replay.js';
+import { recallRoleExperiences } from './role-experiences.js';
 
 export type MemoryPolicy = { recentCount:number; recentDays:number; retentionDays:number };
 export type MemoryKind = 'fact'|'preference'|'topic';
@@ -64,7 +65,8 @@ export class MemoryService {
   const args=before===undefined?[accountId,userId]:[accountId,userId,before];
   const ids=this.store.db.prepare('SELECT id FROM memory_items WHERE account_id=? AND user_id=?'+(before===undefined?'':' AND created_at<=?')).all(...args) as any[];
   for(const row of ids)this.store.db.prepare('DELETE FROM memory_sources WHERE item_id=?').run(row.id);
-  for(const table of ['memory_items','role_experiences'])this.store.db.prepare(`DELETE FROM ${table} WHERE account_id=? AND user_id=?`+(before===undefined?'':' AND created_at<=?')).run(...args);
+  if(this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='role_experience_meta'").get())this.store.db.prepare("DELETE FROM role_experience_meta WHERE account_id=? AND experience_id IN (SELECT id FROM role_experiences WHERE account_id=? AND user_id=? AND kind<>'manual'"+(before===undefined?'':' AND created_at<=?')+')').run(...(before===undefined?[accountId,accountId,userId]:[accountId,accountId,userId,before]));
+  for(const table of ['memory_items','role_experiences'])this.store.db.prepare(`DELETE FROM ${table} WHERE account_id=? AND user_id=?`+(table==='role_experiences'?" AND kind<>'manual'":'')+(before===undefined?'':' AND created_at<=?')).run(...args);
   this.store.db.prepare('DELETE FROM memory_progress WHERE account_id=? AND user_id=?'+(before===undefined?'':' AND COALESCE(last_summary_at,0)<=?')).run(...args);
   if(before===undefined)this.store.db.prepare('DELETE FROM memory_legacy_imports WHERE account_id=? AND user_id=?').run(accountId,userId);
  }
@@ -116,7 +118,7 @@ export class MemoryService {
   }
   const rows=this.store.db.prepare(`SELECT id,body,draft,status,created_at,channel FROM messages WHERE account_id=? AND user_id=? AND (?='private' OR channel='public') AND status IN (${PROCESSED}) AND created_at>=? ORDER BY processed_seq DESC LIMIT ?`).all(accountId,userId,channel,at-policy.recentDays*86400000,policy.recentCount) as any[];
   const recent=rows.reverse().map(r=>({id:r.id,channel:r.channel,message:json(r.body).text??'',timestamp:r.created_at,...(r.status==='confirmed'?{reply:json(r.draft).text??''}:{})}));
-  const experiences=(this.store.db.prepare("SELECT * FROM role_experiences WHERE account_id=? AND (channel='public' OR (?='private' AND channel='private' AND user_id=?)) ORDER BY created_at DESC LIMIT 10").all(accountId,channel,userId) as any[]).map(r=>({id:r.id,type:r.kind,text:r.text,sourceMessageId:r.source_message_id,receipt:json(r.receipt,null),createdAt:r.created_at,channel:r.channel}));
+  const experiences=recallRoleExperiences(this.store,accountId);
   return {memories,recent,experiences,...(availableMemories.length>memories.length?{recallOmitted:availableMemories.length-memories.length}: {})};
  }
  listUsers(opts:{accountId:string;channel?:Channel;q?:string;cursor?:number;limit?:number}){
@@ -132,7 +134,8 @@ export class MemoryService {
  }
  detail(userId:string,channel:Channel,accountId:string){
   const forgotten=this.store.forgotten(userId,accountId),context=this.context(userId,channel,accountId),progress=this.state({userId,channel,accountId});
-  return {userId,channel,accountId,forgotten,epoch:this.store.epoch(userId,accountId),...progress,items:forgotten?[]:this.items(userId,channel,accountId),recent:context.recent,experiences:context.experiences,progress};
+  const interactions=forgotten?[]:(this.store.db.prepare("SELECT * FROM role_experiences WHERE account_id=? AND user_id=? AND kind='interaction' AND (?='private' OR channel='public') ORDER BY created_at DESC,id DESC LIMIT 10").all(accountId,userId,channel) as any[]).map(r=>({id:r.id,type:r.kind,text:r.text,sourceMessageId:r.source_message_id,receipt:json(r.receipt,null),createdAt:r.created_at,channel:r.channel}));
+  return {userId,channel,accountId,forgotten,epoch:this.store.epoch(userId,accountId),...progress,items:forgotten?[]:this.items(userId,channel,accountId),recent:context.recent,experiences:interactions,progress};
  }
  edit(itemId:string,accountId:string,text:string,revision:number){
   if(typeof text!=='string'||!text.trim()||text.length>1200||!Number.isInteger(revision))throw new MemoryError('记忆内容或修订无效');
@@ -231,11 +234,12 @@ export class MemoryService {
   const source=value.sourceMessageId?this.store.db.prepare('SELECT id,channel,user_id FROM messages WHERE id=? AND account_id=?').get(value.sourceMessageId,value.accountId) as any:undefined;
   if(value.sourceMessageId&&!source)throw new MemoryError('角色经历来源已删除或不属于该账号',409);
   const confirmed=!!(value.receipt?.status==='confirmed'&&value.receipt.id);
+  if(value.kind==='post'&&!confirmed)throw new MemoryError('角色发帖经历需要带唯一平台 ID 的确认回执');
   if(!confirmed&&!source)throw new MemoryError('角色经历缺少明确来源或平台回执');
   if(source&&(source.channel!==value.channel||source.user_id!==value.userId))throw new MemoryError('角色经历来源范围不符');
   const key=confirmed?'receipt:'+value.receipt!.id:'message:'+source.id;
   const id=randomUUID();
   this.store.db.prepare('INSERT OR IGNORE INTO role_experiences VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,value.accountId,value.userId,value.channel,value.kind??'interaction',value.text.trim(),key,value.sourceMessageId??null,value.receipt?JSON.stringify(value.receipt):null,this.store.nextTimestamp(this.now()));
-  return {ok:true,id};
+  const saved=this.store.db.prepare('SELECT id FROM role_experiences WHERE account_id=? AND source_key=?').get(value.accountId,key) as {id:string};return {ok:true,id:saved.id};
  }
 }

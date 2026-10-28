@@ -11,6 +11,9 @@ import { publicResourceOK } from './posting-policy.js';
 import type { Store } from './store.js';
 import type { Channel, Config, Draft, Event } from './types.js';
 import twitterText from 'twitter-text';
+import { ModelLibraryService } from './model-library.js';
+import { readPanelSettings } from './settings.js';
+import { freezeReplayModel,type FrozenReplayModel,type ReplayPrice } from './replay-model.js';
 
 /** 由应用的加法迁移统一注册；模块不另占迁移编号。 */
 export const REPLAY_SCHEMA = `
@@ -106,11 +109,12 @@ function summaryQuality(items:QualityInput[]) {
 
 type FrozenSample = {id:string;hash:string;revision:number};
 type ReplayContext = {event:Event;at:number;body:any;hasSnapshot:boolean;memory:unknown;recentReplies:ReplySample[]};
-type Prepared = {id:string;accountId:string;at:number;samples:FrozenSample[];filter:ReplayFilter;candidate:Persona;baseline:Persona;baselineMode:ReplayBaseline;personaRevision:number;promptHints:unknown;dailyState:string;config:Config;estimate:any};
-type ReplayOptions = {accountId:()=>string;config?:()=>Config;memory?:(userId:string,channel:Channel,accountId:string,at:number)=>unknown;now?:()=>number};
+type Prepared = {id:string;accountId:string;at:number;samples:FrozenSample[];filter:ReplayFilter;candidate:Persona;baseline:Persona;baselineMode:ReplayBaseline;personaRevision:number;promptHints:unknown;dailyState:string;config:Config;estimate:any;compare?:'persona'|'model';modelCandidate?:{key:string;modelId:string;reasoningLevel:string};candidateConfig?:Config;frozenModels?:{baseline:FrozenReplayModel;candidate:FrozenReplayModel};assertCurrent?:()=>void;dispose?:()=>void;expiryTimer?:ReturnType<typeof setTimeout>};
+export type ReplayModelSelection={key:string;modelId:string;reasoningLevel:string};
+type ReplayOptions = {accountId:()=>string;config?:()=>Config;memory?:(userId:string,channel:Channel,accountId:string,at:number)=>unknown;now?:()=>number;resolveModel?:(selection:ReplayModelSelection)=>Promise<{model:Config['model'];revision:number;selection:ReplayModelSelection}>;modelLibraryRevision?:()=>number;freezeModel?:(config:Config,generator:Generator,valid:()=>void)=>Promise<FrozenReplayModel>};
 export class ReplayRunner {
  private estimates=new Map<string,Prepared>();
- private active?:{id:string;accountId:string;controller:AbortController;done:Promise<void>};
+ private active?:{id:string;accountId:string;controller:AbortController;done:Promise<void>;dispose?:()=>void};
  private ledger:LlmStore;
  private now:()=>number;
  constructor(public store:Store,public persona:PersonaService,public generator:Generator,public options:ReplayOptions){
@@ -152,7 +156,7 @@ export class ReplayRunner {
   return {id:row.id,channel:row.channel,timestamp:row.created_at,tier:row.tier??null,status:row.status,revision:row.updated_at,contextIncomplete:!snapshot||!!parse(snapshot.body_json).truncated,private:row.channel==='private',...(row.channel==='public'||privateDetail?{message:{text:body.text??'',handle:body.handle??'',url:body.url??''},actual:parse(row.draft,null)}:{collapsed:true})};
  }
  private costEstimate(config:Config,accountId:string,count:number,candidate:Persona,baseline:Persona,mode:ReplayBaseline){
-  const side=(persona:Persona)=>({reply:count,semantic:persona.triggers.some(t=>t.enabled)?count:0});
+  const side=(persona:Persona)=>({reply:count,semantic:persona.triggers.some(t=>t.enabled&&t.match!=='keywords')?count:0});
   const candidateRequests=side(candidate),baselineRequests=mode==='saved'?side(baseline):{reply:0,semantic:0};
   const requests=candidateRequests.reply+candidateRequests.semantic+baselineRequests.reply+baselineRequests.semantic;
   const mean=(purpose:string)=>{
@@ -164,8 +168,10 @@ export class ReplayRunner {
   const available=reply.value!==null&&(!triggers||semantic.value!==null);
   return {samples:count,requests,candidateRequests,baselineRequests,estimatedUsd:available?replies*reply.value!+triggers*(semantic.value??0):null,pricingStatus:available?'estimated':reply.unpriced||semantic.unpriced?'unpriced':'unknown',priceSource:'Pi 内置价格快照的最近 50 次同模型调用',note:available?'费用为历史平均估算，实际用量可能变化':'未定价或没有可估算历史，不代表免费'};
  }
- estimate(raw:any){
+ estimate(raw:any):any {
   if(!raw||typeof raw!=='object')throw new ReplayError('回放参数无效');
+  if(raw.compare!==undefined&&!['persona','model'].includes(raw.compare))throw new ReplayError('比较对象无效');
+  if(raw.compare==='model')return this.estimateModel(raw);
   const accountId=this.account(),current=this.persona.get(),candidate=validatePersona(raw.persona??current.persona),baselineMode=raw.baselineMode??'actual';
   if(!['actual','saved'].includes(baselineMode))throw new ReplayError('基线模式无效');
   if(!Number.isInteger(raw.personaRevision)||raw.personaRevision!==current.revision)throw new ReplayError('人设修订已变化，请重新读取',409);
@@ -175,29 +181,70 @@ export class ReplayRunner {
   const config=structuredClone((this.options.config??loadConfig)()),estimate=this.costEstimate(config,accountId,samples.length,candidate,current.persona,baselineMode),id=randomUUID(),dailyState=typeof raw.dailyState==='string'?raw.dailyState:'回放模拟日程：在家阅读与休息，非真实活动';
   if(dailyState.length>8000)throw new ReplayError('模拟日程不能超过 8,000 字符');
   const prepared:Prepared={id,accountId,at:this.now(),samples,filter:selected.filter,candidate,baseline:current.persona,baselineMode,personaRevision:current.revision,promptHints:validatePromptHints(raw.promptHints??config.promptHints??{}),dailyState,config,estimate};
-  for(const [key,value] of this.estimates)if(this.now()-value.at>600000)this.estimates.delete(key);
-  if(this.estimates.size>=20)this.estimates.delete(this.estimates.keys().next().value!);
+  for(const [key,value] of this.estimates)if(this.now()-value.at>600000)this.dropEstimate(key);
+  if(this.estimates.size>=20)this.dropEstimate(this.estimates.keys().next().value!);
   this.estimates.set(id,prepared);
-  return {estimateId:id,expiresAt:prepared.at+600000,...estimate,samples:selected.items,excluded:selected.excluded,requiresConfirmation:true};
+  return {estimateId:id,expiresAt:prepared.at+600000,...estimate,compare:'persona',samples:selected.items,excluded:selected.excluded,requiresConfirmation:true};
+ }
+ private dropEstimate(id:string){const prepared=this.estimates.get(id);if(prepared){clearTimeout(prepared.expiryTimer);prepared.dispose?.();this.estimates.delete(id);}}
+ cancelEstimate(id:string){const prepared=this.estimates.get(id);if(!prepared||prepared.accountId!==this.account())throw new ReplayError('费用预估不存在或已过期',404);this.dropEstimate(id);return {ok:true};}
+ private tokenMean(config:Config,purpose:string,accountId:string){
+  const rows=this.store.db.prepare("SELECT input_tokens,output_tokens,cache_read,cache_write FROM llm_calls WHERE account_id=? AND provider=? AND model=? AND purpose=? AND usage_known=1 ORDER BY started_at DESC LIMIT 50").all(accountId,config.model.provider,config.model.id,purpose) as any[];
+  if(!rows.length)return null;
+  return {input:rows.reduce((n,r)=>n+(r.input_tokens??0),0)/rows.length,output:rows.reduce((n,r)=>n+(r.output_tokens??0),0)/rows.length,cacheRead:rows.reduce((n,r)=>n+(r.cache_read??0),0)/rows.length,cacheWrite:rows.reduce((n,r)=>n+(r.cache_write??0),0)/rows.length};
+ }
+ private priceEstimate(config:Config,price:ReplayPrice,requests:number,tokens:ReturnType<ReplayRunner['tokenMean']>){
+  const cost=price.known&&tokens?[tokens.input*(price.input??0),tokens.output*(price.output??0),tokens.cacheRead*(price.cacheRead??0),tokens.cacheWrite*(price.cacheWrite??0)].reduce((a,b)=>a+b,0)/1000000*requests:null;
+  return {model:{provider:config.model.provider,id:config.model.id,reasoningLevel:config.model.reasoningLevel},requests,replyRequests:requests,routingRequests:0,estimatedUsd:requests===0?0:cost,pricingStatus:requests===0?'not-needed':!price.known?'unpriced':cost===null?'unknown':'estimated',price};
+ }
+ private async estimateModel(raw:any){
+  const current=this.persona.get(),saved=validatePersona(current.persona),candidate=validatePersona(raw.persona??saved);
+  if(JSON.stringify(candidate)!==JSON.stringify(saved))throw new ReplayError('比较模型设置时请保持人设未改，一次只比较一个变量');
+  if(raw.baselineMode!=='saved')throw new ReplayError('比较模型设置必须使用已保存人设重新生成基线');
+  const initial=structuredClone((this.options.config??loadConfig)());
+  if(raw.promptHints!==undefined&&JSON.stringify(validatePromptHints(raw.promptHints))!==JSON.stringify(validatePromptHints(initial.promptHints??{})))throw new ReplayError('比较模型设置时请保持已保存的动态提醒设置');
+  if(!raw.modelCandidate||typeof raw.modelCandidate.key!=='string'||typeof raw.modelCandidate.modelId!=='string'||typeof raw.modelCandidate.reasoningLevel!=='string')throw new ReplayError('请选择候选服务商、模型和推理档位');
+  const selection:ReplayModelSelection={key:raw.modelCandidate.key,modelId:raw.modelCandidate.modelId,reasoningLevel:raw.modelCandidate.reasoningLevel};
+  const existing=this.estimate({...raw,compare:'persona',persona:saved,promptHints:initial.promptHints??{}}),prepared=this.estimates.get(existing.estimateId)!;
+  let baseline:FrozenReplayModel|undefined,candidateModel:FrozenReplayModel|undefined;
+  try{
+   const resolved=await (this.options.resolveModel??(value=>new ModelLibraryService({store:this.store}).resolveSelection(value as any)))(selection);
+   const revision=()=>this.options.modelLibraryRevision?.()??readPanelSettings().revisions?.modelLibrary??0;
+   const modelStamp=hash(JSON.stringify(initial.model));
+   const valid=()=>{if(revision()!==resolved.revision||hash(JSON.stringify((this.options.config??loadConfig)().model))!==modelStamp)throw new ReplayError('模型库或使用中的模型已变化，请重新预估',409);};
+   valid();this.ensureAccount(prepared.accountId);
+   const candidateConfig={...structuredClone(prepared.config),model:structuredClone(resolved.model)},freeze=this.options.freezeModel??freezeReplayModel;
+   baseline=await freeze(prepared.config,this.generator,valid);candidateModel=await freeze(candidateConfig,this.generator,valid);valid();
+   const count=prepared.samples.length,routes=saved.triggers.some(t=>t.enabled&&t.match!=='keywords')?count:0,baselineTokens=this.tokenMean(prepared.config,'reply',prepared.accountId),candidateTokens=this.tokenMean(candidateConfig,'reply',prepared.accountId)??baselineTokens;
+   const sides={baseline:this.priceEstimate(prepared.config,baseline.price,count,baselineTokens),candidate:this.priceEstimate(candidateConfig,candidateModel.price,count,candidateTokens),shared:this.priceEstimate(prepared.config,baseline.price,routes,this.tokenMean(prepared.config,'semantic-trigger',prepared.accountId))};
+   sides.shared.replyRequests=0;sides.shared.routingRequests=routes;
+   const all=Object.values(sides),estimate={samples:count,requests:count*2+routes,estimatedUsd:all.every(side=>side.estimatedUsd!==null)?all.reduce((n,side)=>n+(side.estimatedUsd??0),0):null,pricingStatus:all.some(side=>side.pricingStatus==='unpriced')?'unpriced':all.some(side=>side.pricingStatus==='unknown')?'unknown':'estimated',sides,note:'两侧各按冻结的 Pi 目录价格和历史 token 均值估算；共享语义判定单列，未定价不代表免费'};
+   prepared.compare='model';prepared.modelCandidate=resolved.selection;prepared.candidateConfig=candidateConfig;prepared.frozenModels={baseline,candidate:candidateModel};prepared.assertCurrent=()=>{valid();baseline!.assertCurrent();candidateModel!.assertCurrent();};prepared.dispose=()=>{baseline?.dispose();candidateModel?.dispose();};prepared.estimate=estimate;
+   prepared.expiryTimer=setTimeout(()=>this.dropEstimate(prepared.id),600000);prepared.expiryTimer.unref?.();
+   return {...existing,...estimate,compare:'model',modelCandidate:resolved.selection};
+  }catch(error){baseline?.dispose();candidateModel?.dispose();this.dropEstimate(prepared.id);throw error;}
  }
  start(estimateId:string,confirmed:boolean){
   if(confirmed!==true)throw new ReplayError('回放会产生费用，需明确确认');
   if(this.active)throw new ReplayError('已有回放正在运行，请先等待或中止',409);
-  const prepared=this.estimates.get(estimateId);if(!prepared||this.now()-prepared.at>600000)throw new ReplayError('费用预估已过期，请重新预估',410);
-  this.ensureAccount(prepared.accountId);
-  if(this.persona.get().revision!==prepared.personaRevision)throw new ReplayError('人设修订已变化，请重新预估',409);
-  for(const sample of prepared.samples){const row=this.store.getMessage(sample.id,prepared.accountId);if(!this.allowed(row,prepared.accountId)||sourceHash(row)!==sample.hash)throw new ReplayError('样本已变化或移除，请重新预估',409);}
+  const prepared=this.estimates.get(estimateId);if(!prepared||this.now()-prepared.at>600000){this.dropEstimate(estimateId);throw new ReplayError('费用预估已过期，请重新预估',410);}
+  try{
+   prepared.assertCurrent?.();this.ensureAccount(prepared.accountId);
+   if(this.persona.get().revision!==prepared.personaRevision)throw new ReplayError('人设修订已变化，请重新预估',409);
+   for(const sample of prepared.samples){const row=this.store.getMessage(sample.id,prepared.accountId);if(!this.allowed(row,prepared.accountId)||sourceHash(row)!==sample.hash)throw new ReplayError('样本已变化或移除，请重新预估',409);}
+  }catch(error){this.dropEstimate(estimateId);throw new ReplayError(error instanceof Error?error.message:'模型配置已变化，请重新预估',409);}
   const id=randomUUID(),now=this.store.nextTimestamp(this.now());
-  const settings={filter:prepared.filter,personaRevision:prepared.personaRevision,promptHints:prepared.promptHints,dailyState:prepared.dailyState,model:{provider:prepared.config.model.provider,id:prepared.config.model.id},baseline:prepared.baseline};
+  const modelSnapshot=(model:Config['model'])=>({provider:model.provider,id:model.id,api:model.api,reasoning:model.reasoning,reasoningLevel:model.reasoningLevel,maxTokens:model.maxTokens,timeoutMs:model.timeoutMs,custom:model.custom,baseUrlHost:(()=>{try{return new URL(model.baseUrl).hostname;}catch{return '';}})()});
+  const settings={filter:prepared.filter,personaRevision:prepared.personaRevision,promptHints:prepared.promptHints,dailyState:prepared.dailyState,model:{provider:prepared.config.model.provider,id:prepared.config.model.id},baseline:prepared.baseline,compare:prepared.compare??'persona',modelCandidate:prepared.modelCandidate,models:prepared.compare==='model'?{baseline:modelSnapshot(prepared.config.model),candidate:modelSnapshot(prepared.candidateConfig!.model)}:undefined};
   this.store.db.exec('BEGIN IMMEDIATE');
   try{
    this.store.db.prepare("INSERT INTO replay_runs(id,account_id,created_at,updated_at,status,settings_json,persona_json,baseline_mode,estimate_json) VALUES(?,?,?,?,?,?,?,?,?)").run(id,prepared.accountId,now,now,'queued',JSON.stringify(settings),JSON.stringify(prepared.candidate),prepared.baselineMode,JSON.stringify(prepared.estimate));
    for(const sample of prepared.samples){const row=this.store.getMessage(sample.id,prepared.accountId)!;this.store.db.prepare('INSERT INTO replay_items(run_id,message_id,account_id,user_id,channel,created_at,source_revision,source_hash) VALUES(?,?,?,?,?,?,?,?)').run(id,row.id,row.account_id,row.user_id,row.channel,row.created_at,sample.revision,sample.hash);}
    this.store.db.exec('COMMIT');
   }catch(error){this.store.db.exec('ROLLBACK');throw error;}
-  this.estimates.delete(estimateId);
-  const controller=new AbortController(),active={id,accountId:prepared.accountId,controller,done:Promise.resolve()};this.active=active;
-  active.done=this.execute(id,prepared,controller.signal).finally(()=>{if(this.active===active)this.active=undefined;});
+  clearTimeout(prepared.expiryTimer);this.estimates.delete(estimateId);
+  const controller=new AbortController(),active={id,accountId:prepared.accountId,controller,done:Promise.resolve(),dispose:prepared.dispose};this.active=active;
+  active.done=this.execute(id,prepared,controller.signal).finally(()=>{prepared.dispose?.();if(this.active===active)this.active=undefined;});
   this.store.log('persona-replay-start',JSON.stringify({runId:id,accountId:prepared.accountId,samples:prepared.samples.length,requests:prepared.estimate.requests}));
   return {id,status:'queued',estimate:prepared.estimate};
  }
@@ -211,18 +258,23 @@ export class ReplayRunner {
   const recentReplies:ReplySample[]=styleRows.filter(row=>row.id!==sample.id&&this.allowed(row,prepared.accountId)).flatMap(row=>{const draft=parse(row.draft);return draft.action==='reply'&&typeof draft.text==='string'?[{text:draft.text,channel:row.channel,conversationId:parse(row.body).conversationId,accountId:row.account_id,at:row.created_at}]:[];}).slice(0,20);
   return {event,at,body,hasSnapshot:!!snapshot,memory:structuredClone(memory),recentReplies};
  }
- private async generateSide(runId:string,sample:any,prepared:Prepared,persona:Persona,side:'baseline'|'candidate',signal:AbortSignal,privacyRevision:string,context:ReplayContext){
+ private async assembleSide(runId:string,sample:any,prepared:Prepared,persona:Persona,side:'baseline'|'candidate',signal:AbortSignal,context:ReplayContext){
+  const {event,at,body,memory,recentReplies}=context,config=side==='candidate'?prepared.candidateConfig??prepared.config:prepared.config,generator=prepared.frozenModels?.[side].generator??this.generator;
+  return this.persona.assemble({config,persona,message:event.text,channel:sample.channel,quote:event.quote,card:event.card,accountId:prepared.accountId,conversation:body.conversation??[],memory,dailyState:prepared.dailyState,now:at,timestamp:event.timestamp,timestampReliable:event.timestampReliable,conversationId:event.conversationId,promptHints:side==='candidate'?prepared.promptHints as any:prepared.config.promptHints,recentReplies,sampleSource:'replay-current-allowed-history',sessionId:'replay-'+runId+'-'+hash(sample.id).slice(0,16)+(prepared.compare==='model'?'-shared':'-'+side),interactionId:runId,routingPurpose:'persona-replay',routingSource:'panel-replay',routingSide:prepared.compare==='model'?'shared':side,generator,signal});
+ }
+ private async generateSide(runId:string,sample:any,prepared:Prepared,persona:Persona,side:'baseline'|'candidate',signal:AbortSignal,privacyRevision:string,context:ReplayContext,sharedPrompt?:Awaited<ReturnType<PersonaService['assemble']>>){
   const memoryRevision=()=>this.store.get(memoryRevisionKey(prepared.accountId,sample.user_id,sample.channel),'0');
   const latest=this.store.getMessage(sample.id,prepared.accountId);
   if(!this.allowed(latest,prepared.accountId)||sourceHash(latest)!==sourceHash(sample)||memoryRevision()!==privacyRevision)throw new ReplayError('来源或记忆已变化或移除',410);
-  const {event,at,body,memory,recentReplies}=context;
+  prepared.assertCurrent?.();
+  const {body}=context,config=side==='candidate'?prepared.candidateConfig??prepared.config:prepared.config,generator=prepared.frozenModels?.[side].generator??this.generator;
   const sessionId='replay-'+runId+'-'+hash(sample.id).slice(0,16)+'-'+side;
-  const assembled=await this.persona.assemble({config:prepared.config,persona,message:event.text,channel:sample.channel,accountId:prepared.accountId,conversation:body.conversation??[],memory,dailyState:prepared.dailyState,now:at,timestamp:event.timestamp,timestampReliable:event.timestampReliable,conversationId:event.conversationId,promptHints:side==='candidate'?prepared.promptHints as any:prepared.config.promptHints,recentReplies,sampleSource:'replay-current-allowed-history',sessionId,interactionId:runId,routingPurpose:'persona-replay',routingSource:'panel-replay',signal} as any);
+  const assembled=sharedPrompt??await this.assembleSide(runId,sample,prepared,persona,side,signal,context);
   if(signal.aborted)throw signal.reason??new Error('回放已中止');
   this.ensureAccount(prepared.accountId);
   const current=this.store.getMessage(sample.id,prepared.accountId);
   if(!this.allowed(current,prepared.accountId)||sourceHash(current)!==sourceHash(sample)||memoryRevision()!==privacyRevision)throw new ReplayError('来源或记忆已变化或移除',410);
-  const result=await this.generator.complete(prepared.config,assembled.system,assembled.user,signal,sessionId,{purpose:'persona-replay',source:'panel-replay',accountId:prepared.accountId,channel:sample.channel,interactionId:runId});
+  const result=await generator.complete(config,assembled.system,assembled.user,signal,sessionId,{purpose:'persona-replay',source:'panel-replay',side,accountId:prepared.accountId,channel:sample.channel,interactionId:runId});
   const parsed=replayDraft(result.text,sample.channel),draft=parsed.draft,lengthViolation=draft.action==='reply'&&sample.channel==='public'&&twitterText.parseTweet(draft.text).weightedLength>280;
   return {draft,validationError:parsed.validationError,lengthViolation,contextIncomplete:!context.hasSnapshot||!!body.truncated,warning:assembled.warning,hits:assembled.hits,callId:result.callId??null};
  }
@@ -237,21 +289,25 @@ export class ReplayRunner {
     if(!item||!this.allowed(row,prepared.accountId)||sourceHash(row)!==frozen.hash){this.store.db.prepare('DELETE FROM replay_items WHERE run_id=? AND message_id=?').run(id,frozen.id);continue;}
     const epoch=this.store.epoch(row.user_id,prepared.accountId),privacyRevision=this.store.get(memoryRevisionKey(prepared.accountId,row.user_id,row.channel),'0');
     this.store.db.prepare("UPDATE replay_items SET status='running' WHERE run_id=? AND message_id=?").run(id,row.id);
-    let baseline:any=null,candidate:any=null,status='completed';
+    let baseline:any=null,candidate:any=null,status='completed',invalidModel=false;
     try{
      const context=this.replayContext(row,prepared);
+     prepared.assertCurrent?.();
+     const sharedPrompt=prepared.compare==='model'?await this.assembleSide(id,row,prepared,prepared.baseline,'baseline',signal,context):undefined;
      if(prepared.baselineMode==='actual')baseline={draft:parse(row.draft,{action:'skip',text:'',reason:'历史结果缺失'}),actual:true,contextIncomplete:true};
-     else baseline=await this.generateSide(id,row,prepared,prepared.baseline,'baseline',signal,privacyRevision,context);
+     else baseline=await this.generateSide(id,row,prepared,prepared.baseline,'baseline',signal,privacyRevision,context,sharedPrompt);
      if(signal.aborted)throw signal.reason??new Error('回放已中止');
-     candidate=await this.generateSide(id,row,prepared,prepared.candidate,'candidate',signal,privacyRevision,context);
+     candidate=await this.generateSide(id,row,prepared,prepared.candidate,'candidate',signal,privacyRevision,context,sharedPrompt);
     }catch(error){
      status=signal.aborted?'aborted':'failed';candidate={error:signal.aborted?'回放已中止':redact(error instanceof Error?error.message:error).slice(0,300)};
+     if(prepared.compare==='model')try{prepared.assertCurrent?.();}catch{invalidModel=true;final='failed';}
     }
     const current=this.store.getMessage(row.id,prepared.accountId);
     if(this.options.accountId()!==prepared.accountId||!this.allowed(current,prepared.accountId)||sourceHash(current)!==frozen.hash||this.store.epoch(row.user_id,prepared.accountId)!==epoch||this.store.get(memoryRevisionKey(prepared.accountId,row.user_id,row.channel),'0')!==privacyRevision){this.store.db.prepare('DELETE FROM replay_items WHERE run_id=? AND message_id=?').run(id,row.id);if(this.options.accountId()!==prepared.accountId){final='aborted';break;}continue;}
     const metrics={baseline:baseline?.draft?qualityMetrics([{...baseline.draft,channel:row.channel}]):null,candidate:candidate?.draft?qualityMetrics([{...candidate.draft,channel:row.channel}]):null};
     this.store.db.prepare('UPDATE replay_items SET baseline_json=?,candidate_json=?,metrics_json=?,status=? WHERE run_id=? AND message_id=?').run(JSON.stringify(baseline),JSON.stringify(candidate),JSON.stringify(metrics),status,id,row.id);
     this.store.db.prepare('UPDATE replay_runs SET updated_at=? WHERE id=?').run(this.now(),id);
+    if(invalidModel)break;
     if(signal.aborted){final='aborted';break;}
    }
   }catch(error){final=signal.aborted||this.options.accountId()!==prepared.accountId?'aborted':'failed';this.store.log('persona-replay-error',JSON.stringify({runId:id,reason:final}),'warn');}
@@ -263,16 +319,17 @@ export class ReplayRunner {
   this.store.log('persona-replay-end',JSON.stringify({runId:id,status:final}));
  }
  async waitIdle(){await this.active?.done;}
- abort(id:string){const run=this.runRow(id);if(this.active?.id===id)this.active.controller.abort(new Error('管理员中止回放'));return {id:run.id,status:this.active?.id===id?'aborting':run.status};}
+ abort(id:string){const run=this.runRow(id);if(this.active?.id===id){this.active.controller.abort(new Error('管理员中止回放'));this.active.dispose?.();}return {id:run.id,status:this.active?.id===id?'aborting':run.status};}
  private runRow(id:string){const row=this.store.db.prepare('SELECT * FROM replay_runs WHERE id=? AND account_id=?').get(id,this.account()) as any;if(!row)throw new ReplayError('回放记录不存在',404);return row;}
  private trimRuns(accountId:string){const rows=this.store.db.prepare('SELECT id FROM replay_runs WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT -1 OFFSET 20').all(accountId) as any[];for(const row of rows){this.store.db.prepare('DELETE FROM replay_items WHERE run_id=?').run(row.id);this.store.db.prepare('DELETE FROM replay_runs WHERE id=?').run(row.id);}}
  private summary(id:string,accountId:string){
   const rows=(this.store.db.prepare('SELECT * FROM replay_items WHERE run_id=? AND account_id=?').all(id,accountId) as any[]).filter(row=>this.allowed(this.store.getMessage(row.message_id,accountId),accountId)),labels:Record<string,number>={candidate:0,baseline:0,same:0,'both-bad':0},issues:Record<string,number>={},baseline:QualityInput[]=[],candidate:QualityInput[]=[];
   for(const row of rows){if(row.label)labels[row.label]=(labels[row.label]??0)+1;for(const issue of parse(row.issues_json,[]))issues[issue]=(issues[issue]??0)+1;const b=parse(row.baseline_json,null)?.draft,c=parse(row.candidate_json,null)?.draft;if(b)baseline.push({...b,channel:row.channel});if(c)candidate.push({...c,channel:row.channel});}
-  return {total:rows.length,completed:rows.filter(r=>r.status==='completed').length,failed:rows.filter(r=>r.status==='failed').length,labels,issues,baseline:summaryQuality(baseline),candidate:summaryQuality(candidate),fees:this.ledger.summary({accountId,interactionId:id}).totals};
+  const side=(value:'baseline'|'candidate'|'shared')=>{const result=this.store.db.prepare("SELECT COUNT(*) AS calls,AVG(latency_ms) AS averageLatencyMs,COALESCE(SUM(input_tokens),0) AS input,COALESCE(SUM(output_tokens),0) AS output,COALESCE(SUM(cache_read),0) AS cacheRead,SUM(CASE WHEN pricing_status='priced' AND json_valid(cost_json) THEN json_extract(cost_json,'$.total') END) AS costUSD,SUM(CASE WHEN pricing_status='priced' THEN 1 ELSE 0 END) AS priced,SUM(CASE WHEN pricing_status='unpriced' THEN 1 ELSE 0 END) AS unpriced,SUM(CASE WHEN pricing_status='unknown' THEN 1 ELSE 0 END) AS unknown FROM llm_calls WHERE account_id=? AND interaction_id=? AND purpose='persona-replay' AND source=?").get(accountId,id,'panel-replay:'+value) as any;return {...result,priced:result.priced??0,unpriced:result.unpriced??0,unknown:result.unknown??0};};
+  return {total:rows.length,completed:rows.filter(r=>r.status==='completed').length,failed:rows.filter(r=>r.status==='failed').length,labels,issues,baseline:summaryQuality(baseline),candidate:summaryQuality(candidate),sides:{baseline:side('baseline'),candidate:side('candidate'),shared:side('shared')},fees:this.ledger.summary({accountId,interactionId:id}).totals};
  }
- list(){const accountId=this.account();this.purgeMissingSources();return {items:(this.store.db.prepare('SELECT id,created_at,updated_at,status,baseline_mode,estimate_json FROM replay_runs WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT 20').all(accountId) as any[]).map(row=>({id:row.id,createdAt:row.created_at,updatedAt:row.updated_at,status:row.status,baselineMode:row.baseline_mode,estimate:parse(row.estimate_json),summary:this.summary(row.id,accountId)}))};}
- detail(id:string){const run=this.runRow(id);this.purgeMissingSources();const settings=parse(run.settings_json);return {id,status:run.status,createdAt:run.created_at,updatedAt:run.updated_at,baselineMode:run.baseline_mode,persona:parse(run.persona_json),personaRevision:settings.personaRevision,estimate:parse(run.estimate_json),summary:this.summary(id,run.account_id),items:(this.store.db.prepare('SELECT * FROM replay_items WHERE run_id=? ORDER BY created_at,message_id').all(id) as any[]).map(row=>row.channel==='private'?{id:row.message_id,channel:'private',status:row.status,label:row.label,issues:parse(row.issues_json,[]),collapsed:true}:this.itemView(row))};}
+ list(){const accountId=this.account();this.purgeMissingSources();return {items:(this.store.db.prepare('SELECT id,created_at,updated_at,status,baseline_mode,estimate_json,settings_json FROM replay_runs WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT 20').all(accountId) as any[]).map(row=>({id:row.id,createdAt:row.created_at,updatedAt:row.updated_at,status:row.status,baselineMode:row.baseline_mode,compare:parse(row.settings_json).compare??'persona',modelCandidate:parse(row.settings_json).modelCandidate,canAdopt:parse(row.settings_json).compare!=='model',estimate:parse(row.estimate_json),summary:this.summary(row.id,accountId)}))};}
+ detail(id:string){const run=this.runRow(id);this.purgeMissingSources();const settings=parse(run.settings_json);return {id,status:run.status,createdAt:run.created_at,updatedAt:run.updated_at,baselineMode:run.baseline_mode,compare:settings.compare??'persona',modelCandidate:settings.modelCandidate,canAdopt:settings.compare!=='model',persona:parse(run.persona_json),personaRevision:settings.personaRevision,estimate:parse(run.estimate_json),summary:this.summary(id,run.account_id),items:(this.store.db.prepare('SELECT * FROM replay_items WHERE run_id=? ORDER BY created_at,message_id').all(id) as any[]).map(row=>row.channel==='private'?{id:row.message_id,channel:'private',status:row.status,label:row.label,issues:parse(row.issues_json,[]),collapsed:true}:this.itemView(row))};}
  private itemView(row:any){const source=this.store.getMessage(row.message_id,row.account_id);if(!this.allowed(source,row.account_id))throw new ReplayError('来源已移除',410);return {...this.sampleView(source,true),status:row.status,baseline:parse(row.baseline_json,null),candidate:parse(row.candidate_json,null),label:row.label,issues:parse(row.issues_json,[]),metrics:parse(row.metrics_json)};}
  item(id:string,messageId:string){const run=this.runRow(id),row=this.store.db.prepare('SELECT * FROM replay_items WHERE run_id=? AND message_id=? AND account_id=?').get(id,messageId,run.account_id) as any;if(!row)throw new ReplayError('回放条目不存在或已移除',404);return this.itemView(row);}
  label(id:string,messageId:string,label:unknown,issues:unknown){
@@ -280,7 +337,7 @@ export class ReplayRunner {
   this.item(id,messageId);this.store.db.prepare('UPDATE replay_items SET label=?,issues_json=? WHERE run_id=? AND message_id=? AND account_id=?').run(String(label),JSON.stringify([...new Set(issues)]),id,messageId,run.account_id);return {ok:true,summary:this.summary(id,run.account_id)};
  }
  delete(id:string){this.runRow(id);if(this.active?.id===id)throw new ReplayError('请先中止运行，再删除记录',409);this.store.db.prepare('DELETE FROM replay_items WHERE run_id=?').run(id);this.store.db.prepare('DELETE FROM replay_runs WHERE id=?').run(id);return {ok:true};}
- adopt(id:string){const run=this.runRow(id),settings=parse(run.settings_json);if(run.status==='running'||run.status==='queued')throw new ReplayError('回放尚未结束',409);return this.persona.save(parse(run.persona_json),settings.personaRevision);}
+ adopt(id:string){const run=this.runRow(id),settings=parse(run.settings_json);if(settings.compare==='model')throw new ReplayError('模型对比不能一键采用，请前往模型设置',409);if(run.status==='running'||run.status==='queued')throw new ReplayError('回放尚未结束',409);return this.persona.save(parse(run.persona_json),settings.personaRevision);}
  quality(filter:ReplayFilter={}){
   const accountId=this.account(),range=billingRange(filter.from??beijingDate(this.now()-6*86400000),filter.to??beijingDate(this.now()+86400000),this.now());
   if(filter.channel!==undefined&&!['all','public','private'].includes(filter.channel))throw new ReplayError('统计渠道无效');
@@ -289,5 +346,5 @@ export class ReplayRunner {
   for(const row of rows){if(!this.allowed(row,accountId))continue;const draft=parse(row.draft,null);if(!draft||!['reply','skip'].includes(draft.action))continue;const item={action:draft.action,text:draft.text??'',channel:row.channel,timestamp:row.created_at},date=beijingDate(row.created_at);all.push(item);const group=daily.get(date)??[];group.push(item);daily.set(date,group);}
   return {range,metrics:summaryQuality(all),daily:[...daily.entries()].map(([date,items])=>({date,...summaryQuality(items)})),deterministic:true};
  }
- async close(){this.active?.controller.abort(new Error('服务关闭'));await this.waitIdle();}
+ async close(){for(const id of this.estimates.keys())this.dropEstimate(id);this.active?.controller.abort(new Error('服务关闭'));this.active?.dispose?.();await this.waitIdle();}
 }

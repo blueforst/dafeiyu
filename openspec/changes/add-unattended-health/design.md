@@ -29,13 +29,15 @@ app 内 `setInterval` 每 60 秒检查：`control==='running'` 且 `busy` 持续
 
 ### 3. 浏览器资源自愈
 
-浏览器服务在 `Serial` 每项任务开始前读取 cgroup v2 的 `/sys/fs/cgroup/memory.current` 与 `memory.max`；读取失败时回退为遍历 `/proc` 统计 Camoufox 进程树 RSS。超过阈值（默认 75%）或上下文运行超过 24 小时，且当前任务不是 `send`／`lookup`、模式不是 manual 时，关闭上下文并用同一 profile 重新 `launchBrowser()`，随后执行身份检查；结果写入浏览器日志并通过 `/health` RPC 暴露最近一次重启时间、原因与当前占用。重启失败或身份变化时向 app 返回明确错误，app 走 `safetyPause()`。
+浏览器服务在 `Serial` 每项任务开始前只读采样 cgroup v2 的 `memory.current`、`memory.max` 与 `memory.stat`，以 current 减 inactive_file 的工作集判定并保留原始读数；读取失败时回退为遍历 `/proc` 统计 Camoufox 进程树 RSS。超过阈值（默认 75%）或上下文运行超过 24 小时先标记待恢复，满足下述持续压力、安全边界与保护条件后才关闭上下文并用同一 profile 重新 `launchBrowser()`，随后有界等待同账号身份就绪；结果写入浏览器日志并通过 `/health` RPC 暴露最近一次重启时间、原因与当前占用。重启失败或身份变化时向 app 返回明确错误，app 走 `safetyPause()`。
+
+实施补充（2026-10-28）：正常页面工作集会在恢复后重新加载，瞬时越过 75% 不能直接导致每轮关闭。维持阈值不变，内存压力须持续三十秒且至少两个间隔样本；实际恢复仅允许 `prepare-round` 显式安全边界。已解锁／正在解锁 Chat、人工处理和未收束出站受保护；未收束出站挡住恢复时本轮只回查。恢复后五分钟内再现持续压力或滚动一小时超过两次恢复预算时，明确暂停且不再重启；受保护会话持续 95% 时暂停但不关闭。记录恢复前后 working set、延后原因与保护标记，不能把工作负载增长直接称为泄漏。
 
 *备选*：由宿主 helper 重启整个浏览器容器。会中断 noVNC 和正在进行的操作，且需要扩展宿主白名单，被否决；容器级重启仍由 compose `restart` 策略兜底。
 
 ### 4. 健康计算与告警
 
-新增 `src/health.ts`，函数 `evaluate(now)` 从现有数据计算指标：
+新增 `src/unattended-health.ts` 与 `src/collection-health.ts`，函数 `evaluate(now)` 从现有数据计算指标：
 
 | 指标 | 来源 | 异常条件（默认） |
 | --- | --- | --- |
@@ -44,13 +46,15 @@ app 内 `setInterval` 每 60 秒检查：`control==='running'` 且 `busy` 持续
 | 平台拒绝与退避 | 冷却键、自动化拦截计数 | 退避中为注意；24 小时三次自动化拦截为异常 |
 | 浏览器需人工处理 | `identity.needsHuman` | 异常 |
 | 账号受限 | 账号状态（见第 5 节） | 异常 |
-| 采集连续异常 | `collection-warning` 日志 | 连续 3 轮 |
+| 采集连续异常 | 按账号／渠道绑定的 `collection-result` | 同渠道真实失败或未适配连续 3 个独立轮次 |
 | 备份失败 | 宿主 `backup-latest.json` | 最近一次失败 |
 | 证书临期 | 宿主监控结果 | 少于 24 小时 |
 
 迁移新增 `alerts(id, key, level, summary, started_at, last_seen_at, resolved_at)`，`key` 唯一约束活动告警（`resolved_at IS NULL`）。`evaluate` 在每轮结束和看门狗周期中执行，开启、刷新、恢复告警。`GET /api/health` 返回指标与活动告警，`/api/status` 增加 `health` 摘要；SSE 增加 `health` 事件。主页面（或动态首页顶部）显示活动告警横幅，任务页／排查区显示历史。
 
 “成功发送停滞”与 `add-reply-triage` 的“可发送通道”使用同一判断函数；该提案尚未实施时退化为“冷却未过且小时额度未满”。
+
+实施补充：浏览器保留 events／warnings 兼容，另返回固定码 diagnostics；账号、轮次、时间由应用绑定。公开和私信独立判定，同轮多来源只算一轮，预算 partial 不当全部失败；有真实失败来源的 partial 仍计失败，empty 必须有明确空界面证据。旧 warning 只显示范围未知注意，后续两渠道都有可信诊断时正常收束旧笼统告警，不掩盖仍存在的私信失败。
 
 ### 5. 账号状态识别
 

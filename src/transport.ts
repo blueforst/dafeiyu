@@ -2,15 +2,22 @@ import type { Event, Identity, Receipt } from './types.js';
 import type { PostingCapabilities } from './posting-capabilities.js';
 import {healthSettings,type HealthSettings,type BrowserResourceHealth,type ComplianceObservation} from './unattended-health.js';
 import { rpcResourceOK } from './posting-policy.js';
+import {safeBrowserDiagnostic} from './browser-operation.js';
+import {failureSummary} from './failure-summary.js';
+import type {CollectionResult} from './collection-health.js';
+import type {InspectPostResult} from './public-target.js';
 export type TransportRequestOptions={signal?:AbortSignal;deadline?:number;timeoutMs?:number};
 export interface Transport {
  identity(options?:TransportRequestOptions):Promise<Identity>;
  capabilities?():Promise<PostingCapabilities>;
  health?():Promise<BrowserResourceHealth&{ready?:boolean;mode?:string}>;
  compliance?(handle:string,options?:TransportRequestOptions):Promise<ComplianceObservation>;
- collect(handle:string,options?:TransportRequestOptions):Promise<{events:Event[];warnings:string[]}>;
- collectPublic?(handle:string,options?:TransportRequestOptions):Promise<{events:Event[];warnings:string[]}>;
- collectPrivate?(handle:string,options?:TransportRequestOptions):Promise<{events:Event[];warnings:string[]}>;
+ prepareRound?(handle:string,options?:TransportRequestOptions&{unsettledOutbox?:boolean}):Promise<BrowserResourceHealth&{ready?:boolean;mode?:string}>;
+ collectionSources?():Promise<{sources:Array<{id:string;label:string;enabled:boolean;status:string;reason?:string}>}>;
+ inspectPost?(url:string,handle:string,options?:TransportRequestOptions):Promise<InspectPostResult>;
+ collect(handle:string,options?:TransportRequestOptions):Promise<CollectionResult>;
+ collectPublic?(handle:string,options?:TransportRequestOptions):Promise<CollectionResult>;
+ collectPrivate?(handle:string,options?:TransportRequestOptions):Promise<CollectionResult>;
  context(event:Event,handle:string,options?:TransportRequestOptions):Promise<string>;
  send(event:Event,text:string,handle:string,options?:TransportRequestOptions):Promise<Receipt>;
  lookup(event:Event,text:string,handle:string,options?:TransportRequestOptions):Promise<Receipt>;
@@ -26,11 +33,14 @@ export class BrowserTransport implements Transport {
   if(payload!==undefined&&!rpcResourceOK(payload))throw new Error('浏览器请求体超过资源保护边界');
   const timeout=Math.max(1,Math.min(300000,options.timeoutMs??settings.rpcTimeoutSeconds*1000)),timeoutSignal=AbortSignal.timeout(timeout),signal=options.signal?AbortSignal.any([options.signal,timeoutSignal]):timeoutSignal;
   const r=await fetch(this.endpoint+path,{method:data===undefined?'GET':'POST',headers:{'x-browser-key':this.key,'content-type':'application/json'},body:payload===undefined?undefined:JSON.stringify(payload),signal});
-  const x:any=await r.json();if(!r.ok)throw Object.assign(new Error(x.error||'浏览器请求失败'),{restricted:x.restricted,browserPaused:x.browserPaused,browserMode:x.browserMode});return x;
+  const x:any=await r.json();if(!r.ok){const diagnostic=safeBrowserDiagnostic(x,'request');throw Object.assign(new Error(failureSummary({diagnostic},'浏览器请求失败')),{diagnostic,restricted:x.restricted,browserPaused:x.browserPaused,browserMode:x.browserMode});}return x;
  }
  identity(options?:TransportRequestOptions){return this.rpc('/identity',undefined,options);}
  capabilities(){return this.rpc('/capabilities',{});}
  health(){return this.rpc('/health');}
+ prepareRound(handle:string,options?:TransportRequestOptions&{unsettledOutbox?:boolean}){return this.rpc('/prepare-round',{handle,unsettledOutbox:options?.unsettledOutbox===true},options);}
+ collectionSources(){return this.rpc('/collection-sources');}
+ inspectPost(url:string,handle:string,options?:TransportRequestOptions){return this.rpc('/inspect-post',{url,handle,...(options?.deadline!==undefined?{deadline:options.deadline}:{})},options);}
  compliance(handle:string,options?:TransportRequestOptions){return this.rpc('/compliance',{handle},options);}
  collect(handle:string,options?:TransportRequestOptions){return this.rpc('/collect',{handle,...(options?.deadline!==undefined?{deadline:options.deadline}:{})},options);}
  collectPublic(handle:string,options?:TransportRequestOptions){return this.rpc('/collect/public',{handle,...(options?.deadline!==undefined?{deadline:options.deadline}:{})},options);}

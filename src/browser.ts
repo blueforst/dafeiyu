@@ -11,7 +11,15 @@ import { readSecret,redact } from './config.js';
 import type { Event,Identity,Receipt } from './types.js';
 import { validatePostingText,type PostingValidation } from './posting-policy.js';
 import { BrowserPostingCapabilities } from './posting-capabilities.js';
-import { BrowserResourceGuard,detectAccountRestriction,classifyPlatformRejection,healthSettings,waitForIdentityReady,type ComplianceObservation } from './unattended-health.js';
+import { BrowserResourceGuard,detectAccountRestriction,classifyPlatformRejection,healthSettings,waitForIdentityReady,type ComplianceObservation,type BrowserProtectionReason } from './unattended-health.js';
+import {BrowserOperationError,safeBrowserDiagnostic,browserOperationReason,type BrowserOperationStage} from './browser-operation.js';
+import {SubmissionAttempt,type DiagnosticValidation} from './submission-boundary.js';
+import {waitForPublicTarget,publicConversationContext,inspectPublicPost,type PublicConversationContext} from './public-target.js';
+import {readPublicPosts,validatePublicExtras} from './public-post.js';
+import {collectReadyPublic,observeNativeReads} from './public-collection.js';
+import {collectionSources} from './collection-sources.js';
+import {inspectPrivateConversation,collectPrivateWithDiagnostics,type ChatProtection} from './chat-dom.js';
+import type {CollectionDiagnostic} from './collection-health.js';
 const exec=promisify(execFile);
 export function browserProxy(value?:string):{server:string}|undefined {
  if(!value?.trim())return undefined;
@@ -41,6 +49,7 @@ export function safeEvent(e:Event){
  if(!['public','private'].includes(e.channel)||!e.id||!e.userId||typeof e.text!=='string'||e.text.length>30000)throw new Error('消息格式无效');
  if(e.channel==='public'&&(!/\/status\/\d+$/.test(u.pathname)||e.platformId&&u.pathname.split('/').at(-1)!==e.platformId))throw new Error('公开消息目标与地址不符');
  if(e.channel==='private'&&(!/^\/(messages|i\/chat)\//.test(u.pathname)||u.pathname.split('/').at(-1)!==e.conversationId))throw new Error('私信会话与地址不符');
+ validatePublicExtras(e);
 }
 export function platformId(e:Event):string {
  const id=e.platformId||(e.channel==='public'?new URL(e.url).pathname.match(/\/status\/(\d+)$/)?.[1]:'');
@@ -80,7 +89,8 @@ export class PreflightJournal {
  block(id:string,kind:Intent['kind'],handle:string,targetId:string,text:string,validation:PostingValidation):Receipt {
   if(!/^[A-Za-z0-9:_-]{1,250}$/.test(id)||!handle||typeof text!=='string'||validation.allowed)throw new Error('未提交预检参数无效');
   const old=this.get(id,kind,handle,targetId,text);if(old)return old;
-  const receipt:Receipt={status:'not_submitted',reason:validation.reason,validation};
+  const diagnostic=(validation as DiagnosticValidation).diagnostic;
+  const receipt:Receipt&{diagnostic?:ReturnType<typeof safeBrowserDiagnostic>}={status:'not_submitted',reason:validation.reason,validation,...(diagnostic?{diagnostic:safeBrowserDiagnostic({diagnostic})}:{})};
   const next=Object.assign(Object.create(null),this.entries,{[id]:{kind,handle:handle.toLowerCase(),targetId,textHash:hash(text),at:Date.now(),receipt}});
   // 只在文件及目录同步成功后发布终态；写盘异常的同ID也被冻结为unknown，不能再次进入点击。
   try{this.persist(this.path,JSON.stringify({version:1,entries:next}));}catch(error){this.uncertain[id]={...next[id],receipt:{status:'unknown',reason:'预检结果未完成持久确认，禁止重复提交，只允许回查'}};throw error;}
@@ -122,7 +132,7 @@ export async function identity(page:Page):Promise<Identity>{
  const result=await page.evaluate(()=>{
   const a=document.querySelector('a[data-testid="AppTabBar_Profile_Link"]') as HTMLAnchorElement|null;
   const handle=a?.getAttribute('href')?.split('/').filter(Boolean)[0]||'';
-  const cloned=document.body.cloneNode(true) as HTMLElement;cloned.querySelectorAll('article,[data-testid="messageEntry"],[data-testid="tweetText"],[data-testid="UserDescription"],[data-testid="UserName"]').forEach(node=>node.remove());
+  const cloned=document.body.cloneNode(true) as HTMLElement;cloned.querySelectorAll('article,[data-testid="messageEntry"],[data-testid="tweetText"],[data-testid="UserDescription"],[data-testid="UserName"],[data-testid^="tweetTextarea"],[role="textbox"]').forEach(node=>node.remove());
   const text=cloned.innerText||cloned.textContent||'';
   const needsHuman=/verify (your|you are)|unusual activity|authenticate your|enter (your )?passcode|unlock your|验证你的身份|输入.*密码锁|解锁.*聊天/i.test(text)||/challenge|account\/access/.test(location.pathname);
   return {handle,loggedIn:!!handle,needsHuman,pageText:text,ownAccount:!!handle,url:location.href,reason:needsHuman?'页面需要人工验证或解锁':!handle?'尚未登录或页面结构需要适配':undefined};
@@ -130,26 +140,21 @@ export async function identity(page:Page):Promise<Identity>{
  const {pageText,ownAccount,url,...safe}=result;return {...safe,...(restricted?{restricted,reason:'当前工作账号受限：'+restricted}:{})};
 }
 export async function readTweets(page:Page):Promise<Event[]> {
- const rows=await page.locator('article[data-testid="tweet"]').evaluateAll(articles=>articles.slice(0,60).map(a=>{
-  const owned=(node:Element)=>node.closest('article[data-testid="tweet"]')===a&&!node.closest('[data-testid="quoteTweet"],[data-testid="card.wrapper"],div[role="link"]');
-  const time=Array.from(a.querySelectorAll('time')).find(owned);
-  const link=time?.closest('a') as HTMLAnchorElement|null;
-  const match=link?.getAttribute('href')?.match(/^\/([A-Za-z0-9_]+)\/status\/(\d+)/);
-  if(!match)return null;
-  const text=(Array.from(a.querySelectorAll('[data-testid="tweetText"]')).find(owned) as HTMLElement|undefined)?.innerText||'';
-  const parsed=Date.parse(time?.getAttribute('datetime')||'');const reliable=Number.isFinite(parsed)&&parsed>0;
-  return {id:'x:'+match[2],platformId:match[2],targetId:match[2],channel:'public' as const,userId:'x:'+match[1].toLowerCase(),handle:match[1],text,url:'https://x.com/'+match[1]+'/status/'+match[2],conversationId:match[2],timestamp:reliable?parsed:0,timestampReliable:reliable,mediaUnavailable:!!a.querySelector('[data-testid="tweetPhoto"],video')};
- }).filter(Boolean));
- return rows as Event[];
+ return readPublicPosts(page);
 }
 export async function replyArticleIndex(page:Page,target:string):Promise<number> {
  const indexes=await page.locator('article[data-testid="tweet"]').evaluateAll((nodes,id)=>nodes.slice(0,60).flatMap((a,index)=>{
   const time=Array.from(a.querySelectorAll('time')).find(t=>t.closest('article[data-testid="tweet"]')===a&&!t.closest('[data-testid="quoteTweet"],[data-testid="card.wrapper"],div[role="link"]'));
   return time?.closest('a')?.getAttribute('href')?.match(/\/status\/(\d+)$/)?.[1]===id?[index]:[];
  }),target);
- if(indexes.length!==1)throw new Error('无法唯一定位要回复的主帖');return indexes[0];
+ if(indexes.length!==1)throw Object.assign(new Error('无法唯一定位要回复的主帖'),{code:indexes.length?'public-target-ambiguous':'public-target-timeout',stage:'target-validate'});return indexes[0];
 }
 export async function readDM(page:Page,conversationId:string):Promise<{events:Event[];all:any[]}> {
+ if(await page.locator('[data-testid="xchatEmbedRoute"]').count()){
+  // 已观察到的新版 Chat 只有分钟显示时间，未满足可靠入站及回执契约。
+  await inspectPrivateConversation(page,conversationId);
+  throw new BrowserOperationError('private-contract-unverified','dm-validate');
+ }
  if(!/^\d+-\d+$/.test(conversationId)&&await page.locator('[data-conversation-type="direct"],[data-chat-type="direct"],[data-participant-count="2"]').count()===0)throw new Error('当前聊天缺少可靠一对一会话标识，停止自动处理');
  const all=await page.evaluate(()=>{
   const nodes=Array.from(document.querySelectorAll('[data-testid="messageEntry"]'));
@@ -174,39 +179,15 @@ export async function readDM(page:Page,conversationId:string):Promise<{events:Ev
  return {events,all};
 }
 export type CollectionBudgetInput={page:Page;handle:string;deadline:number;navigate:(page:Page,url:string,deadline:number)=>Promise<void>;now?:()=>number};
-function collected(events:Event[],warnings:string[],handle:string){return {events:[...new Map(events.map(e=>[e.channel+':'+e.platformId,{...e,accountId:handle.toLowerCase()}])).values()],warnings};}
+function collected(events:Event[],warnings:string[],handle:string,diagnostics?:CollectionDiagnostic[]){return {events:[...new Map(events.map(e=>[e.channel+':'+e.platformId,{...e,accountId:handle.toLowerCase()}])).values()],warnings,...(diagnostics?{diagnostics}:{})};}
 
 export async function collectPublicWithBudget(input:CollectionBudgetInput&{source:number}){
-  const {page:publicPage,handle,deadline,navigate,source}=input,now=input.now??Date.now;const expired=()=>now()>=deadline;
-  const events:Event[]=[],warnings:string[]=[];
-  const url=source===0?'https://x.com/notifications/mentions':source===1?'https://x.com/search?q='+encodeURIComponent('@'+handle)+'&f=live':'https://x.com/'+handle;
-  if(expired())return collected(events,['公开采集时间预算已用完'],handle);
-  try{await navigate(publicPage,url,deadline);}catch(error){if((error as any)?.restricted)throw error;return collected(events,['公开采集未完成：'+redact(error)],handle);}
-  await publicPage.locator('article[data-testid="tweet"]').first().waitFor({timeout:Math.max(1,Math.min(10000,deadline-now()))}).catch(()=>{});
-  if(expired())return collected(events,['公开采集时间预算已用完，保留已采集消息'],handle);
-  const initial=await readTweets(publicPage);
-  if(!initial.length){const body=await publicPage.locator('main').innerText().catch(()=>'');if(!/no (notifications|results|posts)|nothing to see|没有.*(通知|结果|帖子)|暂无|尚无/i.test(body))warnings.push('公开页面没有可可靠解析的帖子；可能为空、加载失败或结构需要适配');}
-  if(source===2){
-   const own=initial.filter(e=>e.handle.toLowerCase()===handle.toLowerCase()).slice(0,2);
-   for(const post of own){if(expired()){warnings.push('公开采集时间预算已用完，保留已采集消息');break;}try{await navigate(publicPage,post.url,deadline);events.push(...(await readTweets(publicPage)).filter(e=>e.handle.toLowerCase()!==handle.toLowerCase()));}catch(error){if((error as any)?.restricted)throw error;warnings.push('公开采集未完成：'+redact(error));break;}}
-  }else events.push(...initial.filter(e=>e.handle.toLowerCase()!==handle.toLowerCase()));
-  return collected(events,warnings,handle);
+ return collectReadyPublic({...input,readTweets});
  }
 
 export async function collectPrivateWithBudget(input:CollectionBudgetInput){
-  const {page:p,handle,deadline,navigate}=input,now=input.now??Date.now;const expired=()=>now()>=deadline;
-  const events:Event[]=[],warnings:string[]=[];
-  try{
-   const links:string[]=[];
-   for(const inbox of ['https://x.com/messages','https://x.com/messages/requests']){
-    if(expired()){warnings.push('私信采集时间预算已用完，保留已采集消息');break;}await navigate(p,inbox,deadline);
-    links.push(...await p.locator('a[href^="/messages/"],a[href^="/i/chat/"]').evaluateAll(as=>as.map(a=>a.getAttribute('href')||'').filter(h=>/^\/(messages\/[\d-]+|i\/chat\/[a-zA-Z0-9_-]+)$/.test(h)).slice(0,3)));
-   }
-   if(!links.length)warnings.push('私信列表暂无可识别会话；新版 Chat 或加密会话需人工确认');
-   for(const link of [...new Set(links)].slice(0,6)){if(expired()){warnings.push('私信采集时间预算已用完，保留已采集消息');break;}try{await navigate(p,'https://x.com'+link,deadline);const conversationId=link.split('/').at(-1)!;events.push(...(await readDM(p,conversationId)).events);}catch(err){if((err as any)?.restricted)throw err;warnings.push('会话适配：'+redact(err));}}
-  }catch(err){if((err as any)?.restricted)throw err;warnings.push('私信采集：'+redact(err));}
-  return collected(events,warnings,handle);
- }
+ return collectPrivateWithDiagnostics(input);
+}
 
 /** 仅访问自己的资料及页面提供的通知设置链接；不点击任何开关。 */
 export async function readCompliance(page:Page,handle:string,navigate:(page:Page,url:string)=>Promise<void>):Promise<ComplianceObservation>{
@@ -220,35 +201,63 @@ export async function readCompliance(page:Page,handle:string,navigate:(page:Page
  result.qualityFilter=await page.evaluate(()=>{const candidates=Array.from(document.querySelectorAll('main [role="switch"],main input[type="checkbox"]')).filter(node=>{const id=node.getAttribute('id'),label=id?document.querySelector('label[for="'+CSS.escape(id)+'"]'):null;const text=(node.getAttribute('aria-label')??'')+' '+(label?.textContent??'')+' '+(node.closest('label')?.textContent??'');return /quality filter|质量过滤|优质内容过滤/i.test(text);});if(candidates.length!==1)return null;const node=candidates[0];if(node instanceof HTMLInputElement)return node.checked;const checked=node.getAttribute('aria-checked');return checked==='true'?true:checked==='false'?false:null;});
  if(result.qualityFilter===null)result.reasons!.push('通知质量过滤开关无法可靠确认');return result;
 }
-export async function startBrowserServer(){
+export async function startBrowserServer(options:{launch?:typeof launchBrowser}={}){
  const secret=readSecret('browser_key');if(!secret)throw new Error('缺少浏览器内部凭据');
  const profile=process.env.PROFILE_DIR||'/profile';mkdirSync(profile,{recursive:true});
  let shuttingDown=false,internalRestart=false;
- let mode='paused',effectiveHealth=healthSettings();const serial=new Serial();let round=0;let context:BrowserContext;
+ let mode='paused',effectiveHealth=healthSettings();const serial=new Serial();let round=0;let context:BrowserContext;const launch=options.launch??launchBrowser;
  const journal=new TransportJournal(profile+'/transport-journal.json');
  const preflight=new PreflightJournal(profile+'/posting-preflight-v1.json');const capabilities=new BrowserPostingCapabilities();
  const proxy=browserProxy(process.env.BROWSER_PROXY_SERVER);
- context=await launchBrowser(profile,proxy);
+ context=await launch(profile,proxy);
  function supervise(){context.on('close',()=>{if(shuttingDown||internalRestart)return;console.error('浏览器上下文关闭，交由监督器恢复');process.exit(1);});}supervise();
- let publicPage=context.pages()[0]||await context.newPage();
+ const isChatPage=(page:Page)=>!page.isClosed()&&/^https:\/\/x\.com\/(?:i\/chat|messages)(?:\/|$)/.test(page.url());
+ let publicPage=context.pages().find(page=>!isChatPage(page))||await context.newPage();
  await publicPage.goto('https://x.com/home',{waitUntil:'domcontentloaded',timeout:30000}).catch(()=>{});
- let dmPage:Page|undefined;
+ let dmPage:Page|undefined=context.pages().filter(isChatPage).at(-1);
+ let privateProtection:ChatProtection={hasUnlockedSession:false,unlockPending:false,needsHuman:false};
+ async function adoptChatPage(){
+  const candidates=context.pages().filter(isChatPage),selected=candidates.at(-1);
+  if(selected&&(!dmPage||dmPage.isClosed()||selected!==dmPage))dmPage=selected;
+  if(publicPage.isClosed()||isChatPage(publicPage)){
+   if(isChatPage(publicPage))dmPage=publicPage;publicPage=await context.newPage();
+   await publicPage.goto('https://x.com/home',{waitUntil:'domcontentloaded',timeout:30000});
+  }
+ }
  const resourceGuard=new BrowserResourceGuard({settings:()=>effectiveHealth,identity:()=>identity(publicPage),restart:async(reportStage,expectedHandle)=>{
   internalRestart=true;try{
-   reportStage?.('close-context');await context.close();reportStage?.('launch-context');context=await launchBrowser(profile,proxy);supervise();publicPage=context.pages()[0]||await context.newPage();dmPage=undefined;capabilities.invalidate('浏览器上下文重启，旧能力证据失效');
+   reportStage?.('close-context');await context.close();reportStage?.('launch-context');context=await launch(profile,proxy);supervise();publicPage=context.pages().find(page=>!isChatPage(page))||await context.newPage();dmPage=context.pages().filter(isChatPage).at(-1);capabilities.invalidate('浏览器上下文重启，旧能力证据失效');
    reportStage?.('navigate-home');await publicPage.goto('https://x.com/home',{waitUntil:'domcontentloaded',timeout:30000});
    reportStage?.('wait-identity');return await waitForIdentityReady(()=>identity(publicPage),expectedHandle??'',{timeoutMs:30000,intervalMs:250});
   }finally{internalRestart=false;}
  },onRestart:info=>{console.log(JSON.stringify({event:'browser-restart',...info}));}});
- let timeoutPreviousMode='paused';
- async function operationTimeout(){timeoutPreviousMode=mode;mode='paused';capabilities.invalidate('浏览器操作超时');const pages=context.pages();await Promise.allSettled(pages.map(p=>p.close()));}
- async function recoverTimedOutPages(){publicPage=await context.newPage();dmPage=undefined;await publicPage.goto('https://x.com/home',{waitUntil:'domcontentloaded',timeout:30000});const current=await identity(publicPage);if(current.loggedIn&&!current.needsHuman&&!current.restricted)mode=timeoutPreviousMode;}
- async function check(handle:string){const i=await identity(publicPage);capabilities.observe(i);if((i as any).restricted){mode='paused';throw Object.assign(new Error('当前工作账号受限：'+(i as any).restricted),{restricted:(i as any).restricted});}if(!i.loggedIn||i.needsHuman||i.handle.toLowerCase()!==handle.toLowerCase())throw new Error('账号未登录、身份不符或需要人工验证');}
+ async function operationTimeout(){mode='paused';capabilities.invalidate('浏览器操作超时');
+  // 只取消程序公开页；不关闭人工页或已解锁的 Chat。串行锁仍等待旧操作完全退出。
+  if(!publicPage.isClosed()&&!isChatPage(publicPage))await publicPage.close().catch(()=>{});
+ }
+ async function recoverTimedOutPages(){
+  if(publicPage.isClosed()||isChatPage(publicPage)){publicPage=await context.newPage();await publicPage.goto('https://x.com/home',{waitUntil:'domcontentloaded',timeout:30000});}
+  if(dmPage?.isClosed())dmPage=undefined;
+  // 请求超时后保持暂停，不能仅因首页仍登录就自动恢复发送。
+ }
+ async function check(handle:string){
+  try{const i=await waitForIdentityReady(()=>identity(publicPage),handle,{timeoutMs:12000,intervalMs:250});capabilities.observe(i);return i;}
+  catch(error){mode='paused';const current=await identity(publicPage).catch(()=>null);throw Object.assign(new BrowserOperationError(current?.restricted?'account-restricted':'identity-unavailable','identity'),current?.restricted?{restricted:current.restricted}:{});}
+ }
  async function navigate(p:Page,url:string,deadline=Date.now()+45000){const remaining=()=>Math.max(1,Math.min(30000,deadline-Date.now()));if(Date.now()>=deadline)throw new Error('采集时间预算已用完');await p.goto(url,{waitUntil:'domcontentloaded',timeout:remaining()});await p.locator('main').waitFor({timeout:Math.min(12000,remaining())}).catch(()=>{});const state=await identity(p);if((state as any).restricted){mode='paused';throw Object.assign(new Error('当前工作账号受限：'+(state as any).restricted),{restricted:(state as any).restricted});}}
- async function getDM(){if(!dmPage||dmPage.isClosed())dmPage=await context.newPage();return dmPage;}
- async function eventContext(e:Event){
+ async function getDM(){await adoptChatPage();if(!dmPage||dmPage.isClosed())dmPage=await context.newPage();return dmPage;}
+ async function eventContext(e:Event,attempt?:SubmissionAttempt,handle?:string){
   safeEvent(e);
-  if(e.channel==='public'){await navigate(publicPage,e.url);return JSON.stringify((await readTweets(publicPage)).slice(0,12));}
+  if(e.channel==='public'){
+   const deadline=Date.now()+45000,native=observeNativeReads(publicPage);attempt?.setStage('target-navigation');
+   try{
+   try{await navigate(publicPage,e.url,deadline);}catch(error){if((error as any)?.restricted)throw error;throw new BrowserOperationError('public-target-timeout','target-navigation');}
+   const actor=handle??attempt?.binding.handle;if(actor)try{await check(actor);}catch(error){throw Object.assign(new BrowserOperationError((error as any)?.restricted?'account-restricted':'identity-unavailable','identity'),(error as any)?.restricted?{restricted:(error as any).restricted}:{});}
+   attempt?.setStage('target-ready');
+   const reading={page:publicPage,event:e,deadline,pendingRequests:native.count,failedRequests:native.failures},ready=attempt?await waitForPublicTarget(reading):null;
+   const conversation:PublicConversationContext=ready?{messages:ready.context,contextIncomplete:false,omittedEarlier:ready.omittedEarlier}:await publicConversationContext(reading);return JSON.stringify(conversation);
+   }finally{native.dispose();}
+  }
   const p=await getDM();await navigate(p,e.url);return JSON.stringify((await readDM(p,e.conversationId)).all);
  }
  async function capture(page:Page,fn:()=>Promise<void>):Promise<PlatformTweet[]>{
@@ -288,12 +297,17 @@ export async function startBrowserServer(){
   if(a.length!==b.length||!timingSafeEqual(a,b))return reply.code(401).send({error:'未授权'});
  });
  app.get('/health',async()=>({ready:!!context&&context.pages().length>0,mode,engine:'camoufox',version:context.browser()?.version(),...resourceGuard.sample()}));
- app.get('/identity',async()=>{if(publicPage.isClosed()){const replacement=context.pages().find(p=>p.url().startsWith('https://x.com/'));if(replacement)publicPage=replacement;else return {handle:'',loggedIn:false,needsHuman:true,reason:'请人工打开 X 页面'};}return identity(publicPage);});
+ app.get('/collection-sources',async()=>collectionSources());
+ app.get('/identity',async()=>{
+  if(publicPage.isClosed())return {handle:'',loggedIn:false,needsHuman:true,reason:'程序公开页已关闭，请先恢复工作页面'};
+  const current=await identity(publicPage);if(mode==='manual'||current.loggedIn||current.needsHuman||current.restricted)return current;
+  try{return await waitForIdentityReady(()=>identity(publicPage),'',{timeoutMs:12000,intervalMs:250});}catch{return identity(publicPage);}
+ });
  app.post('/control',async(req,reply)=>{
   const next=(req.body as any)?.mode;if(!['manual','paused','auto'].includes(next))return reply.code(400).send({error:'控制模式无效'});
   return serial.run(async()=>{
    if(mode==='manual'&&next!=='manual')await exec('x11vnc',['-display',process.env.DISPLAY||':99','-R','disconnect:all'],{timeout:5000});
-   if(mode==='manual'&&next!=='manual')capabilities.invalidate('人工接管已释放，旧能力证据失效');mode=next;return {mode};
+   if(mode==='manual'&&next!=='manual'){capabilities.invalidate('人工接管已释放，旧能力证据失效');await adoptChatPage();}mode=next;return {mode};
   });
  });
  function requestHealth(req:any){return healthSettings(req.body?.runtimeHealth??effectiveHealth);}
@@ -301,7 +315,7 @@ export async function startBrowserServer(){
   effectiveHealth=requestHealth(req);
   if(mode==='manual')return reply.code(409).send({error:'人工接管期间不能执行账号检查'});
   const handle=String((req.body as any)?.handle??'').replace(/^@/,'').toLowerCase();if(!/^[a-z0-9_]{1,15}$/.test(handle))return reply.code(400).send({error:'工作账号无效'});
-  try{await resourceGuard.before('compliance',mode,handle);await check(handle);const result=await readCompliance(publicPage,handle,navigate);await check(handle);return result;}catch(error){if((error as any)?.code==='browser-recovery-failed')mode='paused';return reply.code(409).send({error:redact(error),browserPaused:mode!=='auto',browserMode:mode});}
+  try{await resourceGuard.before('compliance',mode,handle);await check(handle);const result=await readCompliance(publicPage,handle,navigate);await check(handle);return result;}catch(error){if(['browser-recovery-failed','browser-resource-pressure'].includes((error as any)?.code))mode='paused';const diagnostic=safeBrowserDiagnostic(error);return reply.code(409).send({error:browserOperationReason(diagnostic.code),diagnostic,browserPaused:mode!=='auto',browserMode:mode});}
  },{timeoutMs:requestHealth(req).rpcTimeoutSeconds*1000,onTimeout:operationTimeout,afterTimeout:recoverTimedOutPages}));
  app.post('/capabilities',async(_req,reply)=>serial.run(async()=>{
   if(mode==='manual')return reply.code(409).send({error:'人工接管期间不能读取当前页面能力'});
@@ -311,30 +325,83 @@ export async function startBrowserServer(){
   const snapshot=capabilities.observe(await identity(publicPage));
   return validatePostingText(text,operation,{accountId:handle,capability:operation==='dm'?undefined:snapshot[operation],sessionId:snapshot.sessionId});
  }
- async function task(req:any,reply:any,fn:()=>Promise<unknown>){
-  return serial.run(async()=>{
-   effectiveHealth=requestHealth(req);
-   if(mode!=='auto')return reply.code(409).send({error:'浏览器已暂停或正在人工接管',browserPaused:true,browserMode:mode});
-   try{const operation=String(req.url).split('?')[0].slice(1);await resourceGuard.before(operation==='lookup-post'?'lookupPost':operation,mode,req.body.handle);await check(req.body.handle);return await fn();}catch(err){if((err as any)?.code==='browser-recovery-failed')mode='paused';return reply.code(409).send({error:redact(err),browserPaused:mode!=='auto',browserMode:mode,...((err as any)?.restricted?{restricted:(err as any).restricted}:{})});}
-  },{timeoutMs:requestHealth(req).rpcTimeoutSeconds*1000,onTimeout:operationTimeout,afterTimeout:recoverTimedOutPages});
+ function submissionFor(req:any):SubmissionAttempt|undefined {
+  const path=String(req.url).split('?')[0];if(path!=='/send'&&path!=='/post')return;
+  const body=req.body??{};let kind:'reply'|'dm'|'post',targetId='';
+  try{
+   if(path==='/send'){
+    const event=body.event as Event;safeEvent(event);kind=event.channel==='public'?'reply':'dm';targetId=event.channel==='public'?platformId(event):event.conversationId;
+    if(body.requestId!==(event.outboxId||event.id)||event.timestampReliable===false||!Number.isFinite(event.timestamp)||event.timestamp<=0||event.accountId&&event.accountId.toLowerCase()!==String(body.handle).toLowerCase())throw new Error();
+   }else kind='post';
+   const binding={requestId:body.requestId,kind,handle:body.handle,targetId,text:body.text};
+   return new SubmissionAttempt(binding,{intent:id=>journal.get(id),previous:b=>preflight.get(b.requestId,b.kind,b.handle,b.targetId,b.text),block:(b,validation)=>preflight.block(b.requestId,b.kind,b.handle,b.targetId,b.text,validation)});
+  }catch{throw new BrowserOperationError('invalid-request','request');}
  }
+ async function task(req:any,reply:any,fn:(attempt?:SubmissionAttempt)=>Promise<unknown>){
+  let attempt:SubmissionAttempt|undefined,stage:BrowserOperationStage='request';
+  const phase=(next:BrowserOperationStage)=>{stage=next;attempt?.setStage(next);};
+  const metadata=(error:any)=>({browserPaused:mode!=='auto',browserMode:mode,...(error?.restricted?{restricted:error.restricted}:{})});
+  const report=(diagnostic:ReturnType<typeof safeBrowserDiagnostic>,status:string)=>console.warn(JSON.stringify({event:'browser-operation-failed',requestId:attempt?.binding.requestId,diagnostic,status}));
+  try{
+   return await serial.run(async()=>{
+    try{
+     effectiveHealth=requestHealth(req);attempt=submissionFor(req);
+     if(typeof req.body?.handle!=='string'||!/^[A-Za-z0-9_]{1,15}$/.test(req.body.handle))throw new BrowserOperationError('invalid-request','request');
+     if(attempt?.previous)return {...attempt.previous,...metadata(undefined)};
+     phase('control');if(mode!=='auto')throw new BrowserOperationError('control-unavailable','control');
+     phase('resource');const operation=String(req.url).split('?')[0].slice(1);await resourceGuard.before(operation==='lookup-post'?'lookupPost':operation,mode,req.body.handle);
+     phase('identity');await check(req.body.handle);phase(operation==='context'?'target-navigation':operation.startsWith('lookup')?'lookup':'request');
+     return await fn(attempt);
+    }catch(original){
+     let error=original;const failedStage=safeBrowserDiagnostic(error,attempt?.stage??stage).stage;
+     if(['browser-recovery-failed','browser-resource-pressure'].includes((error as any)?.code)||(error as any)?.restricted||failedStage==='identity'){mode='paused';capabilities.invalidate('浏览器身份或恢复状态变化');}
+     try{const receipt=attempt?.fail(error);if(receipt){const diagnostic=attempt!.safeFailure(error);report(diagnostic,receipt.status);return {...receipt,...metadata(error)};}}
+     catch(failure){error=failure;mode='paused';}
+     let diagnostic=attempt?.safeFailure(error)??safeBrowserDiagnostic(error,stage);
+     if(diagnostic.code==='unknown-error'&&stage==='identity')diagnostic={code:(error as any)?.restricted?'account-restricted':'identity-unavailable',stage};
+     report(diagnostic,'unknown');throw Object.assign(new BrowserOperationError(diagnostic.code,diagnostic.stage),metadata(error));
+    }finally{attempt?.markFinished();}
+   },{timeoutMs:requestHealth(req).rpcTimeoutSeconds*1000,onTimeout:()=>{attempt?.markTimedOut();return operationTimeout();},afterTimeout:async()=>{
+    // 这里运行时旧 fn 已退出且 onTimeout 已关闭旧页面；此前绝不写确定未提交终态。
+    try{const result=attempt?.finishTimedOut();if(result)report({code:'operation-timeout',stage:attempt!.stage},result.status);}catch(error){report(safeBrowserDiagnostic(error,attempt?.stage??stage),'unknown');}
+    await recoverTimedOutPages();if(attempt)mode='paused';
+   }});
+  }catch(error){
+   const diagnostic=attempt?.safeFailure(error)??safeBrowserDiagnostic(error,stage);
+   return reply.code(409).send({error:browserOperationReason(diagnostic.code),diagnostic,...metadata(error)});
+  }
+ }
+ app.post('/prepare-round',async(req,reply)=>task(req,reply,async()=>{
+  await adoptChatPage();
+  const protections:BrowserProtectionReason[]=[];
+  if((req.body as any).unsettledOutbox===true)protections.push('unsettled-outbox');
+  if(context.pages().some(isChatPage)){
+   protections.push(privateProtection.hasUnlockedSession?'chat-unlocked':'chat-unlock-pending');
+   if(privateProtection.needsHuman)protections.push('needs-human');
+  }
+  return resourceGuard.before('prepare-round',mode,(req.body as any).handle,{safePoint:true,protectedReasons:protections});
+ }));
  async function collectPublic(handle:string,requestedDeadline?:number){
   const deadline=Math.min(Date.now()+effectiveHealth.publicCollectionSeconds*1000,Number.isFinite(requestedDeadline)?requestedDeadline!:Infinity);
   return collectPublicWithBudget({page:publicPage,handle,deadline,navigate,source:round++%3});
  }
  async function collectPrivate(handle:string,requestedDeadline?:number){
   const deadline=Math.min(Date.now()+effectiveHealth.privateCollectionSeconds*1000,Number.isFinite(requestedDeadline)?requestedDeadline!:Infinity);
-  try{return await collectPrivateWithBudget({page:await getDM(),handle,deadline,navigate});}catch(error){if((error as any)?.restricted)throw error;return collected([],['私信采集：'+redact(error)],handle);}
+  try{const result=await collectPrivateWithBudget({page:await getDM(),handle,deadline,navigate});privateProtection=result.chatProtection;return result;}catch(error){if((error as any)?.restricted)throw error;return collected([],['私信页面读取失败，结果未知'],handle,[{channel:'private',source:'chat',status:'failed',code:'private-navigation-failed',eventCount:0}]);}
  }
  app.post('/collect/public',async(req,reply)=>task(req,reply,()=>collectPublic((req.body as any).handle,(req.body as any).deadline)));
  app.post('/collect/private',async(req,reply)=>task(req,reply,()=>collectPrivate((req.body as any).handle,(req.body as any).deadline)));
  app.post('/collect',async(req,reply)=>task(req,reply,async()=>{
   const {handle}=req.body as {handle:string};const publicResult=await collectPublic(handle);await check(handle);const privateResult=await collectPrivate(handle);
-  return collected([...publicResult.events,...privateResult.events],[...publicResult.warnings,...privateResult.warnings],handle);
+  return collected([...publicResult.events,...privateResult.events],[...publicResult.warnings,...privateResult.warnings],handle,[...(publicResult.diagnostics??[]),...(privateResult.diagnostics??[])]);
  }));
- app.post('/context',async(req,reply)=>task(req,reply,async()=>({text:await eventContext((req.body as any).event)})));
+ app.post('/context',async(req,reply)=>task(req,reply,async()=>({text:await eventContext((req.body as any).event,undefined,(req.body as any).handle)})));
+ app.post('/inspect-post',async(req,reply)=>task(req,reply,async()=>{
+  const body=req.body as any,deadline=Math.min(Date.now()+effectiveHealth.publicCollectionSeconds*1000,Number.isFinite(body.deadline)?body.deadline:Infinity);
+  const result=await inspectPublicPost({page:publicPage,url:body.url,deadline,navigate});try{await check(body.handle);}catch(error){throw Object.assign(new BrowserOperationError((error as any)?.restricted?'account-restricted':'identity-unavailable','identity'),(error as any)?.restricted?{restricted:(error as any).restricted}:{});}return result;
+ }));
  app.post('/lookup',async(req,reply)=>task(req,reply,async()=>{const {event,text,requestId,handle}=req.body as any;const r=await lookup(event,text,requestId||event.outboxId||event.id,handle);if(journal.get(requestId||event.outboxId||event.id))journal.settle(requestId||event.outboxId||event.id,r);return r;}));
- app.post('/send',async(req,reply)=>task(req,reply,async()=>{
+ app.post('/send',async(req,reply)=>task(req,reply,async(attempt)=>{
   const {event:e,text,requestId,handle}=req.body as {event:Event;text:string;requestId:string;handle:string};
   safeEvent(e);if(typeof text!=='string')throw new Error('出站正文格式无效');if(requestId!==(e.outboxId||e.id)||e.timestampReliable===false||!Number.isFinite(e.timestamp)||e.timestamp<=0)throw new Error('发送参数或可靠时间无效');
   const target=platformId(e);
@@ -342,58 +409,60 @@ export async function startBrowserServer(){
   if(journal.get(requestId)){journal.intent(requestId,e.channel==='public'?'reply':'dm',handle,e.channel==='public'?target:e.conversationId,text);return lookup(e,text,requestId,handle);}
   const kind=e.channel==='public'?'reply':'dm',destination=e.channel==='public'?target:e.conversationId;
   const previous=preflight.get(requestId,kind,handle,destination,text);if(previous)return previous;
-  const initialValidation=await validationFor(text,kind,handle);if(!initialValidation.allowed)return preflight.block(requestId,kind,handle,destination,text,initialValidation);
-  await eventContext(e);let p=publicPage;
+  attempt!.setStage('editor-validate');const initialValidation=await validationFor(text,kind,handle);if(!initialValidation.allowed)return attempt!.block(initialValidation);
+  await eventContext(e,attempt,handle);let p=publicPage;
   let responseRows:PlatformTweet[]=[],toastsBefore:string[]=[];
   if(e.channel==='public'){
-   const article=p.locator('article[data-testid="tweet"]').nth(await replyArticleIndex(p,target));
-   await article.getByTestId('reply').click();
-   const dialog=p.getByRole('dialog');await dialog.getByTestId('tweetTextarea_0').fill(text);
-   await check(handle);if(mode!=='auto')throw new Error('提交前控制状态已变化');
-   const validation=await validationFor(text,'reply',handle);if(!validation.allowed)return preflight.block(requestId,'reply',handle,target,text,validation);
-   const submit=dialog.getByTestId('tweetButton');if(await submit.count()!==1||!await submit.isEnabled())return preflight.block(requestId,'reply',handle,target,text,{...validation,allowed:false,code:'editor-unavailable',reason:'编辑器未允许提交，未保存提交意图'});
+   attempt!.setStage('target-validate');const article=p.locator('article[data-testid="tweet"]').nth(await replyArticleIndex(p,target));
+   attempt!.setStage('reply-open');await article.getByTestId('reply').click({timeout:10000});
+   const dialog=p.getByRole('dialog');attempt!.setStage('reply-fill');await dialog.getByTestId('tweetTextarea_0').fill(text,{timeout:10000});
+   attempt!.setStage('identity');await check(handle);if(mode!=='auto')throw new BrowserOperationError('control-unavailable','control');
+   attempt!.setStage('editor-validate');const validation=await validationFor(text,'reply',handle);if(!validation.allowed)return attempt!.block(validation);
+   const submit=dialog.getByTestId('tweetButton');if(await submit.count()!==1||!await submit.isEnabled())return attempt!.block({...validation,allowed:false,code:'editor-unavailable',reason:'编辑器未允许提交，未保存提交意图'});
    toastsBefore=await p.getByTestId('toast').allTextContents();
-   journal.intent(requestId,'reply',handle,target,text);
+   attempt!.beforeIntent();journal.intent(requestId,'reply',handle,target,text);attempt!.setStage('submit-click');
    responseRows=await capture(p,async()=>{await dialog.getByTestId('tweetButton').click({timeout:15000});});
   }else{
-   p=await getDM();const snap=await readDM(p,e.conversationId);
+   attempt!.setStage('dm-validate');p=await getDM();const snap=await readDM(p,e.conversationId);
    if(snap.events.at(-1)?.platformId!==target)throw new Error('私信上下文已变化，停止发送');
    const input=p.locator('[data-testid="dmComposerTextInput"]');if(await input.count()!==1)throw new Error('当前私信输入框尚未适配');
-   await input.fill(text);
-   await check(handle);if(mode!=='auto')throw new Error('提交前控制状态已变化');
+   attempt!.setStage('reply-fill');await input.fill(text);
+   attempt!.setStage('identity');await check(handle);if(mode!=='auto')throw new BrowserOperationError('control-unavailable','control');
+   attempt!.setStage('dm-validate');
    if((await readDM(p,e.conversationId)).events.at(-1)?.platformId!==target)throw new Error('提交前私信已有新消息，停止旧上下文回复');
    toastsBefore=await p.getByTestId('toast').allTextContents();
-   journal.intent(requestId,'dm',handle,e.conversationId,text);
+   attempt!.beforeIntent();journal.intent(requestId,'dm',handle,e.conversationId,text);attempt!.setStage('submit-click');
    await p.locator('[data-testid="dmComposerSendButton"]').click({timeout:15000});
   }
-  await p.waitForTimeout(1500);
+  attempt!.setStage('receipt-read');await p.waitForTimeout(1500);
   const toast=await p.locator('[data-testid="toast"]').allTextContents();
   let r:Receipt=e.channel==='public'?matchTweetReceipt(responseRows,handle,text,target,journal.get(requestId)!.at):{status:'unknown'};
   if(r.status!=='confirmed')try{r=await lookup(e,text,requestId,handle);}catch{r={status:'unknown',reason:'尚未取得可靠回执，保持待回查'};}
   r=resolveSubmissionSignals(r,toastsBefore,toast);journal.settle(requestId,r);return r;
  }));
  app.post('/lookup-post',async(req,reply)=>task(req,reply,async()=>{const {text,requestId,handle}=req.body as any;const r=await lookupPost(text,requestId,handle);if(journal.get(requestId))journal.settle(requestId,r);return r;}));
- app.post('/post',async(req,reply)=>task(req,reply,async()=>{
+ app.post('/post',async(req,reply)=>task(req,reply,async(attempt)=>{
   const {text,requestId,handle}=req.body as {text:string;requestId:string;handle:string};
   if(typeof text!=='string')throw new Error('出站正文格式无效');
   if(journal.get(requestId)){journal.intent(requestId,'post',handle,'',text);return lookupPost(text,requestId,handle);}
   const previous=preflight.get(requestId,'post',handle,'',text);if(previous)return previous;
-  const initialValidation=await validationFor(text,'post',handle);if(!initialValidation.allowed)return preflight.block(requestId,'post',handle,'',text,initialValidation);
-  await navigate(publicPage,'https://x.com/compose/post');
-  const input=publicPage.getByTestId('tweetTextarea_0');if(await input.count()!==1)throw new Error('无法唯一识别发帖输入框');await input.fill(text);
-  await check(handle);if(mode!=='auto')throw new Error('提交前控制状态已变化');
-  const validation=await validationFor(text,'post',handle);if(!validation.allowed)return preflight.block(requestId,'post',handle,'',text,validation);
-  const submit=publicPage.getByTestId('tweetButton');if(await submit.count()!==1||!await submit.isEnabled())return preflight.block(requestId,'post',handle,'',text,{...validation,allowed:false,code:'editor-unavailable',reason:'编辑器未允许提交，未保存提交意图'});
+  attempt!.setStage('editor-validate');const initialValidation=await validationFor(text,'post',handle);if(!initialValidation.allowed)return attempt!.block(initialValidation);
+  attempt!.setStage('post-open');await navigate(publicPage,'https://x.com/compose/post');
+  const input=publicPage.getByTestId('tweetTextarea_0');if(await input.count()!==1)throw new BrowserOperationError('editor-unavailable','post-open');attempt!.setStage('post-fill');await input.fill(text);
+  attempt!.setStage('identity');await check(handle);if(mode!=='auto')throw new BrowserOperationError('control-unavailable','control');
+  attempt!.setStage('editor-validate');const validation=await validationFor(text,'post',handle);if(!validation.allowed)return attempt!.block(validation);
+  const submit=publicPage.getByTestId('tweetButton');if(await submit.count()!==1||!await submit.isEnabled())return attempt!.block({...validation,allowed:false,code:'editor-unavailable',reason:'编辑器未允许提交，未保存提交意图'});
   const toastsBefore=await publicPage.getByTestId('toast').allTextContents();
-  journal.intent(requestId,'post',handle,'',text);
+  attempt!.beforeIntent();journal.intent(requestId,'post',handle,'',text);attempt!.setStage('submit-click');
   const rows=await capture(publicPage,async()=>{const button=publicPage.getByTestId('tweetButton');if(await button.count()!==1)throw new Error('无法唯一识别发帖按钮');await button.click({timeout:15000});});
-  const toast=await publicPage.getByTestId('toast').allTextContents();
+  attempt!.setStage('receipt-read');const toast=await publicPage.getByTestId('toast').allTextContents();
   let r=matchTweetReceipt(rows,handle,text,null,journal.get(requestId)!.at);if(r.status!=='confirmed')try{r=await lookupPost(text,requestId,handle);}catch{r={status:'unknown',reason:'尚未取得可靠回执，保持待回查'};}
   return journal.settle(requestId,resolveSubmissionSignals(r,toastsBefore,toast));
  }));
- app.setErrorHandler((err,req,reply)=>reply.code(500).send({error:redact(err instanceof Error?err.message:err),browserPaused:mode!=='auto',browserMode:mode}));
+ app.setErrorHandler((err,req,reply)=>{const diagnostic=safeBrowserDiagnostic(err);reply.code(500).send({error:browserOperationReason(diagnostic.code),diagnostic,browserPaused:mode!=='auto',browserMode:mode});});
+ app.addHook('onClose',async()=>{shuttingDown=true;await context.close().catch(()=>{});});
  await app.listen({port:Number(process.env.BROWSER_PORT||3001),host:'0.0.0.0'});
- process.on('SIGTERM',async()=>{shuttingDown=true;await app.close();await context.close();process.exit(0);});
+ process.on('SIGTERM',async()=>{await app.close();process.exit(0);});
  return {app,context};
 }
 if(process.argv[1]?.endsWith('/browser.js'))startBrowserServer().catch(e=>{console.error(redact(e));process.exit(1);});

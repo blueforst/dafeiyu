@@ -4,6 +4,7 @@ import type { Store } from './store.js';
 import { applyMigration } from './migrations.js';
 import type { Identity, Channel } from './types.js';
 import { redact } from './config.js';
+import {collectionHealthMetrics,recordCollectionResult as persistCollectionResult,type CollectionResult,type CollectionHealthDetail} from './collection-health.js';
 
 /** 加法迁移 v10；旧版忽略新增表，数据库备份保持现有边界。 */
 export const HEALTH_SCHEMA = `
@@ -13,7 +14,7 @@ export const HEALTH_SCHEMA = `
  CREATE TABLE IF NOT EXISTS daily_reports(date TEXT NOT NULL,account_id TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,body_json TEXT NOT NULL,PRIMARY KEY(date,account_id));
 `;
 export type HealthLevel = 'normal'|'attention'|'error';
-export type HealthMetric = {key:string;level:HealthLevel;summary:string;value?:number|string|null};
+export type HealthMetric = {key:string;level:HealthLevel;summary:string;value?:number|string|null;detail?:CollectionHealthDetail};
 export type HealthAlert = {id:string;accountId:string;key:string;level:Exclude<HealthLevel,'normal'>;summary:string;startedAt:number;lastSeenAt:number;resolvedAt:number|null};
 export type HealthSettings = {softTimeoutMinutes:number;hardTimeoutMinutes:number;publicCollectionSeconds:number;privateCollectionSeconds:number;rpcTimeoutSeconds:number;memoryRatio:number;browserMaxAgeHours:number;requiredPhrases:string[]};
 export const DEFAULT_HEALTH_SETTINGS:HealthSettings={softTimeoutMinutes:8,hardTimeoutMinutes:12,publicCollectionSeconds:90,privateCollectionSeconds:90,rpcTimeoutSeconds:120,memoryRatio:.75,browserMaxAgeHours:24,requiredPhrases:['AI']};
@@ -89,8 +90,12 @@ export function readBrowserMemory(options:{cgroupRoot?:string;procRoot?:string;r
   return {bytes,limitBytes:limit,ratio:limit?bytes/limit:null,source:'process-rss',measurement:'process-rss'};
  }catch{return {bytes:null,limitBytes:null,ratio:null,source:'unavailable'};}
 }
-export type BrowserResourceHealth={sessionId?:string;stale?:boolean;at:number;startedAt:number;memory:BrowserMemory;lastRestartAt:number|null;lastRestartReason:string|null;restarts:number;restartError:string|null;lastRestartAttemptAt?:number;lastRestartStage?:BrowserRecoveryStage;lastRestartFailureCode?:BrowserRecoveryCode|null;lastRestartDurationMs?:number};
-export type BrowserGuardDeps={readMemory?:()=>BrowserMemory;clock?:()=>number;restart:(stage?:(value:BrowserRecoveryStage)=>void,expectedHandle?:string)=>Promise<Identity>;identity:()=>Promise<Identity>;settings?:()=>Partial<HealthSettings>;onRestart?:(info:{at:number;reason:string;ok:boolean;stage?:BrowserRecoveryStage;failureCode?:BrowserRecoveryCode;durationMs?:number;memory?:BrowserMemory})=>void};
+export type BrowserProtectionReason='unsettled-outbox'|'chat-unlocked'|'chat-unlock-pending'|'needs-human'|'active-round';
+export type BrowserRecoveryGate={safePoint?:boolean;protectedReasons?:BrowserProtectionReason[]};
+export type BrowserResourceFault='memory-pressure-recurred'|'recovery-budget-exhausted'|'protected-session-pressure';
+export const BROWSER_RECOVERY_POLICY=Object.freeze({pressureConfirmMs:30000,minSamples:2,sampleGapMs:1000,minRestartIntervalMs:300000,maxRestartsPerHour:2,criticalMemoryRatio:.95});
+export type BrowserResourceHealth={sessionId?:string;stale?:boolean;at:number;startedAt:number;memory:BrowserMemory;lastRestartAt:number|null;lastRestartReason:string|null;restarts:number;restartError:string|null;lastRestartAttemptAt?:number;lastRestartStage?:BrowserRecoveryStage;lastRestartFailureCode?:BrowserRecoveryCode|null;lastRestartDurationMs?:number;memoryPressureSince?:number|null;memoryPressureSamples?:number;pendingRecoveryReason?:'memory-threshold'|'runtime-threshold'|null;recoveryDeferredReason?:'pressure-observation'|'post-recovery-observation'|'unsafe-point'|'protected-operation'|'protected-session'|'control-not-auto'|null;protectedReasons?:BrowserProtectionReason[];resourceFault?:BrowserResourceFault|null;lastRestartBeforeMemory?:BrowserMemory;lastRestartAfterMemory?:BrowserMemory;businessBlocked?:boolean};
+export type BrowserGuardDeps={readMemory?:()=>BrowserMemory;clock?:()=>number;restart:(stage?:(value:BrowserRecoveryStage)=>void,expectedHandle?:string)=>Promise<Identity>;identity:()=>Promise<Identity>;settings?:()=>Partial<HealthSettings>;onRestart?:(info:{at:number;reason:string;ok:boolean;stage?:BrowserRecoveryStage;failureCode?:BrowserRecoveryCode;durationMs?:number;memory?:BrowserMemory;afterMemory?:BrowserMemory})=>void};
 export type BrowserRecoveryStage='precheck-identity'|'close-context'|'launch-context'|'navigate-home'|'wait-identity'|'verify-identity'|'completed';
 export type BrowserRecoveryCode='identity-not-ready'|'identity-mismatch'|'needs-human'|'account-restricted'|'identity-read-failed'|'timeout'|'page-closed'|'context-closed'|'launch-failed'|'navigation-failed'|'unexpected-error';
 export class BrowserRecoveryFailure extends Error {
@@ -122,20 +127,45 @@ export async function waitForIdentityReady(read:()=>Promise<Identity>,expectedHa
  }
 }
 export class BrowserResourceGuard {
- private state:BrowserResourceHealth;private restarting=false;
- constructor(readonly deps:BrowserGuardDeps){const now=(deps.clock??Date.now)();this.state={sessionId:randomUUID(),at:now,startedAt:now,memory:{bytes:null,limitBytes:null,ratio:null,source:'unavailable'},lastRestartAt:null,lastRestartReason:null,restarts:0,restartError:null};}
+ private state:BrowserResourceHealth;private restarting=false;private lastPressureSampleAt:number|null=null;private restartHistory:number[]=[];
+ constructor(readonly deps:BrowserGuardDeps){const now=(deps.clock??Date.now)();this.state={sessionId:randomUUID(),at:now,startedAt:now,memory:{bytes:null,limitBytes:null,ratio:null,source:'unavailable'},lastRestartAt:null,lastRestartReason:null,restarts:0,restartError:null,memoryPressureSince:null,memoryPressureSamples:0,pendingRecoveryReason:null,recoveryDeferredReason:null,protectedReasons:[],resourceFault:null,businessBlocked:false};}
  snapshot(){return structuredClone(this.state);}
- sample(){this.state.at=(this.deps.clock??Date.now)();try{this.state.memory=(this.deps.readMemory??readBrowserMemory)();}catch{this.state.memory={bytes:null,limitBytes:null,ratio:null,source:'unavailable'};}return this.snapshot();}
- async before(operation:string,control:string,expectedHandle=''){
-  const state=this.sample(),config=healthSettings(this.deps.settings?.()??{}),reason=state.memory.ratio!==null&&state.memory.ratio>=config.memoryRatio?'memory-threshold':state.at-state.startedAt>=config.browserMaxAgeHours*3600000?'runtime-threshold':null;
-  if(!reason||this.restarting||control==='manual'||control==='draining'||['send','post','lookup','lookupPost','control','health'].includes(operation))return state;
-  this.restarting=true;const started=(this.deps.clock??Date.now)();let stage:BrowserRecoveryStage='precheck-identity';this.state.lastRestartAttemptAt=started;this.state.lastRestartReason=reason;
+ sample(){
+  this.state.at=(this.deps.clock??Date.now)();try{this.state.memory=(this.deps.readMemory??readBrowserMemory)();}catch{this.state.memory={bytes:null,limitBytes:null,ratio:null,source:'unavailable'};}
+  const threshold=healthSettings(this.deps.settings?.()??{}).memoryRatio,ratio=this.state.memory.ratio;
+  if(ratio!==null&&ratio>=threshold){this.state.pendingRecoveryReason='memory-threshold';if(this.state.memoryPressureSince===null||this.state.memoryPressureSince===undefined){this.state.memoryPressureSince=this.state.at;this.state.memoryPressureSamples=1;this.lastPressureSampleAt=this.state.at;}else if(this.lastPressureSampleAt===null||this.state.at-this.lastPressureSampleAt>=BROWSER_RECOVERY_POLICY.sampleGapMs){this.state.memoryPressureSamples=(this.state.memoryPressureSamples??0)+1;this.lastPressureSampleAt=this.state.at;}}
+  else{this.state.memoryPressureSince=null;this.state.memoryPressureSamples=0;this.lastPressureSampleAt=null;if(ratio!==null&&this.state.pendingRecoveryReason==='memory-threshold')this.state.pendingRecoveryReason=null;}
+  return this.snapshot();
+ }
+ private pressureConfirmed(){return this.state.memoryPressureSince!==null&&this.state.memoryPressureSince!==undefined&&this.state.at-this.state.memoryPressureSince>=BROWSER_RECOVERY_POLICY.pressureConfirmMs&&(this.state.memoryPressureSamples??0)>=BROWSER_RECOVERY_POLICY.minSamples;}
+ private fault(reason:BrowserResourceFault):never{this.state.resourceFault=reason;this.state.businessBlocked=true;throw Object.assign(new Error(reason==='memory-pressure-recurred'?'浏览器恢复后内存压力很快再次出现，已停止重复重启':reason==='recovery-budget-exhausted'?'浏览器一小时内资源恢复次数已达上限，需要人工检查':'浏览器私信会话受保护且持续高内存，需要人工检查'),{code:'browser-resource-pressure',resourceReason:reason,browserPaused:true});}
+ async before(operation:string,control:string,expectedHandle='',gate:BrowserRecoveryGate={}){
+  const state=this.sample(),config=healthSettings(this.deps.settings?.()??{}),memoryHigh=state.memory.ratio!==null&&state.memory.ratio>=config.memoryRatio,reason=memoryHigh?'memory-threshold':state.at-state.startedAt>=config.browserMaxAgeHours*3600000?'runtime-threshold':null;
+  const knownProtections=new Set<BrowserProtectionReason>(['unsettled-outbox','chat-unlocked','chat-unlock-pending','needs-human','active-round']);
+  this.state.protectedReasons=[...new Set((gate.protectedReasons??[]).filter(value=>knownProtections.has(value)))];this.state.pendingRecoveryReason=reason;this.state.recoveryDeferredReason=null;this.state.businessBlocked=!!this.state.resourceFault;
+  if(!reason){if(control==='auto'&&operation==='prepare-round'&&gate.safePoint&&state.memory.ratio!==null){this.state.resourceFault=null;this.state.businessBlocked=false;}return this.snapshot();}
+  if(this.restarting||['send','post','lookup','lookupPost','lookup-post','control','health'].includes(operation)){this.state.recoveryDeferredReason='protected-operation';return this.snapshot();}
+  if(control!=='auto'){this.state.recoveryDeferredReason='control-not-auto';return this.snapshot();}
+  if(operation!=='prepare-round'||gate.safePoint!==true){this.state.recoveryDeferredReason='unsafe-point';return this.snapshot();}
+  if(this.state.protectedReasons.length){this.state.recoveryDeferredReason='protected-session';this.state.businessBlocked=!!this.state.resourceFault||this.state.protectedReasons.includes('unsettled-outbox');
+   if(this.state.resourceFault&&!this.state.protectedReasons.includes('unsettled-outbox'))this.fault(this.state.resourceFault);
+   // unknown 出站必须仍可回查；prepare-round 的 businessBlocked 让调用方只走回查路径。
+   if(memoryHigh&&this.pressureConfirmed()&&(state.memory.ratio??0)>=BROWSER_RECOVERY_POLICY.criticalMemoryRatio&&!this.state.protectedReasons.includes('unsettled-outbox'))this.fault('protected-session-pressure');
+   return this.snapshot();
+  }
+  if(memoryHigh&&!this.pressureConfirmed()){this.state.recoveryDeferredReason='pressure-observation';return this.snapshot();}
+  this.restartHistory=this.restartHistory.filter(at=>state.at-at<3600000);
+  if(memoryHigh&&this.state.lastRestartAt!==null&&state.at-this.state.lastRestartAt<BROWSER_RECOVERY_POLICY.minRestartIntervalMs)this.fault('memory-pressure-recurred');
+  if(this.restartHistory.length>=BROWSER_RECOVERY_POLICY.maxRestartsPerHour)this.fault('recovery-budget-exhausted');
+  this.restarting=true;const started=(this.deps.clock??Date.now)();let stage:BrowserRecoveryStage='precheck-identity';this.state.lastRestartAttemptAt=started;this.state.lastRestartReason=reason;this.state.lastRestartBeforeMemory=state.memory;
   try{
    const before=await this.deps.identity(),previous=String(before.handle||'').replace(/^@/,'').toLowerCase(),expected=expectedHandle.replace(/^@/,'').toLowerCase();
    if(before.restricted)throw new BrowserRecoveryFailure('account-restricted',stage);if(before.needsHuman)throw new BrowserRecoveryFailure('needs-human',stage);if(!before.loggedIn||!previous)throw new BrowserRecoveryFailure('identity-not-ready',stage);if(expected&&expected!==previous)throw new BrowserRecoveryFailure('identity-mismatch',stage);
    const identity=await this.deps.restart(value=>{stage=value;this.state.lastRestartStage=value;},previous),handle=String(identity.handle||'').replace(/^@/,'').toLowerCase();stage='verify-identity';
    if(identity.restricted)throw new BrowserRecoveryFailure('account-restricted',stage);if(identity.needsHuman)throw new BrowserRecoveryFailure('needs-human',stage);if(!identity.loggedIn||!handle)throw new BrowserRecoveryFailure('identity-not-ready',stage);if(handle!==previous)throw new BrowserRecoveryFailure('identity-mismatch',stage);
-   const at=(this.deps.clock??Date.now)();this.state.startedAt=at;this.state.lastRestartAt=at;this.state.lastRestartStage='completed';this.state.lastRestartFailureCode=null;this.state.lastRestartDurationMs=Math.max(0,at-started);this.state.restarts++;this.state.restartError=null;this.deps.onRestart?.({at,reason,ok:true,stage:'completed',durationMs:this.state.lastRestartDurationMs,memory:state.memory});return this.sample();
+   const at=(this.deps.clock??Date.now)();this.state.startedAt=at;this.state.lastRestartAt=at;this.state.lastRestartStage='completed';this.state.lastRestartFailureCode=null;this.state.lastRestartDurationMs=Math.max(0,at-started);this.state.restarts++;this.restartHistory.push(at);this.state.restartError=null;this.state.resourceFault=null;this.state.businessBlocked=false;this.state.memoryPressureSince=null;this.state.memoryPressureSamples=0;this.lastPressureSampleAt=null;
+   const after=this.sample();this.state.lastRestartAfterMemory=after.memory;this.state.pendingRecoveryReason=after.memory.ratio!==null&&after.memory.ratio>=config.memoryRatio?'memory-threshold':null;this.state.recoveryDeferredReason=this.state.pendingRecoveryReason?'post-recovery-observation':null;
+   this.deps.onRestart?.({at,reason,ok:true,stage:'completed',durationMs:this.state.lastRestartDurationMs,memory:state.memory,afterMemory:after.memory});return this.snapshot();
   }catch(error){const at=(this.deps.clock??Date.now)(),failureCode=browserRecoveryCode(error,stage);this.state.restartError='浏览器资源恢复失败，需要人工检查';this.state.lastRestartStage=error instanceof BrowserRecoveryFailure?error.recoveryStage:stage;this.state.lastRestartFailureCode=failureCode;this.state.lastRestartDurationMs=Math.max(0,at-started);this.deps.onRestart?.({at,reason,ok:false,stage:this.state.lastRestartStage,failureCode,durationMs:this.state.lastRestartDurationMs,memory:state.memory});throw Object.assign(new Error(this.state.restartError),{code:'browser-recovery-failed',recoveryStage:this.state.lastRestartStage,recoveryCode:failureCode});}
   finally{this.restarting=false;}
  }
@@ -170,6 +200,7 @@ export class RuntimeHealth {
  get(accountId=''):HealthSnapshot {return parse(this.store.get(this.key(accountId,'snapshot')),{at:0,accountId,status:'normal',metrics:[],activeAlerts:[],compliance:this.compliance(accountId),browser:null});}
  compliance(accountId:string):ComplianceResult|null{return parse(this.store.get(this.key(accountId,'compliance')),null);}
  saveCompliance(observation:ComplianceObservation,phrases=['AI']){const result=assessCompliance(observation,phrases,this.now());this.store.set(this.key(observation.accountId,'compliance'),JSON.stringify(result));this.store.log('account-compliance',JSON.stringify({accountId:observation.accountId,disclosure:result.disclosure,automatedLabel:result.automatedLabel,qualityFilter:result.qualityFilter}));return result;}
+ recordCollectionResult(accountId:string,roundId:string,result:Pick<CollectionResult,'events'|'warnings'|'diagnostics'>,expectedChannel?:Channel){return persistCollectionResult(this.store,accountId,roundId,result,expectedChannel,this.now());}
  recordAutomationBlock(accountId:string,channel:Channel){this.store.log('automation-block',JSON.stringify({accountId,channel}),'warn');}
  recordControl(control:string,accountId=''){this.store.log('health-control',JSON.stringify({control,accountId}));}
  evaluate(input:HealthEvaluation):HealthSnapshot {
@@ -185,9 +216,7 @@ export class RuntimeHealth {
   add('send-stall',stalled?'error':'normal',stalled?'有可处理消息，二十分钟没有确认发送':'发送进展正常',Math.max(0,now-baseline));
   const runs=table(this.store,'task_runs')?this.store.db.prepare("SELECT status FROM task_runs WHERE task_id='main' AND account_id=? AND status<>'running' ORDER BY started_at DESC,id DESC LIMIT 3").all(account) as any[]:[];
   const failures=runs.findIndex(row=>row.status!=='failed'),consecutive=failures===-1?runs.length:failures;add('round-failures',consecutive>=3?'error':'normal',consecutive>=3?'主循环连续三轮失败':'主循环失败次数未达阈值',consecutive);
-  const recentRounds=table(this.store,'task_runs')?this.store.db.prepare("SELECT id,started_at,COALESCE(finished_at,?) ended FROM task_runs WHERE task_id='main' AND account_id=? AND status<>'running' ORDER BY started_at DESC,id DESC LIMIT 3").all(now,account) as any[]:[];
-  const collectionFailures=recentRounds.filter(run=>!!this.store.db.prepare("SELECT 1 FROM logs WHERE at>=? AND at<=? AND event='collection-warning' AND (CASE WHEN json_valid(detail) THEN json_extract(detail,'$.roundId')=? ELSE 1 END) LIMIT 1").get(run.started_at,run.ended,run.id)).length;
-  add('collection-failures',recentRounds.length===3&&collectionFailures===3?'error':'normal',recentRounds.length===3&&collectionFailures===3?'采集连续三轮异常':'采集状态正常',collectionFailures);
+  metrics.push(...collectionHealthMetrics(this.store,account,now));
   for(const channel of ['public','private'] as const){const until=input.cooldown?.[channel]??Number(this.store.get('cooldown:'+channel+':'+account,this.store.get('cooldown:'+channel,'0'))),blocked=this.store.db.prepare("SELECT COUNT(*) n FROM logs WHERE event='automation-block' AND at>=? AND json_valid(detail) AND json_extract(detail,'$.accountId')=? AND json_extract(detail,'$.channel')=?").get(now-86400000,account,channel) as any;
    add('cooldown-'+channel,until>now?'attention':'normal',until>now?(channel==='public'?'公开':'私信')+'通道退避中':'通道没有退避',until);
    const n=Number(blocked.n);add('automation-'+channel,n>=3?'error':'normal',n>=3?`过去二十四小时${channel==='public'?'公开':'私信'}通道自动化拦截 ${n} 次；请降低频率（每小时 ${channel==='public'?input.publicPerHour??'未配置':input.privatePerHour??'未配置'}，每日 ${channel==='public'?input.publicPerDay??'未配置':'未设置'}）`:'自动化拦截次数未达阈值',n);
@@ -195,6 +224,7 @@ export class RuntimeHealth {
   add('browser-human',input.identity?.needsHuman?'error':'normal',input.identity?.needsHuman?'浏览器需要人工处理':'浏览器没有人工处理提示');
   add('account-restricted',input.identity?.restricted?'error':'normal',input.identity?.restricted?'当前账号受限：'+input.identity.restricted:'当前未发现账号受限',input.identity?.restricted??null);
   add('browser-recovery',observedBrowser?.restartError?'error':'normal',observedBrowser?.restartError?'浏览器资源恢复失败，需要人工检查':'浏览器资源恢复正常');
+  add('browser-resource-pressure',observedBrowser?.resourceFault?'error':observedBrowser?.pendingRecoveryReason?'attention':'normal',observedBrowser?.resourceFault?'浏览器资源恢复无法稳定，请检查内存压力；未继续重复重启':observedBrowser?.pendingRecoveryReason?'浏览器资源恢复待安全边界；私信会话、出站回查与人工操作受保护':'浏览器资源压力正常',observedBrowser?.resourceFault??observedBrowser?.pendingRecoveryReason??null);
   const backupFailed=input.backup?.ok===false||input.backup?.status==='failed';add('backup-failure',backupFailed?'error':'normal',backupFailed?'最近一次数据库备份失败':'未发现备份失败');
   const hours=input.certificateHoursRemaining;add('certificate-expiry',hours!==undefined&&hours!==null&&hours<24?'error':'normal',hours!==undefined&&hours!==null&&hours<24?'证书有效期不足二十四小时':'证书没有临期提示',hours??null);
   add('watchdog-failure',input.watchdogFailure?'error':'normal',input.watchdogFailure?'主循环看门狗恢复失败':'主循环调度正常');

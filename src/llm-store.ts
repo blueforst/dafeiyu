@@ -4,7 +4,8 @@ import { applyMigration } from './migrations.js';
 import type { Store } from './store.js';
 
 export type LlmPurpose = 'reply'|'semantic-trigger'|'daily-state'|'memory-summary'|'model-test'|'persona-preview'|'morning-post'|'evening-post'|string;
-export type CallMetadata = { purpose?:LlmPurpose; source?:string; accountId?:string; channel?:string; interactionId?:string; maxTokens?:number; reasoning?:string };
+export type ReplaySide='baseline'|'candidate'|'shared';
+export type CallMetadata = { purpose?:LlmPurpose; source?:string; accountId?:string; channel?:string; interactionId?:string; maxTokens?:number; reasoning?:string;side?:ReplaySide };
 export type CostSnapshot = { input:number; output:number; cacheRead:number; cacheWrite:number; total:number };
 export type FullUsage = { input:number|null; output:number|null; cacheRead:number|null; cacheWrite:number|null; cacheWrite1h?:number|null; totalTokens:number|null; reasoning?:number|null };
 export type PricingStatus = 'priced'|'unpriced'|'unknown';
@@ -72,7 +73,8 @@ export class LlmStore {
  constructor(store:Store|DatabaseSync){this.db='db' in store?store.db:store;initLlmSchema(this.db);}
  start(model:{provider:string;id:string},meta:CallMetadata={},now=Date.now()):string {
   const id=randomUUID();
-  this.db.prepare('INSERT INTO llm_calls(id,started_at,purpose,source,account_id,channel,interaction_id,provider,model,status) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,now,meta.purpose||'reply',meta.source||'workflow',meta.accountId||null,meta.channel||null,meta.interactionId||null,model.provider,model.id,'started');
+  const source=meta.side&&['baseline','candidate','shared'].includes(meta.side)&&meta.purpose==='persona-replay'?(meta.source||'panel-replay').replace(/:(baseline|candidate|shared)$/,'')+':'+meta.side:meta.source||'workflow';
+  this.db.prepare('INSERT INTO llm_calls(id,started_at,purpose,source,account_id,channel,interaction_id,provider,model,status) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,now,meta.purpose||'reply',source,meta.accountId||null,meta.channel||null,meta.interactionId||null,model.provider,model.id,'started');
   return id;
  }
  finish(id:string,status:Exclude<CallStatus,'started'>,result:CallResult={},now=Date.now()):void {
@@ -144,7 +146,7 @@ export class LlmStore {
  }
 }
 
-function callRow(r:any){return {id:r.id,startedAt:r.started_at,finishedAt:r.finished_at,purpose:r.purpose,source:r.source,accountId:r.account_id,channel:r.channel,interactionId:r.interaction_id,provider:r.provider,model:r.model,actualModel:r.actual_model,status:r.status,stopReason:r.stop_reason,latencyMs:r.latency_ms,usage:r.usage_known?{input:r.input_tokens,output:r.output_tokens,cacheRead:r.cache_read,cacheWrite:r.cache_write,cacheWrite1h:r.cache_write_1h,totalTokens:r.total_tokens,reasoning:r.reasoning_tokens}:null,cost:r.cost_json?JSON.parse(r.cost_json):null,pricingStatus:r.pricing_status,priceSource:r.price_source};}
+function callRow(r:any){const side=r.purpose==='persona-replay'?String(r.source).match(/^panel-replay:(baseline|candidate|shared)$/)?.[1]:undefined;return {id:r.id,startedAt:r.started_at,finishedAt:r.finished_at,purpose:r.purpose,source:r.source,...(side?{side:side as ReplaySide}:{}),accountId:r.account_id,channel:r.channel,interactionId:r.interaction_id,provider:r.provider,model:r.model,actualModel:r.actual_model,status:r.status,stopReason:r.stop_reason,latencyMs:r.latency_ms,usage:r.usage_known?{input:r.input_tokens,output:r.output_tokens,cacheRead:r.cache_read,cacheWrite:r.cache_write,cacheWrite1h:r.cache_write_1h,totalTokens:r.total_tokens,reasoning:r.reasoning_tokens}:null,cost:r.cost_json?JSON.parse(r.cost_json):null,pricingStatus:r.pricing_status,priceSource:r.price_source};}
 function includesLegacy(f:BillingFilter):boolean{return !f.provider&&!f.model&&(!f.purpose||f.purpose==='legacy-unknown')&&!f.accountId&&!f.interactionId;}
 function whereFilter(f:BillingFilter):{where:string;args:(string|number)[]}{let where='started_at>=? AND started_at<?';const args:(string|number)[]=[f.start??0,f.end??Number.MAX_SAFE_INTEGER];for(const [key,col] of [['provider','provider'],['model','model'],['purpose','purpose'],['accountId','account_id'],['interactionId','interaction_id']] as const)if(f[key]){where+=' AND '+col+'=?';args.push(f[key]!);}return {where,args};}
 function decodeCursor(value:string):{at:number;id:string}{try{const r=JSON.parse(Buffer.from(value,'base64url').toString('utf8'));if(Number.isSafeInteger(r.at)&&typeof r.id==='string'&&r.id.length<=100)return r;}catch{}throw new Error('流水游标无效');}

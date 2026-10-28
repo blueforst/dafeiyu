@@ -323,11 +323,25 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .usage-more-filters[open] { width:100%; }
 .usage-more-filters form { padding:12px 0; }
 .chart-stack { min-width:0; }
+.chart-frame { position:relative; min-width:0; overflow:visible; }
+.chart-tip { position:absolute; z-index:6; padding:7px 9px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--text); box-shadow:0 4px 18px #0002; pointer-events:none; font-size:12px; line-height:1.4; width:max-content; overflow:auto; }
+.chart-tip-title { font-weight:600; margin-bottom:4px; overflow-wrap:anywhere; }
+.chart-tip-row { display:flex; flex-wrap:wrap; align-items:baseline; gap:3px 6px; }
+.chart-tip-name { color:var(--muted); min-width:0; max-width:160px; overflow-wrap:anywhere; }
+.chart-tip-unit,.chart-tip-note { color:var(--muted); font-size:11px; }
+.chart-frame>svg:focus-visible { outline:2px solid var(--link); outline-offset:3px; border-radius:3px; }
+.trend-hit { fill:transparent; pointer-events:all; }
+.trend-guide { stroke:var(--border-strong); stroke-width:1; pointer-events:none; }
+.trend-point.is-active { stroke:var(--surface); stroke-width:1.5; }
+.donut-slice.is-dimmed { opacity:.35; }
+.share-row.is-active { background:var(--surface-2); border-radius:6px; }
+@media (prefers-reduced-motion:reduce) { .chart-tip,.donut-slice { transition:none; } }
+
 .usage-heatmap,.usage-lines { display:block; width:100%; height:auto; overflow:visible; }
 .chart-axis { fill:var(--muted); font-size:8px; }
 .chart-grid { stroke:var(--border); stroke-width:1; }
 .heat-cell { outline:none; }
-.heat-cell:focus { stroke:var(--text); stroke-width:1; }
+.heat-cell.is-active { stroke:var(--text); stroke-width:1; }
 .heat-0 { fill:var(--surface-2); background:var(--surface-2); }
 .heat-1 { fill:#b3d9c4; background:#b3d9c4; }
 .heat-2 { fill:#76ba94; background:#76ba94; }
@@ -335,7 +349,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .heat-4 { fill:#22653f; background:#22653f; }
 .heat-caption { display:flex; gap:4px; align-items:center; justify-content:flex-end; }
 .heat-key { width:9px; height:9px; border-radius:2px; display:inline-block; }
-.column-heat .heat-week:hover rect,.column-heat .heat-week:focus-within rect { stroke:var(--text); stroke-width:.5; }
+.column-heat .heat-week.is-active rect { stroke:var(--text); stroke-width:.7; }
 .chart-legend { display:flex; flex-wrap:wrap; gap:8px 16px; padding-top:12px; }
 .chart-legend>span { display:inline-flex; gap:6px; align-items:center; overflow-wrap:anywhere; }
 .legend-swatch { display:inline-block; width:9px; height:9px; border-radius:2px; flex-shrink:0; }

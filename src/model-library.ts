@@ -5,6 +5,7 @@ import { redact } from './config.js';
 import { checkBaseUrl,commitModelLibrary,keyHint,keySlot,readModelKey,readPanelSettings,toConfigModel,writeModelKey,type PanelModel,type ReasoningLevel } from './settings.js';
 import { discoverModels,findCatalogModel,listCatalogModels,listModels,listProviders,type ModelInfo } from './model-catalog.js';
 import { ModelService,runCompletion } from './model.js';
+import type { Config } from './types.js';
 
 export type LibraryTest = {ok:boolean;at:number;latencyMs:number;provider:string;id:string;input?:number;output?:number;error?:string;callId?:string;usage?:unknown;cost?:unknown;pricingStatus?:string};
 export type LibraryParams = {reasoningLevel:ReasoningLevel;maxTokens:number;timeoutMs:number};
@@ -66,6 +67,19 @@ export class ModelLibraryService {
   const levels=info?.levels??(model.custom?.reasoning?['off','low','medium','high']:['off']);
   if(!levels.includes(params.reasoningLevel))throw new ModelLibraryError('该模型不支持这个推理档位');
   return info;
+ }
+ private async resolveEntry(library:ModelLibrary,raw:any){
+  const provider=this.provider(library,String(raw?.key||'')),stored=this.model(provider,modelId(raw?.modelId)),model=structuredClone(stored);
+  if(raw?.reasoningLevel!==undefined)model.params={...DEFAULT_PARAMS,...model.params,reasoningLevel:raw.reasoningLevel};
+  await this.validateModel(provider,model);
+  if(!readModelKey(keySlot(provider.provider,provider.baseUrl)))throw new ModelLibraryError('请先填写 API Key');
+  return {provider,stored,model,config:toConfigModel(this.materialize(provider,model))};
+ }
+ /** 只解析现有模型库；不执行首次读取迁移、保存、测试或切换使用中模型。 */
+ async resolveSelection(raw:{key:string;modelId:string;reasoningLevel?:ReasoningLevel}):Promise<{model:Config['model'];revision:number;selection:{key:string;modelId:string;reasoningLevel:string}}>{
+  const panel=readPanelSettings();if(!panel.modelLibrary)throw new ModelLibraryError('请先在模型库保存候选模型',409);
+  const resolved=await this.resolveEntry(structuredClone(panel.modelLibrary) as ModelLibrary,raw);
+  return {model:resolved.config,revision:panel.revisions?.modelLibrary??0,selection:{key:resolved.provider.key,modelId:resolved.model.id,reasoningLevel:resolved.config.reasoningLevel}};
  }
  async view(){
   const {library,revision}=this.read();
@@ -132,8 +146,7 @@ export class ModelLibraryService {
   this.current(state.revision);this.saved(state.library,state.revision,this.active(state.library,provider,model));this.deps.store.log('model-library-model','已更新模型 '+key+'/'+id);return this.view();
  }
  async activate(raw:any){
-  const state=this.current(raw?.revision),provider=this.provider(state.library,String(raw.key||'')),model=this.model(provider,modelId(raw.modelId));await this.validateModel(provider,model);
-  if(!readModelKey(keySlot(provider.provider,provider.baseUrl)))throw new ModelLibraryError('请先填写 API Key');
+  const state=this.current(raw?.revision),resolved=await this.resolveEntry(state.library,{key:raw?.key,modelId:raw?.modelId}),provider=resolved.provider,model=resolved.stored;
   if(!model.lastTest?.ok&&raw.confirmUntested!==true&&raw.confirm!==true)throw new ModelLibraryError('该模型最近未通过测试，确认后才能设为使用中',409,{requiresConfirmation:true});
   state.library.active.default={key:provider.key,modelId:model.id};this.current(state.revision);this.saved(state.library,state.revision,true);
   if(model.lastTest)this.deps.store.set('model:lastTest',JSON.stringify(model.lastTest));else this.deps.store.set('model:lastTest','null');

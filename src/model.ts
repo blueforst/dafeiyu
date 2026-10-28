@@ -38,10 +38,13 @@ export function requestMaxTokens(cap:number, model:Model<Api>, level:string):num
 }
 
 export type CompletionResult = GenerationResult & { stopReason:string; errorMessage?:string; latencyMs:number; actualModel?:string };
-export type CompletionOptions = {signal?:AbortSignal; maxTokens?:number; reasoning?:string; sessionId?:string};
+export type ResolvedCompletionModel=Awaited<ReturnType<typeof resolveRuntimeModel>>;
+export type CompletionOptions = {signal?:AbortSignal; maxTokens?:number; reasoning?:string; sessionId?:string;resolvedModel?:ResolvedCompletionModel};
+/** 内部回放冻结目录模型与真实 Pi 价格；Models 仅在内存使用，绝不序列化到配置。 */
+export async function freezeCompletionModel(model:Config['model']):Promise<ResolvedCompletionModel>{const resolved=await resolveRuntimeModel(model);return {...resolved,model:structuredClone(resolved.model)};}
 
 export async function runCompletion(m:Config['model'], key:string, system:string, user:string, opts:CompletionOptions = {}):Promise<CompletionResult> {
- const { model, models,pricingKnown } = await resolveRuntimeModel(m);
+ const { model, models,pricingKnown } = opts.resolvedModel??await resolveRuntimeModel(m);
  const level = opts.reasoning ?? (m.reasoning ? m.reasoningLevel : 'off');
  const maxTokens = requestMaxTokens(opts.maxTokens ?? m.maxTokens, model, level);
  const timeout = AbortSignal.timeout(m.timeoutMs);

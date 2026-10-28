@@ -12,7 +12,7 @@ import time
 import unicodedata
 from urllib.parse import urlparse
 
-NAMES = {1: "account-ownership-and-settings-baseline", 2: "统一模型调用与价格快照", 3: "可追溯记忆与整理进度", 4: "daily-state", 5: "统一任务实例与历史", 6: "durable-outbox", 7: "工作流阶段", 8: "posting-validation", 9: "回复分级与公平调度", 10: "运行健康告警与日报", 11: "人设回放快照与隔离批次", 12: "动态时间线索引"}
+NAMES = {1: "account-ownership-and-settings-baseline", 2: "统一模型调用与价格快照", 3: "可追溯记忆与整理进度", 4: "daily-state", 5: "统一任务实例与历史", 6: "durable-outbox", 7: "工作流阶段", 8: "posting-validation", 9: "回复分级与公平调度", 10: "运行健康告警与日报", 11: "人设回放快照与隔离批次", 12: "动态时间线索引", 13: "经历附加信息与补录请求"}
 SCHEMA = {
  "runtime": "key value", "users": "id forgot epoch", "account_users": "account_id id forgot epoch",
  "messages": "id channel user_id body status draft receipt error created_at updated_at account_id source_id platform_id target_id ingested_at processed_seq",
@@ -27,9 +27,10 @@ SCHEMA = {
  "triage_ignores": "account_id user_id channel until reason strikes_json", "triage_text_hits": "account_id hash user_id at message_id",
  "alerts": "id account_id key level summary started_at last_seen_at resolved_at", "daily_reports": "date account_id created_at body_json",
  "generation_snapshots": "message_id account_id user_id channel created_at body_json", "replay_runs": "id account_id created_at updated_at status settings_json persona_json baseline_mode estimate_json summary_json", "replay_items": "run_id message_id account_id user_id channel created_at source_revision source_hash baseline_json candidate_json label issues_json metrics_json status",
+ "role_experience_meta": "experience_id account_id origin occurred_at declared_at url verify_status verify_reason hidden updated_at", "manual_imports": "id account_id url platform_id status reason message_id created_at updated_at",
 }
-GROUPS = {1: {"runtime", "users", "messages", "memory", "logs", "usage", "account_users"}, 2: {"llm_calls"}, 3: {"memory_items", "memory_sources", "memory_ignored", "memory_deleted", "memory_progress", "memory_legacy_imports", "role_experiences"}, 4: {"daily_revisions", "daily_attempts", "daily_locks"}, 5: {"task_runs"}, 6: {"outbox"}, 7: {"program_stages"}, 8: set(), 9: {"triage_ignores", "triage_text_hits"}, 10: {"alerts", "daily_reports"}, 11: {"generation_snapshots", "replay_runs", "replay_items"}, 12: set()}
-INDEXES = set("messages_queue messages_user messages_account_queue messages_account_user messages_platform_identity llm_calls_started llm_calls_interaction memory_items_scope daily_history task_runs_history outbox_account_status program_stages_time messages_account_triage messages_account_triage_history triage_text_window alerts_active alerts_history generation_snapshots_scope replay_runs_account replay_items_source messages_account_created messages_account_channel_updated outbox_account_created".split())
+GROUPS = {1: {"runtime", "users", "messages", "memory", "logs", "usage", "account_users"}, 2: {"llm_calls"}, 3: {"memory_items", "memory_sources", "memory_ignored", "memory_deleted", "memory_progress", "memory_legacy_imports", "role_experiences"}, 4: {"daily_revisions", "daily_attempts", "daily_locks"}, 5: {"task_runs"}, 6: {"outbox"}, 7: {"program_stages"}, 8: set(), 9: {"triage_ignores", "triage_text_hits"}, 10: {"alerts", "daily_reports"}, 11: {"generation_snapshots", "replay_runs", "replay_items"}, 12: set(), 13: {"role_experience_meta", "manual_imports"}}
+INDEXES = set("messages_queue messages_user messages_account_queue messages_account_user messages_platform_identity llm_calls_started llm_calls_interaction memory_items_scope daily_history task_runs_history outbox_account_status program_stages_time messages_account_triage messages_account_triage_history triage_text_window alerts_active alerts_history generation_snapshots_scope replay_runs_account replay_items_source messages_account_created messages_account_channel_updated outbox_account_created role_experience_meta_scope manual_imports_pending manual_imports_platform".split())
 MESSAGE_STATUSES = set("queued generating draft approved sending unknown confirmed failed skipped filtered merged ignored".split())
 OUTBOX_STATUSES = set("prepared submitting confirmed unknown rejected cancelled".split())
 SETTINGS_DOMAINS = {"model", "modelLibrary", "persona", "tasks", "memory", "program", "promptHints", "triage", "health"}
@@ -144,7 +145,7 @@ def integrity(connection):
 def inspect(connection, profile, settings_path, stopped):
  integrity(connection)
  reasons = [] if stopped else ["需明确 --confirm-stopped，确认 app、browser、CLI 及全部库访问者已停止"]
- report = {"target": "0.1.16", "eligible": False, "applied": False, "integrity": "ok", "versions": [], "reasons": reasons, "resumeAllowed": False, "plan": {"approvedToDraft": 0, "reviewToDraft": 0, "preparedToCancelled": 0}, "preserve": ["全部表与迁移", "冻结正文与 validation_json", "浏览器两类日志", "面板设置与 Key", "遗忘与删除账本"]}
+ report = {"target": "0.1.16", "eligible": False, "applied": False, "integrity": "ok", "versions": [], "reasons": reasons, "resumeAllowed": False, "plan": {"approvedToDraft": 0, "reviewToDraft": 0, "preparedToCancelled": 0}, "preserve": ["版本 1—12 的表与迁移；版本 13 按单独资格报告", "冻结正文与 validation_json", "浏览器两类日志", "面板设置与 Key", "遗忘与删除账本"]}
  schema_reason_count = len(reasons)
  present = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
  if "schema_migrations" not in present:
@@ -168,6 +169,20 @@ def inspect(connection, profile, settings_path, stopped):
    reasons.append("表列不属于已验证结构：" + table)
  if len(reasons) > schema_reason_count:
   return report, []
+ if 13 in migrations:
+  if connection.execute("SELECT 1 FROM role_experiences WHERE kind='manual' LIMIT 1").fetchone():
+   reasons.append("存在人工经历，旧版不能保留其核对和隐藏边界，拒绝自动回退")
+  imports = connection.execute("SELECT COUNT(*) FROM manual_imports").fetchone()[0]
+  if imports:
+   reasons.append("存在补录请求或结果记录，不能为回退丢弃")
+  unsafe_meta = connection.execute("""SELECT COUNT(*) FROM role_experience_meta m LEFT JOIN role_experiences r ON r.id=m.experience_id AND r.account_id=m.account_id WHERE
+    r.id IS NULL OR r.kind<>'post' OR r.channel<>'public' OR m.origin<>'automatic' OR m.hidden<>0
+    OR m.verify_status<>'verified' OR m.verify_reason IS NOT NULL OR m.url IS NOT NULL OR m.declared_at IS NOT NULL
+    OR m.occurred_at<>r.created_at OR m.updated_at<>r.created_at
+    OR NOT (CASE WHEN json_valid(r.receipt) THEN COALESCE(json_extract(r.receipt,'$.status')='confirmed' AND json_type(r.receipt,'$.id')='text' AND length(json_extract(r.receipt,'$.id'))>0,0) ELSE 0 END)""").fetchone()[0]
+  if unsafe_meta:
+   reasons.append("存在有效经历隐藏、核对、日期修订或不可证明默认的附加信息，不能删除")
+  report["v13"] = {"dropTablesOnApply": ["role_experience_meta", "manual_imports"], "manualImports": imports, "nonDefaultExperienceMeta": unsafe_meta}
  try:
   report["settings"] = inspect_settings(settings_path)
  except (ValueError, OSError, TypeError, KeyError) as error:
@@ -253,6 +268,11 @@ def prepare(connection, actions):
    connection.execute("UPDATE messages SET status='draft',updated_at=MAX(updated_at+1,?) WHERE id=? AND status IN ('queued','approved')", (now, ident))
   else:
    connection.execute("UPDATE outbox SET status='cancelled',updated_at=MAX(updated_at+1,?) WHERE id=? AND status='prepared'", (now, ident))
+ if connection.execute("SELECT 1 FROM schema_migrations WHERE version=13").fetchone():
+  # inspect 已证明没有人工经历、没有任何补录记录、没有非默认经历约束。
+  connection.execute("DROP TABLE role_experience_meta")
+  connection.execute("DROP TABLE manual_imports")
+  connection.execute("DELETE FROM schema_migrations WHERE version=13")
 
 
 def run(database, profile, apply=False, stopped=False):

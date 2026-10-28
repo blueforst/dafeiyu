@@ -14,6 +14,7 @@ EXTENSIONS = {
     5: ("task_runs",),
     6: ("outbox",),
     7: ("program_stages",),
+    13: ("role_experience_meta", "manual_imports"),
 }
 NAMES = {
     1: "account-ownership-and-settings-baseline",
@@ -23,6 +24,7 @@ NAMES = {
     5: "统一任务实例与历史",
     6: "durable-outbox",
     7: "工作流阶段",
+    13: "经历附加信息与补录请求",
 }
 ADDED_MESSAGE_COLUMNS = ("account_id", "source_id", "platform_id", "target_id", "ingested_at", "processed_seq")
 LEGACY_MESSAGE_COLUMNS = ("id", "channel", "user_id", "body", "status", "draft", "receipt", "error", "created_at", "updated_at")
@@ -32,7 +34,8 @@ DERIVED_TABLES = {"memory_items", "memory_legacy_imports"}
 BASE_COLUMNS = {"runtime": ("key", "value"), "users": ("id", "forgot", "epoch"),
                 "logs": ("id", "at", "level", "event", "detail"), "usage": ("id", "at", "input_tokens", "output_tokens", "cache_read")}
 KNOWN_INDEXES = {"messages_queue", "messages_user", *NEW_INDEXES, "llm_calls_started", "llm_calls_interaction",
-                 "memory_items_scope", "daily_history", "task_runs_history", "outbox_account_status", "program_stages_time"}
+                 "memory_items_scope", "daily_history", "task_runs_history", "outbox_account_status", "program_stages_time",
+                 "role_experience_meta_scope", "manual_imports_pending", "manual_imports_platform"}
 
 
 def quote(name):
@@ -138,6 +141,9 @@ def inspect(connection):
         reasons.append("消息结构不符合已验证的基础迁移")
     if columns(connection, "memory") != ("account_id",) + LEGACY_MEMORY_COLUMNS:
         reasons.append("摘要结构不符合已验证的基础迁移")
+    if 13 in registered:
+        if columns(connection, "role_experience_meta") != ("experience_id", "account_id", "origin", "occurred_at", "declared_at", "url", "verify_status", "verify_reason", "hidden", "updated_at") or columns(connection, "manual_imports") != ("id", "account_id", "url", "platform_id", "status", "reason", "message_id", "created_at", "updated_at"):
+            reasons.append("版本 13 结构不符合已验证的加法迁移")
     if reasons:
         return result
     control = connection.execute("SELECT value FROM runtime WHERE key='control'").fetchone()

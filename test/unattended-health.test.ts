@@ -63,8 +63,8 @@ test('cgroup与进程树RSS读取保持只读，无法确认时返回unknown',()
 
 test('资源恢复只在操作之间，manual及send/lookup保护；重启身份变化明确失败',async()=>{
  let now=1,restarts=0;const logged={handle:'worker',loggedIn:true,needsHuman:false};const guard=new BrowserResourceGuard({clock:()=>now,readMemory:()=>({bytes:800,limitBytes:1000,ratio:.8,source:'cgroup'}),identity:async()=>logged,restart:async()=>{restarts++;return logged;}});
- for(const operation of ['send','post','lookup','lookupPost'])await guard.before(operation,'auto','worker');await guard.before('collect/public','manual','worker');assert.equal(restarts,0);await guard.before('collect/public','auto','worker');assert.equal(restarts,1);assert.equal(guard.snapshot().lastRestartReason,'memory-threshold');
- const bad=new BrowserResourceGuard({readMemory:()=>({bytes:800,limitBytes:1000,ratio:.8,source:'cgroup'}),identity:async()=>logged,restart:async()=>({...logged,handle:'other'})});await assert.rejects(bad.before('context','auto','worker'),/资源恢复失败/);assert.ok(bad.snapshot().restartError);
+ for(const operation of ['send','post','lookup','lookupPost'])await guard.before(operation,'auto','worker');await guard.before('collect/public','manual','worker');assert.equal(restarts,0);await guard.before('collect/public','auto','worker');assert.equal(restarts,0);now+=31000;await guard.before('prepare-round','auto','worker',{safePoint:true});assert.equal(restarts,1);assert.equal(guard.snapshot().lastRestartReason,'memory-threshold');
+ const bad=new BrowserResourceGuard({clock:()=>now,readMemory:()=>({bytes:800,limitBytes:1000,ratio:.8,source:'cgroup'}),identity:async()=>logged,restart:async()=>({...logged,handle:'other'})});await bad.before('prepare-round','auto','worker',{safePoint:true});now+=31000;await assert.rejects(bad.before('prepare-round','auto','worker',{safePoint:true}),/资源恢复失败/);assert.ok(bad.snapshot().restartError);
 });
 
 test('受限判定绑定自身账号，未知页面和其他用户提示不误认；合规不存资料正文',()=>{

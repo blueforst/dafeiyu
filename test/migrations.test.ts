@@ -7,6 +7,8 @@ import { Store } from '../src/store.js';
 import { applyMigration } from '../src/migrations.js';
 import type { Event } from '../src/types.js';
 const event:Event={id:'x:123',platformId:'123',targetId:'123',channel:'public',userId:'x:alice',handle:'alice',text:'你好',url:'https://x.com/alice/status/123',conversationId:'123',timestamp:Date.now()};
+// 每条新原生消息的 platformId、目标、详情 URL 一致；内部 source 别名仍可独立变化。
+function nativeEvent(platformId:string,patch:Partial<Event>={}):Event{return {...event,id:'x:'+platformId,...patch,platformId,targetId:platformId,url:'https://x.com/'+event.handle+'/status/'+platformId,conversationId:platformId};}
 function fixture(){const dir=mkdtempSync(tmpdir()+'/role-migration-');return {dir,path:dir+'/db.sqlite',close:()=>rmSync(dir,{recursive:true,force:true})};}
 test('旧库升级保留消息摘要用量，未知归属不分配给新工作账号，重复打开不重复迁移',()=>{
  const f=fixture();let store:Store|undefined;
@@ -45,9 +47,9 @@ test('相同平台消息按工作账号隔离且跨来源去重；兼容原ID只
 test('已处理进度跨清理单调增加，账号遗忘影响旧后台结果并保留其他账号',()=>{
  const f=fixture(),store=new Store(f.path);try{
   store.ingest(event,'first');store.ingest(event,'second');const first=store.pending(1,'first')[0];store.update(first.id,'draft');const sequence=store.getMessage(first.id).processed_seq;
-  store.db.prepare('DELETE FROM messages WHERE id=?').run(first.id);store.ingest({...event,id:'x:124',platformId:'124'},'first');const newer=store.pending(1,'first')[0];store.update(newer.id,'draft');assert.ok(store.getMessage(newer.id).processed_seq>sequence);
+  store.db.prepare('DELETE FROM messages WHERE id=?').run(first.id);store.ingest(nativeEvent('124'),'first');const newer=store.pending(1,'first')[0];store.update(newer.id,'draft');assert.ok(store.getMessage(newer.id).processed_seq>sequence);
   const epoch=store.epoch(event.userId,'first');store.forget(event.userId,'first');assert.equal(store.summary(event.userId,'public','迟到内容',epoch,'first'),false);assert.equal(store.ingest(event,'first'),false);assert.equal(store.pending(10,'second').length,1);
-  store.remember(event.userId,'first');assert.equal(store.ingest(event,'first'),false);assert.equal(store.ingest({...event,id:'x:999',platformId:'999',timestamp:store.recordingAfter(event.userId,'first')+1},'first'),true);
+  store.remember(event.userId,'first');assert.equal(store.ingest(event,'first'),false);assert.equal(store.ingest(nativeEvent('999',{timestamp:store.recordingAfter(event.userId,'first')+1}),'first'),true);
  }finally{store.db.close();f.close();}
 });
 
@@ -57,23 +59,23 @@ test('显式恢复只覆盖当前账号旧全局遗忘，重启与恢复旧库�
   store.ingest(event,'first');store.ingest(event,'second');store.db.exec("VACUUM INTO '"+f.dir+"/old.sqlite'");
   store.forget(event.userId);store.remember(event.userId,'first');
   assert.equal(store.forgotten(event.userId,'first'),false);assert.equal(store.forgotten(event.userId,'second'),true);
-  assert.equal(store.ingest(event,'first'),false);const future={...event,id:'x:future',platformId:'999',text:'恢复后的新消息',timestamp:store.recordingAfter(event.userId,'first')+1};assert.equal(store.ingest(future,'first'),true);
+  assert.equal(store.ingest(event,'first'),false);const future=nativeEvent('999',{id:'x:future',text:'恢复后的新消息',timestamp:store.recordingAfter(event.userId,'first')+1});assert.equal(store.ingest(future,'first'),true);
   const epoch=store.epoch(event.userId,'first');store.db.close();store=new Store(f.path);
   assert.equal(store.epoch(event.userId,'first'),epoch);assert.equal(store.pending(10,'first').length,1);assert.equal(store.pending(10,'first')[0].platform_id,'999');assert.equal(store.forgotten(event.userId,'second'),true);store.db.close();
   copyFileSync(f.dir+'/old.sqlite',f.path);store=new Store(f.path);
   assert.equal(store.pending(10,'first').length,0);assert.equal(store.pending(10,'second').length,0);assert.equal(store.forgotten(event.userId,'first'),false);assert.equal(store.forgotten(event.userId,'second'),true);
-  assert.equal(store.ingest(event,'first'),false);assert.equal(store.ingest({...future,id:'x:1000',platformId:'1000'},'first'),true);
+  assert.equal(store.ingest(event,'first'),false);assert.equal(store.ingest(nativeEvent('1000',{text:future.text,timestamp:future.timestamp}),'first'),true);
  }finally{store.db.close();f.close();}
 });
 
 test('恢复后的时间边界拒绝遗忘期间未采集的旧消息和未知时间，只接受可靠的新消息',()=>{
  const f=fixture();let store=new Store(f.path);try{
   store.ingest(event,'first');store.forget(event.userId,'first');store.remember(event.userId,'first');const after=store.recordingAfter(event.userId,'first');
-  const unseen={...event,id:'x:unseen',platformId:'unseen',timestamp:after-1};assert.equal(store.ingest(unseen,'first'),false);
-  assert.equal(store.ingest({...unseen,id:'x:same-time',platformId:'same-time',timestamp:after},'first'),false);
-  assert.equal(store.ingest({...unseen,id:'x:unknown-time',platformId:'unknown-time',timestamp:after+1000,timestampReliable:false},'first'),false);
-  assert.equal(store.ingest({...unseen,id:'x:future',platformId:'future',timestamp:after+1000,timestampReliable:true},'first'),true);
-  store.db.close();store=new Store(f.path);assert.equal(store.recordingAfter(event.userId,'first'),after);assert.equal(store.ingest({...unseen,id:'x:unseen-restart',platformId:'unseen-restart'},'first'),false);
+  const unseen=nativeEvent('201',{id:'x:unseen',timestamp:after-1});assert.equal(store.ingest(unseen,'first'),false);
+  assert.equal(store.ingest(nativeEvent('202',{id:'x:same-time',timestamp:after}),'first'),false);
+  assert.equal(store.ingest(nativeEvent('203',{id:'x:unknown-time',timestamp:after+1000,timestampReliable:false}),'first'),false);
+  assert.equal(store.ingest(nativeEvent('204',{id:'x:future',timestamp:after+1000,timestampReliable:true}),'first'),true);
+  store.db.close();store=new Store(f.path);assert.equal(store.recordingAfter(event.userId,'first'),after);assert.equal(store.ingest(nativeEvent('205',{id:'x:unseen-restart',timestamp:unseen.timestamp}),'first'),false);
  }finally{store.db.close();f.close();}
 });
 
@@ -81,7 +83,7 @@ test('兼容全局恢复也为此前单账号遗忘建立未来时间边界',()=
  const f=fixture(),store=new Store(f.path);try{
   store.ingest(event,'first');store.forget(event.userId,'first');store.remember(event.userId);
   const after=store.recordingAfter(event.userId,'first');assert.ok(after>0);assert.equal(store.forgotten(event.userId,'first'),false);
-  assert.equal(store.ingest({...event,id:'x:never-collected',platformId:'never-collected',timestamp:after-1},'first'),false);
-  assert.equal(store.ingest({...event,id:'x:future-global',platformId:'future-global',timestamp:after+1000},'first'),true);
+  assert.equal(store.ingest(nativeEvent('301',{id:'x:never-collected',timestamp:after-1}),'first'),false);
+  assert.equal(store.ingest(nativeEvent('302',{id:'x:future-global',timestamp:after+1000}),'first'),true);
  }finally{store.db.close();f.close();}
 });

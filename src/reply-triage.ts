@@ -100,6 +100,17 @@ export class ReplyTriage{
  ingest(event:Event,accountId=event.accountId??'',maxAgeHours=6):boolean{
   return this.transaction(()=>{if(!this.store.ingest(event,accountId))return false;const id=accountId?eventIdentity(accountId,event.channel,event.platformId||event.id):event.id;this.apply(this.store.getMessage(id,accountId),maxAgeHours);return true;});
  }
+ /** 管理员补录与普通采集共用身份、遗忘和去重；优先标记与入库原子提交。 */
+ ingestManual(event:Event,accountId=event.accountId??'',maxAgeHours=6):boolean{
+  return this.transaction(()=>{
+   if(event.channel!=='public'||!event.platformId||!/^\d+$/.test(event.platformId)||event.timestampReliable!==true||!Number.isFinite(event.timestamp)||event.timestamp<=0||event.timestamp>this.now()+60000||this.now()-event.timestamp>maxAgeHours*hour)return false;
+   if(!this.store.ingest(event,accountId))return false;
+   const id=accountId?eventIdentity(accountId,event.channel,event.platformId||event.id):event.id;
+   this.store.set(this.manualKey(id),'1');
+   this.store.db.prepare("UPDATE messages SET tier='priority',tier_reason='管理员补录',merged_into=NULL WHERE id=? AND account_id=? AND status='queued'").run(id,accountId);
+   return true;
+  });
+ }
  refreshQueued(accountId:string,maxAgeHours=6){
   // 先注册全部滑动窗口命中，再统一分类；旧库首轮与名单变动均可重新计算。
   this.transaction(()=>{const rows=this.store.db.prepare("SELECT * FROM messages WHERE status='queued' AND account_id=? ORDER BY created_at,id").all(accountId) as any[];for(const row of rows)this.hit(parseEvent(row),accountId,Math.min(this.now(),row.created_at));for(const row of rows)this.apply(row,maxAgeHours);});

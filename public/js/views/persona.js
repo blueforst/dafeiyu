@@ -28,7 +28,7 @@ export function mount(root, ctx) {
   const previewButton = h('button', { id: 'persona-preview', class: 'btn primary', type: 'button', onclick: preview }, '发送试聊 ', billingBadge());
   const save = h('button', { id: 'persona-save', class: 'btn primary', type: 'button', onclick: savePersona }, '保存人设');
   const add = h('button', { id: 'trigger-add', class: 'btn', type: 'button', onclick: () => {
-    persona.triggers.push({ id: crypto.randomUUID(), title: '', condition: '', content: '', enabled: true, order: persona.triggers.length }); renderRules(); update();
+    persona.triggers.push({ id: crypto.randomUUID(), title: '', condition: '', content: '', match:'semantic', enabled: true, order: persona.triggers.length }); renderRules(); update();
   } }, '添加触发规则');
   const page = h('div', { class: 'stack' }, h('div', {}, h('h1', { class: 'page-title' }, '人设')),
     content,
@@ -52,7 +52,7 @@ export function mount(root, ctx) {
 
   function update() {
     if (!persona) return;
-    const length = persona.sections.reduce((n, x) => n + x.content.length, 0) + persona.triggers.reduce((n, x) => n + x.condition.length + x.content.length, 0);
+    const length = persona.sections.reduce((n, x) => n + x.content.length, 0) + persona.triggers.reduce((n, x) => n + x.condition.length + x.content.length + (x.keywords||[]).reduce((sum,word)=>sum+word.length,0), 0);
     tally.textContent = length.toLocaleString() + ' / 20,000 字符' + (JSON.stringify(persona) !== saved ? ' · 未保存' : ' · 已保存');
     tally.className = length > 20000 ? 'bad small' : 'muted small';
     save.disabled = saving || length > 20000;
@@ -66,13 +66,21 @@ export function mount(root, ctx) {
   function renderRules() {
     set(rules, persona.triggers.length ? persona.triggers.map((rule, index) => {
       const edit = (key, rows, label) => field(label, h(rows ? 'textarea' : 'input', { class: 'input', rows: rows || undefined, value: rule[key], oninput: e => { rule[key] = e.target.value; update(); } }));
+      const condition=h('textarea',{class:'input',rows:2,value:rule.condition,oninput:e=>{rule.condition=e.target.value;update();}});
+      const mode=h('select',{class:'input','aria-label':'触发方式'},h('option',{value:'semantic'},'语义判断'),h('option',{value:'keywords'},'关键词（不调用模型）'));
+      mode.value=rule.match||'semantic';
+      const keywords=h('textarea',{class:'input',rows:3,maxlength:2000,'aria-label':'关键词（每行一个）',placeholder:'怎么做\n教程\n步骤',value:(rule.keywords||[]).join('\n')});
+      const keywordBox=h('div',{class:'stack',hidden:mode.value!=='keywords'},field('关键词（每行一个）',keywords,'1–30 个，每个 1–40 字符；只匹配当前消息正文。'));
+      const autoCondition=()=>{if(rule.match==='keywords'&&!rule.condition.trim()&&(rule.keywords||[]).length){rule.condition='消息包含以下任一关键词：'+rule.keywords.join('、');condition.value=rule.condition;}};
+      mode.onchange=()=>{rule.match=mode.value;keywordBox.hidden=mode.value!=='keywords';autoCondition();update();};
+      keywords.oninput=()=>{const oldGenerated='消息包含以下任一关键词：'+(rule.keywords||[]).join('、');const generated=rule.condition===oldGenerated;rule.keywords=keywords.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(generated)rule.condition='';autoCondition();update();};
       return h('section', { class: 'subcard', dataset: { rule: rule.id } },
         h('div', { class: 'toolbar' }, h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: rule.enabled, onchange: e => { rule.enabled = e.target.checked; update(); } }), '启用'),
           h('span', { class: 'muted small grow' }, '规则 ' + (index + 1)),
           h('button', { class: 'btn small', type: 'button', disabled: index === 0, onclick: () => moveRule(index, -1) }, '上移'),
           h('button', { class: 'btn small', type: 'button', disabled: index === persona.triggers.length - 1, onclick: () => moveRule(index, 1) }, '下移'),
           h('button', { class: 'btn small danger', type: 'button', onclick: () => { persona.triggers.splice(index, 1); renumber(); renderRules(); update(); } }, '删除规则')),
-        edit('title', 0, '名称'), edit('condition', 2, '自然语言触发条件'), edit('content', 4, '命中后加入的提示词'));
+        edit('title', 0, '名称'),field('触发方式',mode),keywordBox,field('自然语言触发条件',condition,'关键词规则未填写时，将按关键词自动生成条件说明。'), edit('content', 4, '命中后加入的提示词'));
     }) : empty('尚未添加触发规则。回复直接使用静态分区，不产生语义判定调用。'));
   }
   function renumber() { persona.triggers.forEach((x, i) => { x.order = i; }); }
@@ -83,7 +91,7 @@ export function mount(root, ctx) {
       persona = structuredClone(data.persona); revision = data.revision; saved = JSON.stringify(persona);
       fixed.textContent = data.fixedRules;
       set(content, h('section', { class: 'card stack' }, h('h2', { class: 'card-h' }, '始终生效的静态分区'), sections),
-        h('details', { class: 'card stack' }, h('summary', {}, '语义触发规则'), h('div', { class:'toolbar' }, add), rules),
+        h('details', { class: 'card stack' }, h('summary', {}, '语义与关键词触发规则'), h('div', { class:'toolbar' }, add), rules),
         h('details', { class: 'card' }, h('summary', {}, '固定系统约束 · 只读'), fixed), h('div', { class: 'toolbar' }, save, tally));
       renderSections(); renderRules(); update();
       mountHints();
@@ -92,8 +100,9 @@ export function mount(root, ctx) {
   }
   async function savePersona() {
     if (!persona || saving) return; saving = true; update();
+    for(const rule of persona.triggers)if(rule.match==='keywords'&&!rule.condition.trim()&&(rule.keywords||[]).length)rule.condition='消息包含以下任一关键词：'+rule.keywords.join('、');
     const snapshot = structuredClone(persona);
-    try { const data = await api('/api/persona', { method: 'PUT', body: { persona: snapshot, revision } }); if (!alive) return; revision = data.revision; saved = JSON.stringify(snapshot); notice('人设已保存，下一轮处理生效', 'ok'); }
+    try { const data = await api('/api/persona', { method: 'PUT', body: { persona: snapshot, revision } }); if (!alive) return; revision = data.revision; const normalized=data.persona||snapshot;saved = JSON.stringify(normalized);if(JSON.stringify(persona)===JSON.stringify(snapshot)){persona=structuredClone(normalized);renderSections();renderRules();} notice('人设已保存，下一轮处理生效', 'ok'); }
     catch (e) { notice(e.message, 'error'); }
     finally { saving = false; update(); }
   }

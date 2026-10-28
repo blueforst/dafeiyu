@@ -2,6 +2,7 @@ import { h, set, fmtDateTime } from '../dom.js';
 import { api } from '../api.js';
 import { notice, getStatus, onStatus } from '../state.js';
 import { field, empty, json, table, editorGuard, errorBox, billingBadge } from '../view-utils.js';
+import {mount as mountExperiences} from './experience-panel.js';
 
 const CHANNEL = { public: '公开', private: '私信' };
 const TYPE = { fact: '明确事实', preference: '偏好', topic: '未完话题', 'open-topic': '未完话题', experience: '角色经历', legacy: '旧摘要' };
@@ -21,7 +22,8 @@ export function mount(root, ctx) {
     h('section', { class: 'card stack' },h('div',{class:'toolbar'},search,h('button',{id:'memory-search-button',class:'btn',type:'button',onclick:()=>loadUsers()},'搜索')),h('div',{class:'toolbar'},h('div',{class:'segmented'},[['','全部渠道'],['public','公开'],['private','私信']].map(([id,label])=>h('button',{class:'btn small',type:'button','aria-pressed':String(channel.value===id),onclick:e=>{channel.value=id;for(const child of e.currentTarget.parentNode.children)child.setAttribute('aria-pressed',String(child===e.currentTarget));loadUsers();}},label))),h('details',{},h('summary',{},'更多筛选'),field('工作账号',account)))),
     selectionConfirm, h('div', { class: 'memory-layout' }, h('section', { class: 'card stack' }, h('h2', { class: 'card-h' }, '用户与会话'), list, more), h('section', { class: 'card stack' }, details)));
   set(root, page);
-  const dirty = () => (!!policy && JSON.stringify(policy) !== policySaved) || [...edits.entries()].some(([id, text]) => text !== current?.items?.find(x => x.id === id)?.text);
+  const experiences=mountExperiences(page);
+  const dirty = () => experiences.dirty() || (!!policy && JSON.stringify(policy) !== policySaved) || [...edits.entries()].some(([id, text]) => text !== current?.items?.find(x => x.id === id)?.text);
   const cleanup = editorGuard(ctx, page, dirty);
   const query = scope => new URLSearchParams({ accountId: scope.accountId || '', channel: scope.channel || 'public' });
   function itemDirty() { return [...edits.entries()].some(([id, text]) => text !== current?.items?.find(x => x.id === id)?.text); }
@@ -68,7 +70,7 @@ export function mount(root, ctx) {
         h('button', { class: 'btn', type: 'button', disabled: data.forgotten, onclick: () => action('summarize') }, '重新整理 ',billingBadge()),
         h('button', { class: 'btn' + (data.forgotten ? '' : ' danger'), type: 'button', onclick: () => action(data.forgotten ? 'remember' : 'forget') }, data.forgotten ? '恢复后续记录' : '遗忘并停止记录')),
       h('div', { class: 'stack' }, data.items?.length ? data.items.map(renderItem) : empty('暂无长期记忆。')),
-      h('details', {}, h('summary', {}, '有来源的角色经历'), data.experiences?.length ? data.experiences.map(item => h('div', { class: 'subcard' }, h('div', { class: 'muted small' }, fmtDateTime(item.createdAt) + ' · ' + (item.channel === 'private' ? '私信' : '公开')), h('div', { class: 'pre-wrap' }, item.text), h('div', { class: 'muted small break' }, '来源：' + (item.sourceMessageId || '平台回执')), item.receipt ? json(item.receipt) : null)) : empty('暂无有来源的真实互动经历。虚构日程不会写入此处。')),
+      h('details', {}, h('summary', {}, '有来源的互动记录'), data.experiences?.length ? data.experiences.map(item => h('div', { class: 'subcard' }, h('div', { class: 'muted small' }, fmtDateTime(item.createdAt) + ' · ' + (item.channel === 'private' ? '私信' : '公开')), h('div', { class: 'pre-wrap' }, item.text), h('div', { class: 'muted small break' }, '来源：' + (item.sourceMessageId || '平台回执')), item.receipt ? json(item.receipt) : null)) : empty('暂无有来源的真实互动记录。虚构日程不会写入此处。')),
       h('details', {}, h('summary', {}, '近期可见互动'), data.recent?.length ? data.recent.map(row => h('div', { class: 'subcard pre-wrap' }, typeof row === 'string' ? row : JSON.stringify(row, null, 2))) : empty('暂无近期互动')),
       h('details', {}, h('summary', {}, '整理进度'), json(data.progress || {})), h('div', { id: 'memory-action-result', class: 'stack' }));
   }
@@ -123,5 +125,5 @@ export function mount(root, ctx) {
   function useRoute(route=ctx.route) {const params=route.params;if(!params?.has('user'))return;const userId=params.get('user'),accountId=params.get('account')||getStatus()?.accountId||'',ch=params.get('channel')==='private'?'private':'public';account.value=accountId;accountEdited=true;channel.value=ch;select({userId,accountId,channel:ch,label:userId,identityConfirmed:true});loadUsers();}
   const onRoute=e=>{if(e.detail.page==='memory')useRoute(e.detail);};window.addEventListener('panel-route',onRoute);
   if(ctx.route?.params?.has('user'))useRoute();else loadUsers();
-  return () => { alive = false; cleanup(); offStatus(); window.removeEventListener('panel-route',onRoute); };
+  return () => { alive = false; cleanup(); experiences.dispose(); offStatus(); window.removeEventListener('panel-route',onRoute); };
 }

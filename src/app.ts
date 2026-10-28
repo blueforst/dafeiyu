@@ -33,6 +33,10 @@ import { ReplayRunner } from './persona-replay.js';
 import { registerReplayRoutes } from './replay-routes.js';
 import { registerPromptHintsRoutes } from './reply-hints-routes.js';
 import { readPanelSettings,mergePanelSettings } from './settings.js';
+import {ManualImportsService} from './manual-imports.js';
+import {registerManualImportRoutes} from './manual-import-routes.js';
+import {RoleExperienceService} from './role-experiences.js';
+import {registerRoleExperienceRoutes} from './role-experience-routes.js';
 export async function startApp(){
  const app=Fastify({logger:false,bodyLimit:16384});const data=process.env.DATA_DIR||'/data';mkdirSync(data,{recursive:true});
  const store=new Store(data+'/workflow.sqlite');store.boot();
@@ -52,8 +56,12 @@ export async function startApp(){
  workflow.services={program,outbox,persona,memory,daily,posting,triage,health};
  scheduler=new TaskScheduler(store,{account:accountId,control:()=>workflow.control(),mode:()=>loadConfig().mode,nextTick:()=>workflow.nextTick,businessBusy:()=>workflow.busy,...productionTaskHandlers(workflow)});
  workflow.services.scheduler=scheduler;
- const feed=new ActivityFeed(store,accountId,()=>loadConfig().maxAgeHours,posting,triage);
+ let imports:ManualImportsService;
+ const feed=new ActivityFeed(store,accountId,()=>loadConfig().maxAgeHours,posting,triage,account=>imports?.summary(account)??{latest:0,pending:0});
  const replay=new ReplayRunner(store,persona,generator,{accountId,config:loadConfig,memory:(userId,channel,account,at)=>memory.context(userId,channel,account,at)});
+ const experiences=new RoleExperienceService(store,accountId);
+ imports=new ManualImportsService(store,{account:accountId,control:()=>workflow.control(),maxAgeHours:()=>loadConfig().maxAgeHours,triage,inspectPost:(url,account,options)=>transport.inspectPost(url,account,options)});
+ workflow.services.experiences=experiences;workflow.services.manualImports=imports;
  app.addHook('onRequest',async(req,reply)=>{
   if(req.url==='/healthz')return;
   const supplied=Buffer.from(String(req.headers['x-ingress-key']||'')),expected=Buffer.from(ingress);
@@ -84,7 +92,10 @@ export async function startApp(){
  registerBillingRoutes(app,{store});
  registerPersonaRoutes(app,{store,persona,daily,accountId});
  registerMemoryRoutes(app,{memory,account:accountId});
- registerProgramRoutes(app,{store,program,workflow});
+ registerProgramRoutes(app,{store,program,workflow,accountId,manualImports:imports});
+ registerManualImportRoutes(app,{imports,wake:()=>workflow.wake()});
+ registerRoleExperienceRoutes(app,{experiences});
+ app.get('/api/collection/sources',async()=>transport.collectionSources());
  registerTaskRoutes(app,{scheduler,workflow});
  registerFeedRoutes(app,{feed,wake:()=>workflow.wake()});
  registerPostingRoutes(app,{capabilities:posting,control:()=>workflow.control(),busy:()=>workflow.busy,refresh:()=>transport.capabilities(),operation:fn=>workflow.taskOperation('manual',fn)});
@@ -100,6 +111,6 @@ export async function startApp(){
  app.addHook('onClose',async()=>{closing=true;clearTimeout(readyTimer);clearInterval(statusInterval);workflow.stop();await replay.close();await workflow.waitIdle().catch(()=>{});store.db.close();});
  process.on('SIGTERM',async()=>{await app.close();process.exit(0);});
  await app.listen({port:Number(process.env.PORT||8080),host:'0.0.0.0'});
- return {app,store,workflow};
+ return {app,store,workflow,imports,experiences};
 }
 if(process.argv[1]?.endsWith('/app.js'))startApp().catch(e=>{console.error(redact(e));process.exit(1);});

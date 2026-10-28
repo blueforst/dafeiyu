@@ -18,12 +18,16 @@ import { recentReplySamples } from './reply-hints.js';
 import { assembleReplyPrompt } from './reply-prompt.js';
 import { captureGenerationSnapshot,pruneReplayData } from './persona-replay.js';
 import { RoundBudget,WorkflowWatchdog,healthSettings,type RuntimeHealth } from './unattended-health.js';
+import {safeBrowserDiagnostic} from './browser-operation.js';
+import {failureSummary} from './failure-summary.js';
+import type {ManualImportsService} from './manual-imports.js';
+import type {RoleExperienceService} from './role-experiences.js';
 
 export function loggedInHandle(identity:Identity):string {
  const handle=String(identity.handle||'').trim().replace(/^@/,'').toLowerCase();
  return identity.loggedIn&&!identity.needsHuman&&!identity.restricted&&/^[a-z0-9_]{1,15}$/.test(handle)?handle:'';
 }
-type Services={program?:Program;persona?:PersonaService;daily?:DailyStateService;memory?:MemoryService;outbox?:Outbox;scheduler?:TaskScheduler;triage?:ReplyTriage;posting?:PostingCapabilitiesService;health?:RuntimeHealth};
+type Services={program?:Program;persona?:PersonaService;daily?:DailyStateService;memory?:MemoryService;outbox?:Outbox;scheduler?:TaskScheduler;triage?:ReplyTriage;posting?:PostingCapabilitiesService;health?:RuntimeHealth;manualImports?:ManualImportsService;experiences?:RoleExperienceService};
 export class Workflow {
  busy=false;abort?:AbortController;lastTick=0;nextTick=0;timer?:ReturnType<typeof setTimeout>;services:Services={};
  private startedAt=0;private watchdogTimer?:ReturnType<typeof setInterval>;private wakeRequested=false;
@@ -112,8 +116,8 @@ export class Workflow {
   const conversation=merged.length?{current:rawContext,previousMessages:merged.map(x=>({id:x.platformId,text:x.text,timestamp:x.timestamp}))}:rawContext;
   const memory=await this.stage('memory',roundId,async()=>this.services.memory?this.services.memory.context(e.userId,e.channel,this.accountId(),Date.now(),memoryPolicy):this.store.context(e.userId,e.channel,this.accountId()),e);
   const session=this.modelSession(e.userId,e.channel),recentReplies=recentReplySamples(this.store,this.accountId(),e.channel,e.conversationId);
-  const input={config:c,persona,message:e.text,channel:e.channel,accountId:this.accountId(),conversation,memory,dailyState:daily?.state?.content??'暂无当日日程',mediaUnavailable:e.mediaUnavailable,signal:this.abort!.signal,sessionId:session,interactionId:e.id,now:Date.now(),timestamp:e.timestamp,timestampReliable:e.timestampReliable===true,conversationId:e.conversationId,recentReplies,promptHints:c.promptHints,lengthRule:postingLimitPrompt(e.channel==='public'?'reply':'dm',this.services.posting?.get().reply,this.accountId())};
-  const assembled=this.services.persona?await this.stage(persona?.triggers.some((t:any)=>t.enabled)?'semantic-trigger':'prompt',roundId,()=>this.services.persona!.assemble(input),e):assembleReplyPrompt({...input,staticText:c.persona,settings:c.promptHints});
+  const input={config:c,persona,message:e.text,channel:e.channel,accountId:this.accountId(),conversation,memory,dailyState:daily?.state?.content??'暂无当日日程',mediaUnavailable:e.mediaUnavailable,quote:e.quote,card:e.card,signal:this.abort!.signal,sessionId:session,interactionId:e.id,now:Date.now(),timestamp:e.timestamp,timestampReliable:e.timestampReliable===true,conversationId:e.conversationId,recentReplies,promptHints:c.promptHints,lengthRule:postingLimitPrompt(e.channel==='public'?'reply':'dm',this.services.posting?.get().reply,this.accountId())};
+  const assembled=this.services.persona?await this.stage(persona?.triggers.some((t:any)=>t.enabled&&t.match!=='keywords')?'semantic-trigger':'prompt',roundId,()=>this.services.persona!.assemble(input),e):assembleReplyPrompt({...input,staticText:c.persona,settings:c.promptHints});
   captureGenerationSnapshot(this.store,e,{conversation,memory,hintMeta:assembled.meta,dailySlot:input.dailyState,personaRevision:this.services.persona?.get().revision});
   const result=await this.stage('generation',roundId,()=>this.generator.complete(c,assembled.system,assembled.user,this.abort!.signal,session,{purpose:'reply',source:'workflow',accountId:this.accountId(),channel:e.channel,interactionId:e.id}),e);
   const draft=parseDraft(result.text,{channel:e.channel});if(e.channel==='public')draft.text=normalizePublicText(draft.text);
@@ -141,10 +145,11 @@ export class Workflow {
   if(!rpcResourceOK({event:sending,text,handle,requestId:outbox?.id??e.id,runtimeHealth:healthSettings(c.health)})){const invalid={...validation,allowed:false,code:'rpc-resource-limit',reason:'完整浏览器请求超过资源保护边界'};if(outbox){this.store.db.prepare("UPDATE outbox SET validation_json=? WHERE id=? AND status='prepared'").run(JSON.stringify(invalid),outbox.id);this.services.outbox!.cancel(outbox.id);}const row=this.store.getMessage(e.id);if(row)this.store.update(e.id,'draft',{draft:{...JSON.parse(row.draft??'{}'),validation:invalid},error:'完整浏览器请求超过资源保护边界，未提交'});return;}
   if(outbox){if(outbox.status==='prepared'&&outbox.text!==text)this.services.outbox!.retext(outbox.id,text);this.services.outbox!.validate(outbox.id,capability);if(!this.services.outbox!.begin(outbox.id,capability)){restore();return;}}
   this.store.update(e.id,'sending');let receipt:Receipt;
-  try{receipt=await this.stage('sending',roundId,()=>this.transport.send(sending,text,handle,{signal:this.abort?.signal}),e);}catch(error){receipt={status:'unknown',reason:'提交结果未知，等待回查'};if((error as any)?.browserPaused)await this.safetyPause('浏览器操作超时并已暂停，请检查后显式恢复');}
+  try{receipt=await this.stage('sending',roundId,()=>this.transport.send(sending,text,handle,{signal:this.abort?.signal}),e);}catch(error){receipt={status:'unknown',reason:'提交结果未知，等待回查；'+failureSummary(error,'未取得可靠提交回执')};if((error as any)?.browserPaused)await this.safetyPause('浏览器已安全暂停，请检查后显式恢复');}
   if(outbox){const settled=this.services.outbox!.settle(outbox.id,receipt);receipt=settled.receipt?JSON.parse(settled.receipt):{status:'unknown'};}
   this.store.update(e.id,receipt.status==='confirmed'?'confirmed':receipt.status==='rejected'?'failed':receipt.status==='not_submitted'?'draft':'unknown',{receipt,error:receipt.reason});
   if(receipt.status==='confirmed'&&this.services.memory)try{this.services.memory.recordExperience({accountId:handle,userId:e.userId,channel:e.channel,text:text.slice(0,1200),kind:'interaction',sourceMessageId:e.id,receipt});}catch{}
+  if(receipt.browserPaused||receipt.restricted)await this.safetyPause(receipt.restricted?'工作账号受到平台限制，请人工检查':'浏览器已安全暂停，请检查后显式恢复');
   if(receipt.status==='rejected'){this.rejectChannel(e.channel);if(/automat|自动化/i.test(receipt.reason??''))this.services.health?.recordAutomationBlock(handle,e.channel);}
   this.store.log('processed',JSON.stringify({id:e.id,channel:e.channel,status:receipt.status,roundId,callId,outboxId:outbox?.id}));
  }
@@ -170,14 +175,26 @@ export class Workflow {
     if(!handle||(this.activeHandle&&handle!==this.activeHandle)){await this.safetyPause('登录状态或账号已变化，请检查浏览器后重新恢复');return;}
     this.activeHandle=handle;this.store.set('activeAccount',handle);
     if(this.services.scheduler){this.services.scheduler.recordMainStart(roundId,handle,startedAt);mainStarted=true;}
-    await this.reconcile(handle,roundId);if(this.control()!=='running')return;await this.sendApproved(c,handle,roundId);if(!budget.check()||this.control()!=='running')return;
+    const unsettledOutbox=!!this.store.db.prepare("SELECT 1 FROM messages WHERE account_id=? AND status IN ('sending','unknown') LIMIT 1").get(handle)||!!(this.services.outbox&&this.store.db.prepare("SELECT 1 FROM outbox WHERE account_id=? AND status IN ('submitting','unknown') LIMIT 1").get(handle));
+    const prepared=this.transport.prepareRound?await this.stage('browser-prepare',roundId,()=>this.transport.prepareRound!(handle,{signal:this.abort!.signal,unsettledOutbox})):undefined;
+    await this.reconcile(handle,roundId);if(this.control()!=='running')return;
+    if(prepared?.businessBlocked){this.lastTick=Date.now();this.store.set('lastTick',String(this.lastTick));this.store.log('browser-resource-wait',JSON.stringify({roundId,accountId:handle,reason:'pending-recovery-with-protected-session'}),'warn');return;}
+    await this.sendApproved(c,handle,roundId);if(!budget.check()||this.control()!=='running')return;
     const daily=this.services.daily?await this.stage('daily-state',roundId,()=>this.services.daily!.ensure(handle,{signal:this.abort!.signal,interactionId:roundId})):null;
     const collected=this.transport.collectPublic&&this.transport.collectPrivate?await (async()=>{
-     const publicResult=await this.stage('collect-public',roundId,()=>this.transport.collectPublic!(handle,{signal:this.abort!.signal,deadline:budget.collectionDeadline('public',c.health)}));
+     const publicDeadline=budget.collectionDeadline('public',c.health);
+     if(this.services.manualImports)await this.stage('manual-import',roundId,()=>this.services.manualImports!.processRound({signal:this.abort!.signal,deadline:publicDeadline,limit:3}));
+     if(this.services.experiences&&this.transport.inspectPost)await this.stage('experience-verify',roundId,()=>this.services.experiences!.verifyPending((url,account,options)=>this.transport.inspectPost!(url,account,{...options,deadline:publicDeadline}),{signal:this.abort!.signal,limit:3,canProcess:()=>budget.check()&&this.control()==='running'&&this.accountId()===handle&&Date.now()<publicDeadline}));
+     const publicResult=await this.stage('collect-public',roundId,()=>this.transport.collectPublic!(handle,{signal:this.abort!.signal,deadline:publicDeadline}));
+     this.services.health?.recordCollectionResult(handle,roundId,publicResult,'public');
      if(!budget.check()||this.control()!=='running')return publicResult;
-     const privateResult=await this.stage('collect-private',roundId,()=>this.transport.collectPrivate!(handle,{signal:this.abort!.signal,deadline:budget.collectionDeadline('private',c.health)}));
+     const privateResult=await this.stage('collect-private',roundId,()=>this.transport.collectPrivate!(handle,{signal:this.abort!.signal,deadline:budget.collectionDeadline('private',c.health)})).catch(error=>{
+      if((error as any)?.browserPaused||(error as any)?.restricted||this.abort?.signal.aborted)throw error;
+      return {events:[] as Event[],warnings:['私信页面读取失败，保留已采集公开消息'],diagnostics:[{channel:'private' as const,source:'chat' as const,status:'failed' as const,code:'private-navigation-failed',eventCount:0}]};
+     });
+     this.services.health?.recordCollectionResult(handle,roundId,privateResult,'private');
      return {events:[...publicResult.events,...privateResult.events],warnings:[...publicResult.warnings,...privateResult.warnings]};
-    })():await this.stage('collect',roundId,()=>this.transport.collect(handle,{signal:this.abort!.signal,deadline:budget.collectionDeadline('public',c.health)}));
+    })():await this.stage('collect',roundId,async()=>{const result=await this.transport.collect(handle,{signal:this.abort!.signal,deadline:budget.collectionDeadline('public',c.health)});this.services.health?.recordCollectionResult(handle,roundId,result);return result;});
     for(const _warning of collected.warnings)this.store.log('collection-warning',JSON.stringify({roundId,accountId:handle,reason:'页面采集存在异常，请检查浏览器结构'}),'warn');
     await this.stage('queue',roundId,async()=>{for(const e of collected.events){
      if(/^忘(了|记)?我吧[。！!\s]*$/.test(e.text.trim())){this.store.forget(e.userId,handle);continue;}
@@ -214,9 +231,9 @@ export class Workflow {
      }catch(error){
       if((error as any)?.browserPaused)await this.safetyPause('浏览器已安全暂停，请检查后显式恢复');
       roundFailed=true;
-      if(this.services.program){const failure=this.services.program.begin('error',{roundId,messageId:e.id,accountId:handle,channel:e.channel});this.services.program.end(failure,this.abort.signal.aborted?'aborted':'failed','消息处理未完成');}
-      if(this.store.getMessage(e.id)?.status==='generating')this.store.update(e.id,this.abort.signal.aborted?'queued':'failed',{error:this.abort.signal.aborted?'生成已取消':'生成或输出校验失败，请检查调用与阶段记录'});
-      this.store.log('generation-error',JSON.stringify({id:e.id,channel:e.channel,roundId,aborted:this.abort.signal.aborted}),'warn');
+      if(this.services.program){const failure=this.services.program.begin('error',{roundId,messageId:e.id,accountId:handle,channel:e.channel});this.services.program.end(failure,this.abort.signal.aborted?'aborted':'failed',error);}
+      if(this.store.getMessage(e.id)?.status==='generating')this.store.update(e.id,this.abort.signal.aborted?'queued':'failed',{error:this.abort.signal.aborted?'生成已取消':failureSummary(error,'生成或输出校验失败，请检查调用与阶段记录')});
+      this.store.log('generation-error',JSON.stringify({id:e.id,channel:e.channel,roundId,aborted:this.abort.signal.aborted,diagnostic:safeBrowserDiagnostic(error,'request')}),'warn');
      }
     }
     if(this.control()==='running'&&!this.abort.signal.aborted){
@@ -226,7 +243,7 @@ export class Workflow {
     this.lastTick=Date.now();this.store.set('lastTick',String(this.lastTick));this.store.prune(c.retentionDays);pruneReplayData(this.store,Date.now()-c.retentionDays*86400000);
    }
    if(!this.abort.signal.aborted&&this.services.scheduler){this.schedulerActive=true;try{await this.services.scheduler.tick();}finally{this.schedulerActive=false;}}
-  }catch(error){if((error as any)?.browserPaused)await this.safetyPause('浏览器已安全暂停，请检查后显式恢复');roundFailed=true;if(this.services.program){const failure=this.services.program.begin('error',{roundId,accountId:this.accountId()});this.services.program.end(failure,this.abort.signal.aborted?'aborted':'failed','轮次处理未完成');}throw error;}
+  }catch(error){if((error as any)?.browserPaused)await this.safetyPause('浏览器已安全暂停，请检查后显式恢复');roundFailed=true;if(this.services.program){const failure=this.services.program.begin('error',{roundId,accountId:this.accountId()});this.services.program.end(failure,this.abort.signal.aborted?'aborted':'failed',error);}throw error;}
   finally{budget.dispose();this.startedAt=0;if(mainStarted)this.services.scheduler!.recordMainEnd(roundId,this.abort.signal.aborted||this.control()!=='running'?'cancelled':roundFailed?'failed':'completed',[...this.roundCalls]);try{await this.sampleHealth();}finally{this.busy=false;this.abort=undefined;}}
  }
  async summarize(userId:string,visibility:Channel){
