@@ -20,7 +20,7 @@ import {collectReadyPublic,observeNativeReads} from './public-collection.js';
 import {collectionSources} from './collection-sources.js';
 import {inspectPrivateConversation,collectPrivateWithDiagnostics,type ChatProtection} from './chat-dom.js';
 import type {CollectionDiagnostic} from './collection-health.js';
-import {readReadyComplianceProfile,readReadyComplianceFilters,readReadyComplianceQuality,type ComplianceWaitOptions} from './account-compliance-dom.js';
+import {readObservedComplianceProfile,readObservedComplianceFilters,readObservedComplianceQuality,type ComplianceWaitOptions} from './account-compliance-dom.js';
 const exec=promisify(execFile);
 export function browserProxy(value?:string):{server:string}|undefined {
  if(!value?.trim())return undefined;
@@ -194,12 +194,13 @@ export async function collectPrivateWithBudget(input:CollectionBudgetInput){
 export async function readCompliance(page:Page,handle:string,navigate:(page:Page,url:string)=>Promise<void>,readiness:ComplianceWaitOptions={}):Promise<ComplianceObservation>{
  const result:ComplianceObservation={accountId:handle.toLowerCase(),profileReliable:false,automatedLabel:null,qualityFilter:null,reasons:[]};
  await navigate(page,'https://x.com/'+handle);
- const profile=await readReadyComplianceProfile(page,handle,readiness);
+ const profileObservation=await readObservedComplianceProfile(page,handle,readiness),profile=profileObservation.value;
  result.profileReliable=profile.reliable;result.name=profile.name;result.bio=profile.bio;result.automatedLabel=profile.automatedLabel;if(!profile.reliable)result.reasons!.push('自己的资料页结构无法可靠解析');else if(profile.automatedLabel===null)result.reasons!.push('自己的资料页自动化标签结构无法可靠确认');
  await navigate(page,'https://x.com/settings/notifications');
- const filterLink=await readReadyComplianceFilters(page,readiness);
+ const filtersObservation=await readObservedComplianceFilters(page,readiness),filterLink=filtersObservation.value;
  if(filterLink)await navigate(page,'https://x.com'+filterLink);
- result.qualityFilter=await readReadyComplianceQuality(page,readiness);
+ const qualityObservation=await readObservedComplianceQuality(page,readiness);result.qualityFilter=qualityObservation.value;
+ result.diagnostics={profile:profileObservation.diagnostics,filters:filtersObservation.diagnostics,quality:qualityObservation.diagnostics};
  if(result.qualityFilter===null)result.reasons!.push('通知质量过滤开关无法可靠确认');return result;
 }
 export async function startBrowserServer(options:{launch?:typeof launchBrowser}={}){

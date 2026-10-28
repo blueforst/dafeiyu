@@ -89,6 +89,16 @@ test('受限判定绑定自身账号，未知页面和其他用户提示不误�
  assert.equal(assessCompliance({accountId:'worker',profileReliable:false,automatedLabel:null,qualityFilter:null}).disclosure,'unknown');
 });
 
+test('账号检查诊断只用于本次DOM排查，不进入公共合规结果、持久记录或日志',()=>{
+ const f=fixture();try{
+  const sample={stable:false,sampleCount:2,readAttempts:3,sampledAt:Date.parse('2026-10-28T13:10:00+08:00')};
+  const diagnostics={profile:{...sample,mainCount:1,nameCount:0,handleCount:0,editCount:0,bioCount:0,locationMatches:true,handleMatches:false,expectedHandleMatches:false,detailsComplete:false,loading:true,failed:false},filters:{...sample,mainCount:1,visibleEntryCount:0,locationMatches:true,loading:true,failed:false},quality:{...sample,mainCount:1,matchedControlCount:0,associationValidCount:0,nativeStateCount:0,ariaStateCount:0,locationMatches:true,loading:true,failed:false}};
+  const result=f.health.saveCompliance({accountId:'worker',profileReliable:false,automatedLabel:null,qualityFilter:null,diagnostics});
+  assert.equal(Object.hasOwn(result,'diagnostics'),false);assert.equal(result.disclosure,'unknown');assert.equal(result.automatedLabel,'unknown');assert.equal(result.qualityFilter,'unknown');
+  for(const serialized of [JSON.stringify(result),f.store.get('health:compliance:worker'),JSON.stringify(f.store.logs())])assert.doesNotMatch(serialized,/sampleCount|sampledAt|expectedHandleMatches|matchedControlCount/);
+ }finally{f.close();}
+});
+
 test('日报09点补一次，全天暂停及未知usage保持可见，不调用模型且不含正文',()=>{
  const f=fixture();try{
   f.at(Date.parse('2026-10-27T12:00:00+08:00'));message(f,'1');f.store.update('1','filtered',{},'worker');

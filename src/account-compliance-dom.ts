@@ -1,4 +1,5 @@
 import type {Page} from 'playwright-core';
+import type {ComplianceDiagnostics,ComplianceSampleDiagnostics} from './unattended-health.js';
 
 export type ComplianceProfileSnapshot={url:string;mainCount:number;nameCount:number;handles:string[];ownEditLinks:number;detailsComplete:boolean;loading:boolean;failed:boolean;name:string;bio:string;bioCount:number;automatedLabels:number;automatedLabelConflict:boolean};
 export type ComplianceProfileReading={reliable:boolean;name:string;bio:string;automatedLabel:boolean|null};
@@ -32,19 +33,44 @@ export function inspectComplianceFiltersSnapshot(snapshot:ComplianceFiltersSnaps
 }
 
 export type ComplianceWaitOptions={timeoutMs?:number;stableMs?:number;intervalMs?:number;now?:()=>number;sleep?:(milliseconds:number)=>Promise<void>};
-/** 连续结构稳定才采信，次数与墙钟均有上限，注入时钟异常也不会无限读取。 */
-export async function waitForStableComplianceSnapshot<T>(options:ComplianceWaitOptions&{read:()=>Promise<T>;ready:(snapshot:T)=>boolean;signature?:(snapshot:T)=>string}):Promise<{snapshot:T|null;stable:boolean;reads:number}>{
+export type ComplianceSnapshotWaitResult<T>={snapshot:T|null;stable:boolean;reads:number;sampleCount:number;sampledAt:number|null};
+/** 连续结构稳定才采信；每次读取共用总墙钟截止时间，读取异常仍由调用者处理。 */
+export async function waitForStableComplianceSnapshot<T>(options:ComplianceWaitOptions&{read:()=>Promise<T>;ready:(snapshot:T)=>boolean;signature?:(snapshot:T)=>string}):Promise<ComplianceSnapshotWaitResult<T>>{
  const bounded=(value:number|undefined,fallback:number,min:number,max:number)=>typeof value==='number'&&Number.isFinite(value)?Math.max(min,Math.min(max,value)):fallback;
  const timeout=bounded(options.timeoutMs,10000,1,15000),interval=bounded(options.intervalMs,100,1,1000),stableMs=bounded(options.stableMs,400,0,2000),now=options.now??Date.now,sleep=options.sleep??(ms=>new Promise(resolve=>setTimeout(resolve,ms)));
- const start=now(),wallStart=Date.now(),limit=Math.ceil(timeout/interval)+3;let last:T|null=null,previous='',unchangedAt=start,reads=0;
- while(reads<limit&&Date.now()-wallStart<=timeout+interval){
+ const start=now(),wallDeadline=Date.now()+timeout,limit=Math.ceil(timeout/interval)+3;let last:T|null=null,previous='',unchangedAt=start,reads=0,sampleCount=0,sampledAt:number|null=null;
+ while(reads<limit&&Date.now()<wallDeadline){
   if(reads&&now()-start>=timeout)break;
-  last=await options.read();reads++;const at=now(),signature=(options.signature??JSON.stringify)(last);
+  const remaining=Math.min(timeout,wallDeadline-Date.now(),timeout-Math.max(0,now()-start));if(remaining<=0)break;
+  let timer:ReturnType<typeof setTimeout>|undefined;reads++;
+  try{
+   const reading=Promise.resolve().then(options.read).then(snapshot=>({kind:'snapshot' as const,snapshot}));
+   const expired=new Promise<{kind:'deadline'}>(resolve=>{timer=setTimeout(()=>resolve({kind:'deadline'}),Math.ceil(remaining));});
+   const outcome=await Promise.race([reading,expired]);
+   // 即使事件循环延迟使读取先于定时器被处理，截止时间后的结果也不能被采信。
+   if(outcome.kind==='deadline'||Date.now()>=wallDeadline||now()-start>=timeout)break;
+   last=outcome.snapshot;sampleCount++;sampledAt=Date.now();
+  }finally{clearTimeout(timer);}
+  const at=now(),signature=(options.signature??JSON.stringify)(last);
   if(signature!==previous){previous=signature;unchangedAt=at;}
-  if(options.ready(last)&&reads>=2&&at-unchangedAt>=stableMs)return {snapshot:last,stable:true,reads};
-  if(at-start>=timeout)break;await sleep(Math.max(1,Math.min(interval,timeout-(at-start))));
+  if(options.ready(last)&&reads>=2&&at-unchangedAt>=stableMs)return {snapshot:last,stable:true,reads,sampleCount,sampledAt};
+  const sleepRemaining=Math.min(interval,timeout-(at-start),wallDeadline-Date.now());if(sleepRemaining<=0)break;await sleep(Math.max(1,sleepRemaining));
  }
- return {snapshot:last,stable:false,reads};
+ return {snapshot:last,stable:false,reads,sampleCount,sampledAt};
+}
+
+function sampleDiagnostics<T>(result:ComplianceSnapshotWaitResult<T>):ComplianceSampleDiagnostics{return {stable:result.stable,sampleCount:result.sampleCount,readAttempts:result.reads,sampledAt:result.sampledAt};}
+/** 只投影固定计数和布尔值，不能把快照里的URL、账号或资料正文带出浏览器。 */
+export function complianceProfileDiagnostics(result:ComplianceSnapshotWaitResult<ComplianceProfileSnapshot>,expectedHandle:string):ComplianceDiagnostics['profile']{
+ const snapshot=result.snapshot,handle=expectedHandle.replace(/^@/,'').toLowerCase();
+ const locationMatches=snapshot?ownPath(snapshot.url,'/'+handle):null,handleMatches=snapshot?snapshot.handles.length===1&&snapshot.handles[0].toLowerCase()===handle:null;
+ return {...sampleDiagnostics(result),mainCount:snapshot?.mainCount??null,nameCount:snapshot?.nameCount??null,handleCount:snapshot?.handles.length??null,editCount:snapshot?.ownEditLinks??null,bioCount:snapshot?.bioCount??null,locationMatches,handleMatches,expectedHandleMatches:snapshot?locationMatches===true&&handleMatches===true:null,detailsComplete:snapshot?.detailsComplete??null,loading:snapshot?.loading??null,failed:snapshot?.failed??null};
+}
+export function complianceFiltersDiagnostics(result:ComplianceSnapshotWaitResult<ComplianceFiltersSnapshot>):ComplianceDiagnostics['filters']{
+ const snapshot=result.snapshot;return {...sampleDiagnostics(result),mainCount:snapshot?.mainCount??null,visibleEntryCount:snapshot?.links.length??null,locationMatches:snapshot?ownPath(snapshot.url,'/settings/notifications'):null,loading:snapshot?.loading??null,failed:snapshot?.failed??null};
+}
+export function complianceQualityDiagnostics(result:ComplianceSnapshotWaitResult<ComplianceQualitySnapshot>):ComplianceDiagnostics['quality']{
+ const snapshot=result.snapshot;return {...sampleDiagnostics(result),mainCount:snapshot?.mainCount??null,matchedControlCount:snapshot?.matches.length??null,associationValidCount:snapshot?snapshot.matches.filter(control=>control.associationValid===true).length:null,nativeStateCount:snapshot?snapshot.matches.filter(control=>control.nativeChecked===true||control.nativeChecked===false).length:null,ariaStateCount:snapshot?snapshot.matches.filter(control=>control.ariaChecked==='true'||control.ariaChecked==='false').length:null,locationMatches:snapshot?ownPath(snapshot.url,'/settings/notifications/filters')||ownPath(snapshot.url,'/settings/notifications'):null,loading:snapshot?.loading??null,failed:snapshot?.failed??null};
 }
 
 /** evaluate函数自包含，只读取可见原生DOM，不调用平台接口或点击任何元素。 */
@@ -132,15 +158,19 @@ export async function readComplianceQualitySnapshot(page:Page):Promise<Complianc
  });
 }
 
-export async function readReadyComplianceProfile(page:Page,handle:string,options:ComplianceWaitOptions={}):Promise<ComplianceProfileReading>{
+export async function readObservedComplianceProfile(page:Page,handle:string,options:ComplianceWaitOptions={}):Promise<{value:ComplianceProfileReading;diagnostics:ComplianceDiagnostics['profile']}>{
  const result=await waitForStableComplianceSnapshot({...options,read:()=>readComplianceProfileSnapshot(page),ready:snapshot=>inspectComplianceProfileSnapshot(snapshot,handle).reliable});
- return result.stable&&result.snapshot?inspectComplianceProfileSnapshot(result.snapshot,handle):unknownProfile();
+ return {value:result.stable&&result.snapshot?inspectComplianceProfileSnapshot(result.snapshot,handle):unknownProfile(),diagnostics:complianceProfileDiagnostics(result,handle)};
 }
-export async function readReadyComplianceFilters(page:Page,options:ComplianceWaitOptions={}):Promise<string|null>{
+export async function readObservedComplianceFilters(page:Page,options:ComplianceWaitOptions={}):Promise<{value:string|null;diagnostics:ComplianceDiagnostics['filters']}>{
  const result=await waitForStableComplianceSnapshot({...options,read:()=>readComplianceFiltersSnapshot(page),ready:snapshot=>inspectComplianceFiltersSnapshot(snapshot)!==null});
- return result.stable&&result.snapshot?inspectComplianceFiltersSnapshot(result.snapshot):null;
+ return {value:result.stable&&result.snapshot?inspectComplianceFiltersSnapshot(result.snapshot):null,diagnostics:complianceFiltersDiagnostics(result)};
 }
-export async function readReadyComplianceQuality(page:Page,options:ComplianceWaitOptions={}):Promise<boolean|null>{
+export async function readObservedComplianceQuality(page:Page,options:ComplianceWaitOptions={}):Promise<{value:boolean|null;diagnostics:ComplianceDiagnostics['quality']}>{
  const result=await waitForStableComplianceSnapshot({...options,read:()=>readComplianceQualitySnapshot(page),ready:snapshot=>inspectComplianceQualitySnapshot(snapshot)!==null});
- return result.stable&&result.snapshot?inspectComplianceQualitySnapshot(result.snapshot):null;
+ return {value:result.stable&&result.snapshot?inspectComplianceQualitySnapshot(result.snapshot):null,diagnostics:complianceQualityDiagnostics(result)};
 }
+// 原有标量读取接口保持兼容，诊断与最终判定始终使用同一次有界采样。
+export async function readReadyComplianceProfile(page:Page,handle:string,options:ComplianceWaitOptions={}):Promise<ComplianceProfileReading>{return (await readObservedComplianceProfile(page,handle,options)).value;}
+export async function readReadyComplianceFilters(page:Page,options:ComplianceWaitOptions={}):Promise<string|null>{return (await readObservedComplianceFilters(page,options)).value;}
+export async function readReadyComplianceQuality(page:Page,options:ComplianceWaitOptions={}):Promise<boolean|null>{return (await readObservedComplianceQuality(page,options)).value;}

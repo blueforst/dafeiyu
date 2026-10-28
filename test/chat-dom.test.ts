@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {inspectNativeChatRows,NATIVE_CHAT_CONTRACT,type NativeChatRow,waitForPrivateUI,type PrivateUIState,inspectPrivateConversation} from '../src/chat-dom.js';
+import {inspectNativeChatRows,NATIVE_CHAT_CONTRACT,type NativeChatRow,waitForPrivateUI,type PrivateUIState,inspectPrivateConversation,readPrivateUIState} from '../src/chat-dom.js';
 const uuid='11111111-1111-4111-8111-111111111111';
 const row=(patch:Partial<NativeChatRow>={}):NativeChatRow=>({nativeId:uuid,testId:'message-'+uuid,articleRole:'article',focusTarget:uuid+':content',bodyUnique:true,contentTestId:'message-text-'+uuid,contentLinked:true,text:'合成正文',sender:'You',senderLinked:true,displayTime:'1:10 PM',dateBoundary:'Today',sendStatus:'sent',media:false,...patch});
 const inspect=(rows:NativeChatRow[],url='https://x.com/i/chat/111-222')=>inspectNativeChatRows(rows,'111-222',url);
@@ -89,4 +89,10 @@ test('等待期间native降级legacy残留时，不读取残留正文也不产�
  let now=0,reads=0,queries=0,parsed=0;const page={url:()=> 'https://x.com/i/chat/111-222',locator:(_selector:string)=>{queries++;return {count:async()=>0,evaluateAll:async()=>{parsed++;return [{id:'legacy-residue',text:'不应读取的残留正文',direction:'in',timestamp:1,timestampReliable:true,media:false,contract:'legacy',blockedCodes:[]}];}};}} as any;
  const value=await inspectPrivateConversation(page,'111-222',{deadline:1000,now:()=>now,sleep:async ms=>{now+=ms;},intervalMs:5,stableMs:10,minimumObserveMs:0,timeoutMs:50,inspect:async()=>++reads===1?nativeLoadingUI():legacyReadyUI()});
  assert.equal(value.contract,NATIVE_CHAT_CONTRACT);assert.equal(value.ui?.state,'unknown');assert.equal(value.ui?.code,'chat-native-messages-unavailable');assert.equal(value.all.length,0);assert.equal(value.events.length,0);assert.equal(queries,0);assert.equal(parsed,0);
+});
+
+test('错误私信路由在DOM读取前拒绝，不被遍历超时或无关正文拖延',async()=>{
+ let domReads=0;const page={url:()=> 'https://x.com/i/chat/999-222',evaluate:async()=>{domReads++;throw Error('错误路由不得读取DOM');}} as any;
+ const value=await readPrivateUIState(page,{kind:'conversation',conversationId:'111-222'});assert.equal(value.state,'wrong-location');assert.equal(value.code,'private-wrong-location');assert.equal(domReads,0);assert.equal(value.traversedElements,0);
+ const waited=await waitForPrivateUI({page,kind:'conversation',conversationId:'111-222',timeoutMs:1,stableMs:500,minimumObserveMs:500});assert.equal(waited.state,'wrong-location');assert.equal(waited.samples,1);assert.equal(domReads,0);
 });

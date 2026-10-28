@@ -185,7 +185,13 @@ export function classifyPlatformRejection(text:string):'automation'|'quota'|'oth
  if(/(?:looks? like|appear).{0,50}automat|请求看起来像是自动|看起来像自动|疑似自动化/i.test(text))return 'automation';
  if(/(?:daily|rate|post|message|usage) limit|too many|已达.{0,10}上限|次数过多/i.test(text))return 'quota';return 'other';
 }
-export type ComplianceObservation={accountId:string;profileReliable:boolean;name?:string;bio?:string;automatedLabel:boolean|null;qualityFilter:boolean|null;reasons?:string[]};
+export type ComplianceSampleDiagnostics={stable:boolean;sampleCount:number;readAttempts:number;sampledAt:number|null};
+export type ComplianceDiagnostics={
+ profile:ComplianceSampleDiagnostics&{mainCount:number|null;nameCount:number|null;handleCount:number|null;editCount:number|null;bioCount:number|null;locationMatches:boolean|null;handleMatches:boolean|null;expectedHandleMatches:boolean|null;detailsComplete:boolean|null;loading:boolean|null;failed:boolean|null};
+ filters:ComplianceSampleDiagnostics&{mainCount:number|null;visibleEntryCount:number|null;locationMatches:boolean|null;loading:boolean|null;failed:boolean|null};
+ quality:ComplianceSampleDiagnostics&{mainCount:number|null;matchedControlCount:number|null;associationValidCount:number|null;nativeStateCount:number|null;ariaStateCount:number|null;locationMatches:boolean|null;loading:boolean|null;failed:boolean|null};
+};
+export type ComplianceObservation={accountId:string;profileReliable:boolean;name?:string;bio?:string;automatedLabel:boolean|null;qualityFilter:boolean|null;reasons?:string[];diagnostics?:ComplianceDiagnostics};
 export type ComplianceResult={accountId:string;checkedAt:number;disclosure:'confirmed'|'missing'|'unknown';missingPhrases:string[];automatedLabel:'confirmed'|'missing'|'unknown';qualityFilter:'on'|'off'|'unknown';reasons:string[]};
 export function assessCompliance(observation:ComplianceObservation,requiredPhrases:string[]=['AI'],now=Date.now()):ComplianceResult {
  const phrases=healthSettings({requiredPhrases}).requiredPhrases,reliable=observation.profileReliable===true&&typeof observation.name==='string'&&typeof observation.bio==='string',text=((observation.name??'')+'\n'+(observation.bio??'')).normalize('NFC').toLocaleLowerCase('en-US');

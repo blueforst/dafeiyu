@@ -50,62 +50,125 @@ function result(contract:ChatContract,conversationId:string,all:ChatObservedMess
 function conversationPath(url:string,conversationId:string){try{const parsed=new URL(url);return parsed.origin==='https://x.com'&&parsed.pathname==='/i/chat/'+conversationId;}catch{return false;}}
 
 export type PrivateUIKind='inbox'|'conversation';
-export type PrivateUIState={state:'ready'|'empty'|'locked'|'loading'|'unsupported'|'unknown'|'wrong-location';code:string;contract:ChatContract;locationValid:boolean;nativeHosts:number;openShadowRoots:number;mainPresent:boolean;loading:boolean;loadingIndicators:number;lockInputs:number;emptyMarkers:number;conversationLinks:number;conversationLists:number;optionalEntries:number;validConversations:number;messageLogs:number;messageRows:number;legacyRows:number};
+export type PrivateTraversalOptions={maxDepth?:number;maxRoots?:number;maxElements?:number};
+export type PrivateUIExpectation={kind:PrivateUIKind;conversationId?:string;traversal?:PrivateTraversalOptions};
+export type PrivateUIState={state:'ready'|'empty'|'locked'|'loading'|'unsupported'|'unknown'|'wrong-location';code:string;contract:ChatContract;locationValid:boolean;nativeHosts:number;openShadowRoots:number;mainPresent:boolean;loading:boolean;loadingIndicators:number;lockInputs:number;emptyMarkers:number;conversationLinks:number;conversationLists:number;optionalEntries:number;validConversations:number;messageLogs:number;messageRows:number;legacyRows:number;shadowChildElements?:number;nestedOpenRoots?:number;iframeCount?:number;readableIframeDocuments?:number;unreadableIframeDocuments?:number;slotCount?:number;assignedElements?:number;traversedElements?:number;traversalRoots?:number;traversalTruncated?:boolean;emptyPanelProof?:number;emptyPanelProofType?:'native-empty-inbox-v1'|null;emptyPanelHeadings?:number;emptyPanelSubtitles?:number;allViewConfirmed?:boolean;searchFieldCount?:number;searchEmpty?:boolean|null};
 export type PrivateUIReadiness=PrivateUIState&{uiState:PrivateUIState['state'];samples:number;elapsedMs:number};
-export type PrivateReadinessOptions={deadline?:number;now?:()=>number;sleep?:(milliseconds:number)=>Promise<void>;inspect?:(page:Page,expected:{kind:PrivateUIKind;conversationId?:string})=>Promise<PrivateUIState>;stableMs?:number;minimumObserveMs?:number;timeoutMs?:number;intervalMs?:number};
+export type PrivateReadinessOptions={deadline?:number;now?:()=>number;sleep?:(milliseconds:number)=>Promise<void>;inspect?:(page:Page,expected:PrivateUIExpectation)=>Promise<PrivateUIState>;traversal?:PrivateTraversalOptions;stableMs?:number;minimumObserveMs?:number;timeoutMs?:number;intervalMs?:number};
 
 /** 仅返回结构计数。页面函数自包含，不读取正文、口令值或账号资料，也不操作任何控件。 */
-export async function readPrivateUIState(page:Page,expected:{kind:PrivateUIKind;conversationId?:string}):Promise<PrivateUIState>{
- const snapshot=await page.evaluate(({kind,conversationId})=>{
+export async function readPrivateUIState(page:Page,expected:PrivateUIExpectation):Promise<PrivateUIState>{
+ // 先在调用侧检查目标地址；不为错误页面启动DOM遍历或读取其标签。
+ let here:URL|null=null;try{here=new URL(page.url());}catch{}
+ const matching=!!here&&here.origin==='https://x.com'&&(expected.kind==='conversation'?!!expected.conversationId&&['/i/chat/'+expected.conversationId,'/messages/'+expected.conversationId].includes(here.pathname):/^\/(?:i\/chat|messages)(?:\/(?:requests|other|\d+(?:-\d+)?))?\/?$/.test(here.pathname));
+ if(!matching)return {state:'wrong-location',code:'private-wrong-location',contract:here?.origin==='https://x.com'&&/^\/i\/chat(?:\/|$)/.test(here.pathname)?NATIVE_CHAT_CONTRACT:'unknown',locationValid:false,nativeHosts:0,openShadowRoots:0,mainPresent:false,loading:false,loadingIndicators:0,lockInputs:0,emptyMarkers:0,conversationLinks:0,conversationLists:0,optionalEntries:0,validConversations:0,messageLogs:0,messageRows:0,legacyRows:0,shadowChildElements:0,nestedOpenRoots:0,iframeCount:0,readableIframeDocuments:0,unreadableIframeDocuments:0,slotCount:0,assignedElements:0,traversedElements:0,traversalRoots:0,traversalTruncated:false};
+ const snapshot=await page.evaluate(({kind,conversationId,traversal})=>{
   const path=location.pathname,origin=location.origin;
   const locationValid=origin==='https://x.com'&&(kind==='conversation'?!!conversationId&&['/i/chat/'+conversationId,'/messages/'+conversationId].includes(path):/^\/(?:i\/chat|messages)(?:\/(?:requests|other|\d+(?:-\d+)?))?\/?$/.test(path));
+  if(!locationValid)return {contract:origin==='https://x.com'&&/^\/i\/chat(?:\/|$)/.test(path)?'xchat-observation-v1':'unknown',locationValid:false,nativeHosts:0,openShadowRoots:0,mainPresent:false,loading:false,loadingIndicators:0,lockInputs:0,emptyMarkers:0,conversationLinks:0,conversationLists:0,optionalEntries:0,validConversations:0,messageLogs:0,messageRows:0,legacyRows:0,shadowChildElements:0,nestedOpenRoots:0,iframeCount:0,readableIframeDocuments:0,unreadableIframeDocuments:0,slotCount:0,assignedElements:0,traversedElements:0,traversalRoots:0,traversalTruncated:false};
   const hosts=Array.from(document.querySelectorAll('[data-testid="xchatEmbedRoute"]')),host=hosts.length===1?hosts[0]:null,shadow=host?.shadowRoot;
   const scope:Document|ShadowRoot=shadow??document;
-  const visible=(node:Element)=>{const style=getComputedStyle(node);return style.display!=='none'&&style.visibility!=='hidden'&&!!node.getClientRects().length;};
-  const outsideMessage=(node:Element)=>!node.closest('[data-dm-message-row],[data-testid="messageEntry"],article,[role="article"],[role="option"]');
-  const elements=(selector:string)=>Array.from(scope.querySelectorAll(selector)).slice(0,200);
-  const ui=(selector:string)=>elements(selector).filter(node=>outsideMessage(node)&&visible(node));
+  const limit=(value:number|undefined,fallback:number,max:number)=>typeof value==='number'&&Number.isFinite(value)?Math.max(1,Math.min(max,Math.floor(value))):fallback;
+  const maxDepth=limit(traversal?.maxDepth,12,24),maxRoots=limit(traversal?.maxRoots,24,64),maxElements=limit(traversal?.maxElements,3000,10000);
+  const messageSelector='[data-dm-message-row],[data-testid="messageEntry"],article,[role="article"]';
+  const parent=(node:Element):Element|null=>{if(node.assignedSlot)return node.assignedSlot;if(node.parentElement)return node.parentElement;const root=node.getRootNode();return root instanceof ShadowRoot?root.host:null;};
+  const closest=(node:Element,selector:string,stopOwner=true):Element|null=>{let current:Element|null=node;for(let depth=0;current&&depth<64;depth++,current=parent(current)){if(current.matches(selector))return current;if(shadow&&current===host&&stopOwner)break;}return null;};
+  const owned=(node:Element)=>{if(!shadow)return true;let current:Element|null=node;for(let depth=0;current&&depth<64;depth++,current=parent(current))if(current===host)return true;return false;};
+  const outsideMessage=(node:Element)=>!closest(node,messageSelector,false)&&!closest(node,'[role="option"]',false);
+  const visible=(node:Element)=>{if(closest(node,'[hidden],[aria-hidden="true"]',false))return false;const style=getComputedStyle(node);return style.display!=='none'&&style.visibility!=='hidden'&&!!node.getClientRects().length;};
+  const walked:Element[]=[],seen=new Set<Element>(),roots=new Set<ShadowRoot>(),queue:Array<{node:Element;depth:number}>=[];
+  let traversalTruncated=false,nestedOpenRoots=0,iframeCount=0,readableIframeDocuments=0,unreadableIframeDocuments=0,slotCount=0,assignedElements=0;
+  const enqueue=(node:Element,depth:number)=>{if(seen.has(node))return;if(depth>maxDepth||seen.size>=maxElements){traversalTruncated=true;return;}seen.add(node);queue.push({node,depth});};
+  const children=(nodes:HTMLCollection|Element[],depth:number)=>{if(nodes.length&&depth>maxDepth){traversalTruncated=true;return;}for(let index=0;index<nodes.length;index++){if(seen.size>=maxElements){traversalTruncated=true;break;}enqueue(nodes[index],depth);}};
+  if(shadow){roots.add(shadow);children(shadow.children,1);}
+  for(let index=0;index<queue.length;index++){
+   const {node,depth}=queue[index];if(!owned(node))continue;walked.push(node);
+   // 只记录消息行本身；不遍历其正文、内层ShadowRoot或slot内容。
+   if(closest(node,messageSelector,false))continue;
+   if(node.tagName==='IFRAME'){
+    iframeCount++;try{if((node as HTMLIFrameElement).contentDocument)readableIframeDocuments++;else unreadableIframeDocuments++;}catch{unreadableIframeDocuments++;}
+    continue;
+   }
+   if(node.tagName==='SLOT'){
+    slotCount++;const assigned=(node as HTMLSlotElement).assignedElements();assignedElements+=assigned.length;
+    children(assigned.length?assigned:node.children,depth+1);continue;
+   }
+   if(node.shadowRoot){
+    if(roots.size>=maxRoots){traversalTruncated=true;continue;}
+    roots.add(node.shadowRoot);nestedOpenRoots++;children(node.shadowRoot.children,depth+1);continue;
+   }
+   children(node.children,depth+1);
+  }
+  const elements=(selector:string)=>shadow?walked.filter(node=>node.matches(selector)):Array.from(scope.querySelectorAll(selector)).slice(0,200);
+  const ui=(selector:string)=>elements(selector).filter(node=>owned(node)&&outsideMessage(node)&&visible(node));
+  // 只取UI标签的有界文本；消息祖先中的文本节点从不读取。
+  const text=(node:Element)=>{if(!owned(node)||!outsideMessage(node))return '';const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let value='',reads=0;while(walker.nextNode()){if(++reads>1000)return '';const current=walker.currentNode,owner=current.parentElement;if(!owner||!owned(owner)||!outsideMessage(owner))continue;value+=(current.textContent??'');if(value.length>1000)return '';}return value.trim().replace(/\s+/g,' ');};
   const name=(node:Element)=>{
-   const ids=(node.getAttribute('aria-labelledby')??'').split(/\s+/).filter(Boolean).slice(0,10),linked=ids.map(id=>scope.querySelector('#'+CSS.escape(id))?.textContent??'').join(' '),id=node.getAttribute('id');
-   const label=id?scope.querySelector('label[for="'+CSS.escape(id)+'"]')?.textContent??'':'';
-   return [node.getAttribute('aria-label')??'',linked,label,node.closest('label')?.textContent??'',node.getAttribute('placeholder')??''].join(' ');
+   const root=node.getRootNode(),candidates=shadow?walked:Array.from(scope.querySelectorAll('[id],label[for]')).slice(0,200);
+   const eligible=(candidate:Element)=>candidate.getRootNode()===root&&owned(candidate)&&outsideMessage(candidate);
+   const ids=(node.getAttribute('aria-labelledby')??'').split(/\s+/).filter(Boolean).slice(0,10),linked:string[]=[];
+   for(const id of ids){const targets=candidates.filter(candidate=>eligible(candidate)&&candidate.id===id);if(targets.length!==1)return '';linked.push(text(targets[0]));}
+   const id=node.getAttribute('id'),labels=id?candidates.filter(candidate=>eligible(candidate)&&candidate.matches('label[for]')&&candidate.getAttribute('for')===id):[];
+   if(labels.length>1)return '';const wrapping=closest(node,'label');
+   return [node.getAttribute('aria-label')??'',...linked,...labels.map(text),wrapping&&wrapping.getRootNode()===root?text(wrapping):'',node.getAttribute('placeholder')??''].join(' ');
   };
-  // 必须存在可见的专用口令控件；普通消息或提示文字中的“PIN/密码”不是锁定证据。
   const lockInputs=shadow?ui('input').filter(node=>{
    const input=node as HTMLInputElement;if(input.type==='password')return true;
-   // 数值及一次性口令以页面声明的原生属性和关联名称共同确认。
    const autocomplete=(node.getAttribute('autocomplete')??'').trim().toLowerCase(),inputMode=(node.getAttribute('inputmode')??'').trim().toLowerCase();
    return (autocomplete==='one-time-code'||inputMode==='numeric')&&/\b(?:passcode|pin|password)\b|口令|密码|密碼|解锁码/i.test(name(node));
   }).length:0;
   const loadingIndicators=ui('[role="progressbar"],[data-testid="spinner"],[data-testid="loading"],[aria-busy="true"]').length,loading=loadingIndicators>0;
   const listSelector='[role="listbox"][aria-label="Conversations"]',logSelector='[role="log"][aria-label="Messages"][data-testid="dm-message-scroller"]';
-  const conversationLists=elements(listSelector).length,messageLogs=elements(logSelector).length;
+  const conversationLists=ui(listSelector).length,messageLogs=ui(logSelector).length;
   const inboxEmpty=/^(?:no conversations(?: yet)?|no messages(?: yet)?|no message requests|you (?:do not|don.t) have any (?:messages|message requests)(?: yet)?|暂无(?:任何)?(?:会话|消息|私信|消息请求)|没有(?:任何)?(?:会话|消息|私信|消息请求))[.!。！]?$/i;
   const conversationEmpty=/^(?:no messages(?: yet)?|you (?:do not|don.t) have any messages(?: yet)?|暂无(?:任何)?(?:消息|私信)|没有(?:任何)?(?:消息|私信))[.!。！]?$/i;
-  const emptyMarkers=ui('[data-testid="emptyState"]').filter(node=>{
-   const text=((node as HTMLElement).innerText||node.textContent||'').trim().replace(/\s+/g,' ');
-   return kind==='conversation'?messageLogs===1&&!!node.closest(logSelector)&&conversationEmpty.test(text):conversationLists===1&&!!node.closest('main')&&!node.closest(logSelector)&&inboxEmpty.test(text);
-  }).length;
+  const emptyMarkers=ui('[data-testid="emptyState"]').filter(node=>kind==='conversation'?messageLogs===1&&!!closest(node,logSelector)&&conversationEmpty.test(text(node)):conversationLists===1&&!!closest(node,'main')&&!closest(node,logSelector)&&inboxEmpty.test(text(node))).length;
   const pathOf=(node:Element)=>{try{const url=new URL(node.getAttribute('href')??'',location.origin);return url.origin==='https://x.com'&&!url.username&&!url.password?url.pathname:'';}catch{return '';}};
-  const links=elements('a[href]'),nativeLinks=links.filter(node=>/^\/(?:i\/chat)\/\d+-\d+$/.test(pathOf(node)));
+  const links=elements('a[href]').filter(node=>owned(node)&&!closest(node,messageSelector,false)&&visible(node)),nativeLinks=links.filter(node=>/^\/i\/chat\/\d+-\d+$/.test(pathOf(node)));
+  const itemParent=(node:Element)=>{let current=parent(node);for(let depth=0;current?.tagName==='SLOT'&&depth<24;depth++)current=parent(current);return current;};
   const validConversations=nativeLinks.filter(node=>{
-   const direct=pathOf(node).match(/^\/i\/chat\/(\d+)-(\d+)$/),item=node.parentElement?.getAttribute('data-testid')?.match(/^dm-conversation-item-(\d+):(\d+)$/),option=node.id.match(/^dm-conversation-option-(\d+):(\d+)$/);
-   return !!direct&&!!item&&!!option&&node.getAttribute('role')==='option'&&node.closest('[role="listbox"]')?.getAttribute('aria-label')==='Conversations'&&direct[1]===item[1]&&direct[2]===item[2]&&direct[1]===option[1]&&direct[2]===option[2];
+   const direct=pathOf(node).match(/^\/i\/chat\/(\d+)-(\d+)$/),item=itemParent(node)?.getAttribute('data-testid')?.match(/^dm-conversation-item-(\d+):(\d+)$/),option=node.id.match(/^dm-conversation-option-(\d+):(\d+)$/);
+   return !!direct&&!!item&&!!option&&node.getAttribute('role')==='option'&&closest(node,listSelector)?.getAttribute('aria-label')==='Conversations'&&direct[1]===item[1]&&direct[2]===item[2]&&direct[1]===option[1]&&direct[2]===option[2];
   }).length;
   const optionalEntries=links.filter(node=>['/messages/requests','/i/chat/requests','/i/chat/other'].includes(pathOf(node))).length;
   const legacyLinks=links.filter(node=>/^\/messages\/\d+(?:-\d+)?$/.test(pathOf(node))).length;
-  const legacyRows=elements('[data-testid="messageEntry"]').length,messageRows=elements('[data-dm-message-row]').length;
-  const nativeRoute=origin==='https://x.com'&&/^\/i\/chat(?:\/|$)/.test(path);
-  const contract=hosts.length||nativeRoute?'xchat-observation-v1':legacyRows||legacyLinks?'legacy':'unknown';
-  return {contract,locationValid,nativeHosts:hosts.length,openShadowRoots:hosts.filter(node=>!!node.shadowRoot).length,mainPresent:!!scope.querySelector('main'),loading,loadingIndicators,lockInputs,emptyMarkers,conversationLinks:contract==='xchat-observation-v1'?nativeLinks.length:legacyLinks,conversationLists,optionalEntries,validConversations:contract==='xchat-observation-v1'?validConversations:legacyLinks,messageLogs,messageRows,legacyRows};
+  const legacyRows=elements('[data-testid="messageEntry"]').length,messageRows=elements('[data-dm-message-row]').filter(node=>!!closest(node,logSelector)).length;
+  // 已目视取证的原生All空收件箱：标题/副文只是组合证据，不能单独把右侧CTA当空。
+  const captionNodes=ui('h1,h2,h3,h4,h5,h6,[role="heading"],span,div,p').filter(node=>!closest(node,'button,a,input,select,[role="button"],[role="tab"],[role="combobox"]')&&(node.children.length===0||node.matches('h1,h2,h3,h4,h5,h6,[role="heading"]')));
+  const caption=(literal:string)=>{const matches=captionNodes.filter(node=>text(node)===literal);return matches.filter(node=>!matches.some(child=>child!==node&&node.contains(child)));};
+  const headingNodes=ui('h1,h2,h3,h4,h5,h6,[role="heading"]').filter(node=>!closest(node,'button,a,[role="button"],[role="tab"],[role="combobox"]')&&text(node)==='Empty inbox');
+  const emptyTitles=headingNodes.filter(node=>!headingNodes.some(child=>child!==node&&node.contains(child))),emptySubtitles=caption('Message someone');
+  const contains=(ancestor:Element,node:Element)=>{let current:Element|null=node;for(let depth=0;current&&depth<64;depth++,current=parent(current))if(current===ancestor)return true;return false;};
+  let adjacentPanel:Element|null=null;
+  if(emptyTitles.length===1&&emptySubtitles.length===1){let candidate=parent(emptyTitles[0]);for(let depth=0;candidate&&candidate!==host&&depth<3;depth++,candidate=parent(candidate)){if(contains(candidate,emptySubtitles[0])&&elements('*').filter(node=>contains(candidate!,node)).length<=40){adjacentPanel=candidate;break;}}}
+  const filterControls=ui('button,[role="button"],[role="tab"],[role="combobox"],select,[role="radio"]');
+  const filterName=(node:Element)=>node instanceof HTMLSelectElement&&node.selectedOptions.length===1?text(node.selectedOptions[0]):text(node);
+  const activeFilter=(node:Element)=>['aria-selected','aria-pressed','aria-checked'].some(attribute=>node.getAttribute(attribute)==='true')||node instanceof HTMLSelectElement;
+  const allControls=filterControls.filter(node=>{
+   if(filterName(node)!=='All'||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement||node instanceof HTMLSelectElement)&&node.disabled)return false;
+   if(['aria-selected','aria-pressed','aria-checked'].some(attribute=>node.getAttribute(attribute)==='false'))return false;
+   const role=node.getAttribute('role'),popup=node.getAttribute('aria-haspopup');return activeFilter(node)||role==='combobox'||node.matches('button,[role="button"]')&&['true','menu','listbox','dialog'].includes(popup??'')&&!closest(node,'[role="menu"],[role="listbox"]');
+  });
+  const allViewConfirmed=allControls.length===1&&!filterControls.some(node=>activeFilter(node)&&filterName(node)!=='All');
+  const searches=ui('input').filter(node=>{
+   const input=node as HTMLInputElement;if(input.type==='password'||input.disabled)return false;
+   return input.type==='search'||node.getAttribute('role')==='searchbox'||/^(?:Search)(?:\s+Search)*$/i.test(name(node).trim())||/^Search$/i.test((node.getAttribute('placeholder')??'').trim());
+  });
+  // 只保留“是否为空”；搜索字符串不进入快照或诊断。
+  const searchEmpty=searches.length===1?(searches[0] as HTMLInputElement).value.trim().length===0:null;
+  const emptyPanelProof=hosts.length===1&&!!shadow&&kind==='inbox'&&origin==='https://x.com'&&/^\/i\/chat\/?$/.test(path)&&!location.search&&!location.hash&&!!adjacentPanel&&allViewConfirmed&&searchEmpty===true&&nativeLinks.length===0&&legacyLinks===0&&messageRows===0&&legacyRows===0&&loadingIndicators===0&&lockInputs===0&&!traversalTruncated?1:0;
+  const nativeRoute=origin==='https://x.com'&&/^\/i\/chat(?:\/|$)/.test(path),contract=hosts.length||nativeRoute?'xchat-observation-v1':legacyRows||legacyLinks?'legacy':'unknown';
+  return {contract,locationValid,nativeHosts:hosts.length,openShadowRoots:hosts.filter(node=>!!node.shadowRoot).length,mainPresent:ui('main').length>0,loading,loadingIndicators,lockInputs,emptyMarkers,conversationLinks:contract==='xchat-observation-v1'?nativeLinks.length:legacyLinks,conversationLists,optionalEntries,validConversations:contract==='xchat-observation-v1'?validConversations:legacyLinks,messageLogs,messageRows,legacyRows,shadowChildElements:shadow?.children.length??0,nestedOpenRoots,iframeCount,readableIframeDocuments,unreadableIframeDocuments,slotCount,assignedElements,traversedElements:walked.length,traversalRoots:roots.size,traversalTruncated,emptyPanelProof,emptyPanelProofType:emptyPanelProof?'native-empty-inbox-v1':null,emptyPanelHeadings:emptyTitles.length,emptyPanelSubtitles:emptySubtitles.length,allViewConfirmed,searchFieldCount:searches.length,searchEmpty};
  },expected);
  const value=snapshot as Omit<PrivateUIState,'state'|'code'>;
  let state:PrivateUIState['state']='unknown',code=expected.kind==='inbox'?'private-inbox-unverified':'chat-native-messages-unavailable';
  if(!value.locationValid){state='wrong-location';code='private-wrong-location';}
  else if(value.nativeHosts>1){state='unsupported';code='private-structure-unverified';}
  else if(value.contract===NATIVE_CHAT_CONTRACT&&(value.nativeHosts!==1||value.openShadowRoots!==1)){state='loading';code='private-page-loading';}
+ else if(value.traversalTruncated){state='unsupported';code='private-structure-unverified';}
  else if(value.lockInputs){state='locked';code='chat-native-locked';}
  else if(value.loading){state='loading';code='private-page-loading';}
+ else if(value.emptyPanelProof===1){state='empty';code='private-inbox-empty';}
  else if(value.emptyMarkers===1&&(expected.kind==='conversation'||value.conversationLinks===0&&value.validConversations===0)&&value.messageRows===0&&value.legacyRows===0){state='empty';code=expected.kind==='inbox'?'private-inbox-empty':'chat-native-conversation-empty';}
  else if(expected.kind==='inbox'&&value.contract===NATIVE_CHAT_CONTRACT&&value.conversationLinks>0&&value.validConversations===0){state='unsupported';code='chat-inbox-entries-unverified';}
  else if(expected.kind==='inbox'&&value.validConversations>0){state='ready';code='private-inbox-ready';}
@@ -124,7 +187,7 @@ export async function waitForPrivateUI(input:PrivateReadinessOptions&{page:Page;
  // 次数、注入时钟和墙钟三重上限，损坏的测试时钟或页面不会无限等待。
  while(samples<Math.ceil(timeout/interval)+3&&Date.now()-wallStart<=timeout+interval){
   const remaining=Math.max(1,Math.min(deadline-now(),timeout-(Date.now()-wallStart)));let timer:ReturnType<typeof setTimeout>|undefined;
-  let value:PrivateUIState|null;try{samples++;value=await Promise.race([inspect(input.page,{kind:input.kind,conversationId:input.conversationId}),new Promise<null>(resolve=>{timer=setTimeout(()=>resolve(null),remaining);})]);}finally{clearTimeout(timer);}
+  let value:PrivateUIState|null;try{samples++;value=await Promise.race([inspect(input.page,{kind:input.kind,conversationId:input.conversationId,traversal:input.traversal}),new Promise<null>(resolve=>{timer=setTimeout(()=>resolve(null),remaining);})]);}finally{clearTimeout(timer);}
   if(!value)break;
   everNative=everNative||value.nativeHosts>0||value.contract===NATIVE_CHAT_CONTRACT;
   // 本次等待一旦识别新Chat，就绪前的SPA卸载也不能退回document里的旧私信残留。
@@ -133,7 +196,7 @@ export async function waitForPrivateUI(input:PrivateReadinessOptions&{page:Page;
   const at=now(),wallAt=Date.now(),signature=JSON.stringify(value);if(signature!==lastSignature){lastSignature=signature;stableAt=at;wallStableAt=wallAt;}
   const settled=(at-stableAt>=stable||wallAt-wallStableAt>=stable)&&(at-start>=minimum||wallAt-wallStart>=minimum);lastSettled=settled;
   if(input.deadline!==undefined&&at>=input.deadline&&['ready','empty'].includes(value.state)){last={...value,state:'unknown',code:'private-collection-deadline'};break;}
-  if(settled&&['ready','empty','locked','wrong-location'].includes(value.state))return finish();
+  if(value.state==='wrong-location'||settled&&['ready','empty','locked'].includes(value.state))return finish();
   if(at>=deadline||wallAt-wallStart>=timeout)break;
   await sleep(Math.max(1,Math.min(interval,deadline-at,timeout-(wallAt-wallStart))));
  }
@@ -235,7 +298,17 @@ export async function discoverPrivateInboxes(page:Page,options:PrivateReadinessO
  const ui=await waitForPrivateUI({...options,page,kind:'inbox'}),contract=ui.contract,native=contract===NATIVE_CHAT_CONTRACT;
  let source:ChatDiagnostic['source']='inbox';try{if(new URL(page.url()).pathname.endsWith('/requests'))source='requests';}catch{}
  if(ui.state!=='ready'){const diagnostics=[uiDiagnostic(ui,source)];return {ui,contract,conversations:[],entries:[],diagnostics,warnings:diagnostics.filter(row=>!['ok','empty'].includes(row.status)).map(row=>chatDiagnosticMessage(row.code)),chatProtection:uiProtection(ui)};}
- const links=await page.locator('a[href^="/messages/"],a[href^="/i/chat/"],a[href^="https://x.com/messages/"],a[href^="https://x.com/i/chat/"]').evaluateAll(nodes=>nodes.slice(0,200).map(node=>({href:node.getAttribute('href')??'',optionId:node.getAttribute('id')??'',role:node.getAttribute('role')??'',itemTestId:node.parentElement?.tagName==='DIV'?node.parentElement.getAttribute('data-testid')??'':'',inConversations:node.closest('[role="listbox"]')?.getAttribute('aria-label')==='Conversations'})));
+ const linkScope=native?page.locator('[data-testid="xchatEmbedRoute"]'):page;
+ const links=await linkScope.locator('a[href^="/messages/"],a[href^="/i/chat/"],a[href^="https://x.com/messages/"],a[href^="https://x.com/i/chat/"]').evaluateAll((nodes,{native})=>{
+  const owner=native?document.querySelector('[data-testid="xchatEmbedRoute"]'):null;
+  const parent=(node:Element):Element|null=>{if(node.assignedSlot)return node.assignedSlot;if(node.parentElement)return node.parentElement;const root=node.getRootNode();return root instanceof ShadowRoot?root.host:null;};
+  const closest=(node:Element,selector:string,stopOwner=true)=>{let current:Element|null=node;for(let depth=0;current&&depth<64;depth++,current=parent(current)){if(current.matches(selector))return current;if(owner&&current===owner&&stopOwner)break;}return null;};
+  const owned=(node:Element)=>{if(!owner)return !native;let current:Element|null=node;for(let depth=0;current&&depth<64;depth++,current=parent(current))if(current===owner)return true;return false;};
+  return nodes.slice(0,200).filter(node=>owned(node)&&!closest(node,'[data-dm-message-row],[data-testid="messageEntry"],article,[role="article"]',false)&&!closest(node,'[hidden],[aria-hidden="true"]',false)&&!!node.getClientRects().length).map(node=>{
+   let item=parent(node);for(let depth=0;item?.tagName==='SLOT'&&depth<24;depth++)item=parent(item);
+   return {href:node.getAttribute('href')??'',optionId:node.getAttribute('id')??'',role:node.getAttribute('role')??'',itemTestId:item?.tagName==='DIV'?item.getAttribute('data-testid')??'':'',inConversations:closest(node,'[role="listbox"]')?.getAttribute('aria-label')==='Conversations'};
+  });
+ },{native});
  const conversations:PrivateConversationLink[]=[],entries:PrivateInboxDiscovery['entries']=[],diagnostics:ChatDiagnostic[]=[uiDiagnostic(ui,source)];let unknown=false;
  let currentKind:PrivateInboxKind='inbox';try{const path=new URL(page.url()).pathname;currentKind=path.endsWith('/requests')?'requests':path.endsWith('/other')?'other':'inbox';}catch{}
  for(const link of links){let url:URL;try{url=new URL(link.href,'https://x.com');}catch{continue;}if(url.origin!=='https://x.com')continue;const path=url.pathname;
