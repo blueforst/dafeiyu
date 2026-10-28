@@ -6,6 +6,7 @@ import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 
 const BASE=(process.env.PANEL_URL||'https://43.133.80.237').replace(/\/$/,''),OUT=process.env.ARTIFACT_DIR||'/artifacts';
+const READ_ONLY_ACCEPTANCE=process.env.READ_ONLY_ACCEPTANCE==='1';
 const CREDENTIAL_FILE=process.env.ADMIN_ACCESS_FILE||'/run/test/admin-access.txt';
 const baseURL=new URL(BASE);
 if(baseURL.protocol!=='https:'||baseURL.username||baseURL.password||baseURL.search||baseURL.hash)throw new Error('生产面板地址必须为不含凭据、查询及片段的 HTTPS 地址');
@@ -18,7 +19,7 @@ function redact(value){return String(value).split(password).join('[已隐藏]').
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ROUTES=[['feed','动态','.feed-page'],['persona','人设','#persona-section-0'],['memory','记忆','#memory-search-button'],['settings','设置','#program-mode'],['billing','计费','.usage-summary']];
 const LEGACY=[['overview','feed'],['model','settings/model'],['program','settings/logs'],['tasks','settings/tasks'],['browser','settings/browser']];
-const API_PATHS=['/api/status','/api/model','/api/persona','/api/persona/daily','/api/persona/prompt-hints','/api/memory/policy','/api/memory/users','/api/program','/api/program/logs','/api/messages','/api/tasks','/api/tasks/runs','/api/feed','/api/account/posting-limits','/api/health','/api/health/settings','/api/health/alerts','/api/health/reports','/api/triage/settings','/api/billing/activity?weeks=52','/api/billing/summary','/api/billing/calls'];
+const API_PATHS=['/api/status','/api/model','/api/persona','/api/persona/presets','/api/persona/daily','/api/persona/prompt-hints','/api/memory/policy','/api/memory/users','/api/program','/api/program/logs','/api/messages','/api/tasks','/api/tasks/runs','/api/feed','/api/account/posting-limits','/api/health','/api/health/settings','/api/health/alerts','/api/health/reports','/api/triage/settings','/api/billing/activity?weeks=52','/api/billing/summary','/api/billing/calls'];
 const SCOPED_PATHS=['/api/triage/summary','/api/triage/ignores','/api/persona/replay/runs','/api/persona/replay/samples?channel=public&limit=1','/api/persona/quality?channel=public'];
 const results={evidence:'真实 HTTPS 面板、鉴权接口、五页与旧地址以及可选受控桌面连接；没有模型调用或 X 内容操作',controlOwnershipPolicy:'仅在独占验收窗口且初始 paused、本脚本接管收到200时推定所有权；未确认响应不盲目释放。初始 manual 仅只读观察。',checks:[],errors:[],apiReads:[],scopedUnavailable:[],screenshots:[],writes:[],blockedWrites:[],startedAt:new Date().toISOString()};
 let browser,context,page,initial=null,ownsTakeover=false,permittedControl=null,exitCode=0;
@@ -112,6 +113,7 @@ try{
    for(const path of SCOPED_PATHS){const d=await readJson(path,{scoped:true});if(d)results.apiReads.push({path,status:200,...(Array.isArray(d.items)?{items:d.items.length,empty:d.items.length===0}:{})});}
    const feed=cached.get('/api/feed');assert.ok(Array.isArray(feed.items)&&Number.isSafeInteger(feed.pending),'动态接口缺少条目或待处理数');
    const health=cached.get('/api/health');assert.ok(Array.isArray(health.metrics)&&Array.isArray(health.activeAlerts),'健康接口结构无效');
+   const presets=cached.get('/api/persona/presets');assert.equal(presets.version,2);assert.equal(presets.items.length,6,'预设目录缺少六个人设');
    const activity=cached.get('/api/billing/activity?weeks=52');assert.ok(Array.isArray(activity.daily)&&activity.totals&&activity.last7,'活动汇总结构无效');
    assert.ok(Array.isArray(cached.get('/api/billing/summary').dailyModels),'计费缺少按日期模型聚合');
    const limits=cached.get('/api/account/posting-limits');assert.ok(limits.effective?.post&&limits.effective?.reply,'字数接口缺少两种操作策略');
@@ -154,7 +156,7 @@ try{
   const browserPage=await step('旧浏览器地址展开设置接管区且不自动连接',async()=>{
    await page.goto(BASE+'/?desktop-check=1#/browser');await page.waitForFunction(()=>location.hash==='#/settings/browser');await sectionReady('browser');assert.equal(await page.locator('#desktop-frame').count(),0);assert.equal(await page.locator('.tabs a[data-route="browser"]').count(),0);
   });
-  if(browserPage&&initial.control==='paused'){
+  if(browserPage&&initial.control==='paused'&&!READ_ONLY_ACCEPTANCE){
    await step('初始暂停时受控接管与noVNC有效画布',async()=>{
     await statusIs('paused');permittedControl='takeover';
     try{const responsePromise=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/control/takeover',{timeout:120000});await page.locator('#connect').click();const response=await responsePromise;assert.equal(response.status(),200,'接管请求未确认成功');ownsTakeover=true;await page.locator('#takeover-link').waitFor({state:'visible',timeout:120000});await assertTopControl('manual');assert.equal(await page.locator('#settings-browser .section-summary').innerText(),'人工接管中');}finally{permittedControl=null;}
@@ -169,7 +171,8 @@ try{
     await page.locator('#takeover-link').waitFor({state:'hidden',timeout:30000});await assertTopControl('paused');assert.equal(await page.locator('#settings-browser .section-summary').innerText(),'按需连接');assert.equal(await page.locator('#desktop-frame').count(),0);assert.equal((await context.request.get(BASE+'/desktop/vnc.html')).status(),423);
    });
    else results.desktopSkipped='未确认取得本次接管所有权，未盲目释放。';
-  }else if(initial.control==='manual')results.desktopSkipped='初始已由他人接管，只读取面板，不连接桌面、不释放他人会话。';
+  }else if(READ_ONLY_ACCEPTANCE)results.desktopSkipped='本次为纯只读发布验收，不接管、不连接桌面、不发起控制写请求。';
+  else if(initial.control==='manual')results.desktopSkipped='初始已由他人接管，只读取面板，不连接桌面、不释放他人会话。';
   await step('配置、模型库、LLM调用与消息计数保持不变',async()=>{
    const final=await snapshot();results.final=final;assert.equal(final.control,initial.control);assert.equal(final.modelHash,initial.modelHash);assert.equal(final.libraryHash,initial.libraryHash);assert.equal(final.panelSettingsHash,initial.panelSettingsHash);assert.equal(final.effectiveConfigHash,initial.effectiveConfigHash);assert.deepEqual(final.model,initial.model);assert.deepEqual(final.usage,initial.usage);assert.equal(final.llmCalls,initial.llmCalls,'验收期间新增模型调用');assert.equal(final.messageCountsHash,initial.messageCountsHash,'验收期间消息状态计数变化');assert.deepEqual(results.blockedWrites,[]);assert.ok(results.writes.every(w=>['/api/control/takeover','/api/control/release'].includes(w.path)));
   });
