@@ -6,8 +6,8 @@ import type { Config } from './types.js';
 
 export type ReasoningLevel = 'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max';
 export type PanelModel = { provider:string; baseUrl:string; api?:'openai-completions'|'openai-responses'|'anthropic-messages'; id:string; reasoningLevel:ReasoningLevel; maxTokens:number; timeoutMs:number; custom?:{contextWindow:number;reasoning:boolean} };
-export type SettingsSection = 'model'|'modelLibrary'|'persona'|'tasks'|'memory'|'program'|'promptHints'|'triage'|'health';
-export type PanelSettings = { model?:PanelModel; modelLibrary?:import('./model-library.js').ModelLibrary; promptHints?:Record<string,any>; triage?:Record<string,any>; health?:Record<string,any>; persona?:Record<string,any>; tasks?:Record<string,any>; memory?:Record<string,any>; program?:Record<string,any>; revisions?:Partial<Record<SettingsSection,number>> };
+export type SettingsSection = 'model'|'modelLibrary'|'persona'|'personaLibrary'|'tasks'|'memory'|'program'|'promptHints'|'triage'|'health';
+export type PanelSettings = { model?:PanelModel; modelLibrary?:import('./model-library.js').ModelLibrary; personaLibrary?:import('./persona-library.js').PersonaLibrary; promptHints?:Record<string,any>; triage?:Record<string,any>; health?:Record<string,any>; persona?:Record<string,any>; tasks?:Record<string,any>; memory?:Record<string,any>; program?:Record<string,any>; revisions?:Partial<Record<SettingsSection,number>> };
 export class SettingsConflictError extends Error { statusCode=409; constructor(public section:SettingsSection,public revision:number){super('设置已被其他操作修改，请重新读取后保存');} }
 
 
@@ -53,6 +53,19 @@ export function mergePanelSettings(section:SettingsSection,value:Record<string,a
  const next={...current,[section]:['model','modelLibrary'].includes(section)?structuredClone(value):mergeFields(current[section],value),revisions:{...current.revisions,[section]:revision+1}};
  writeAtomic(panelDir()+'/settings.json',JSON.stringify(next,null,2));
  return {settings:next,revision:revision+1};
+}
+
+/** 人设库与兼容 persona 镜像必须一次写入；单项与整库修订均在写前核对。 */
+export function commitPersonaLibrary(library:import('./persona-library.js').PersonaLibrary,opts:{expectedLibraryRevision?:number;itemId?:string;expectedItemRevision?:number;previousPersona?:import('./persona.js').Persona;expectedPersonaRevision?:number}={}):{settings:PanelSettings;revision:number;personaRevision:number} {
+ const current=readPanelSettings(),revision=current.revisions?.personaLibrary??0,personaRevision=current.revisions?.persona??0;
+ if(opts.expectedLibraryRevision!==undefined&&(!Number.isSafeInteger(opts.expectedLibraryRevision)||opts.expectedLibraryRevision!==revision))throw new SettingsConflictError('personaLibrary',revision);
+ if(opts.expectedPersonaRevision!==undefined&&(!Number.isSafeInteger(opts.expectedPersonaRevision)||opts.expectedPersonaRevision!==personaRevision))throw new SettingsConflictError('persona',personaRevision);
+ if(opts.itemId!==undefined&&current.personaLibrary){const item=current.personaLibrary.items.find(item=>item.id===opts.itemId);if(!item||item.revision!==opts.expectedItemRevision)throw new SettingsConflictError('personaLibrary',item?.revision??0);}
+ const active=library.items.find(item=>item.id===library.activeId);if(!active)throw new Error('人设库缺少使用中人设');
+ const previous=current.persona??opts.previousPersona,changed=JSON.stringify(previous)!==JSON.stringify(active.persona),nextPersonaRevision=personaRevision+Number(changed);
+ const next:PanelSettings={...current,personaLibrary:structuredClone(library),persona:structuredClone(active.persona),revisions:{...current.revisions,personaLibrary:revision+1,persona:nextPersonaRevision}};
+ writeAtomic(panelDir()+'/settings.json',JSON.stringify(next,null,2));
+ return {settings:next,revision:revision+1,personaRevision:nextPersonaRevision};
 }
 /** 兼容旧模型保存入口：重读最新设置并逐域合并，不能删除其他页面的数据。 */
 export function writePanelSettings(next:PanelSettings):void {
@@ -106,11 +119,13 @@ export function toConfigModel(p:PanelModel):Config['model'] {
 
 export function mergePanel(c:Config, p:PanelSettings):Config {
   c.model = p.model ? toConfigModel(p.model) : { ...c.model, source: 'config' };
-  for(const field of ['mode','maxAgeHours','maxPerRound','publicPerHour','privatePerHour','publicPerDay'] as const)if(p.program?.[field]!==undefined)(c as any)[field]=p.program[field];
+  for(const field of ['mode','maxAgeHours','maxPerRound','publicPerHour','privatePerHour','publicPerDay','privatePerDay','replyHours'] as const)if(p.program?.[field]!==undefined)(c as any)[field]=p.program[field];
   if(p.tasks?.plans?.main?.intervalSeconds!==undefined)c.pollSeconds=p.tasks.plans.main.intervalSeconds;
   c.memoryPolicy={recentCount:p.memory?.recentCount??3,recentDays:p.memory?.recentDays??7,retentionDays:p.memory?.retentionDays??c.retentionDays};
   c.retentionDays=c.memoryPolicy.retentionDays;
   c.publicPerDay=p.program?.publicPerDay??c.publicPerDay??180;
+  if(c.privatePerDay===undefined)c.privatePerDay=400;
+  if(c.replyHours===undefined)c.replyHours={enabled:true,closeDelayMinutes:30};
   c.promptHints=p.promptHints??{};
   c.triage=p.triage??{};
   c.health=p.health??{};

@@ -34,11 +34,15 @@ const server = createServer(async (req, res) => {
       state.control = ({ pause: 'paused', resume: 'running', takeover: 'manual', release: 'paused' })[action]; state.busy = false;
       return send(res, 200, { ok: true });
     }
-    if (path === '/api/program') return send(res, 200, { settings: settings(), revision: 0 });
+    if (path === '/api/program') return send(res, 200, { control:state.control, settings: settings(), revision: 0,limits:{public:{used:0,limit:8},private:{used:0,limit:8}},cooldown:{} });
     if (path === '/api/memory/policy') return send(res, 200, { policy, revision: 0 });
     if (path === '/api/memory/users') return send(res, 200, { users: [], nextCursor: null });
-    if (path === '/api/feed') return send(res, 200, { items: [], pending: 0, nextCursor: null });
-    if (path === '/api/health') return send(res, 200, { status: 'normal', activeAlerts: [] });
+    if (path === '/api/tasks') return send(res,200,{tasks:[],revision:0});
+    if (path === '/api/tasks/runs') return send(res,200,{items:[],nextCursor:null});
+    if (path === '/api/triage/summary') return send(res,200,{queues:[],reasons:[],publicToday:0,publicPerDay:30,privateRecent:0,privatePerDay:400});
+    if (path === '/api/billing/summary') return send(res,200,{totals:{costUSD:0,unpriced:0},daily:[],models:[],purposes:[]});
+    if (path === '/api/feed' || path === '/api/feed/conversations') return send(res, 200, { items: [], pending: 0, nextCursor: null });
+    if (path === '/api/health') return send(res, 200, { status: 'normal', activeAlerts: [], metrics:[] });
     if (path === '/api/account/posting-limits') return send(res, 200, { effective: { post: { limit: 280 }, reply: { limit: 280 } } });
     return send(res, 404, { error: '隔离 API 未定义 ' + path });
   }
@@ -68,6 +72,7 @@ async function fresh(control = 'paused', { mode = 'draft', busy = false, fail = 
 // 等待 app 自身轮询；Camoufox 的 evaluate 动态 import 使用独立模块上下文。
 async function refresh() { await page.waitForResponse(response => new URL(response.url()).pathname === '/api/status', { timeout: 20000 }); }
 async function enabled(selector) { await page.waitForFunction(selector => { const el = document.querySelector(selector); return el && !el.disabled; }, selector); }
+async function expectedBrowserSummary(text){await page.waitForFunction(text=>document.querySelector('[data-settings-item="browser"] .settings-nav-summary')?.textContent===text,text);assert.equal(await page.locator('[data-settings-item="browser"] .settings-nav-summary').textContent(),text);}
 async function expectedPill(text) { await page.locator('#status-pill').filter({ hasText: text }).waitFor(); assert.equal(await page.locator('#status-pill').innerText(), text); }
 async function shot(name) { await page.evaluate(() => window.scrollTo(0, 0)); await page.waitForFunction(() => scrollY === 0); await page.screenshot({ path: OUT + '/' + name + '.png', fullPage: true }); report.screenshots.push(name + '.png'); }
 async function layout(manual) {
@@ -91,11 +96,11 @@ async function check(name, run) {
 try {
   await check('五态顶部、摘要、浅深色和1440/375布局', async () => {
     const cases = [
-      { control: 'running', label: '运行中', button: '暂停', disabled: false, color: 'running', summary: '按需连接' },
-      { control: 'paused', label: '已暂停', button: '启动', disabled: false, color: 'paused', summary: '按需连接' },
-      { control: 'draining', label: '正在暂停…', button: '正在暂停…', disabled: true, color: 'draining', summary: '等待当前操作结束' },
+      { control: 'running', label: '运行中', button: '暂停', disabled: false, color: 'running', summary: '未接管' },
+      { control: 'paused', label: '已暂停', button: '启动', disabled: false, color: 'paused', summary: '未接管' },
+      { control: 'draining', label: '正在暂停…', button: '正在暂停…', disabled: true, color: 'draining', summary: '未接管' },
       { control: 'manual', label: '已暂停', button: '启动', disabled: true, color: 'paused', summary: '人工接管中' },
-      { control: 'paused', label: '连接失败', button: '…', disabled: true, color: 'error', summary: '按需连接', fail: true },
+      { control: 'paused', label: '连接失败', button: '…', disabled: true, color: 'error', summary: '—', fail: true },
     ];
     for (const color of ['light', 'dark']) for (const width of [1440, 375]) {
       await page.emulateMedia({ colorScheme: color }); await page.setViewportSize({ width, height: 1100 });
@@ -105,7 +110,7 @@ try {
         assert.equal(await page.locator('#primary-action').isDisabled(), item.disabled);
         assert.equal(await page.locator('#status-pill').getAttribute('data-state'), item.color);
         assert.equal(await page.locator('#takeover-link').isVisible(), item.control === 'manual');
-        assert.equal(await page.locator('#settings-browser .section-summary').innerText(), item.summary);
+        await expectedBrowserSummary(item.summary);if(item.control==='draining')assert.match(await page.locator('[data-settings-view="browser"]').innerText(),/正在等待当前操作结束/);
         assert.equal(await page.locator('.top-actions').getByRole('button', { name: '释放接管', exact: true }).count(), 0);
         if (item.control === 'manual') {
           assert.equal(await page.locator('#primary-action').getAttribute('title'), '请先在浏览器接管分区释放接管');
@@ -116,11 +121,12 @@ try {
       }
     }
   });
-  await check('顶部接管链接从动态打开并展开浏览器分区', async () => {
+  await check('顶部接管链接从动态直接打开浏览器设置项', async () => {
     await fresh('manual', { route: 'feed' }); await page.locator('#takeover-link').click(); await page.locator('#connect').waitFor();
     assert.equal(await page.evaluate(() => location.hash), '#/settings/browser');
-    assert.equal(await page.locator('#settings-browser').evaluate(el => el.open), true);
-    assert.equal(await page.locator('.diagnostics').evaluate(el => el.open), true);
+    assert.equal(await page.locator('[data-settings-view="browser"]').isVisible(),true);
+    assert.equal(await page.locator('[data-settings-item="browser"]').getAttribute('aria-current'),'page');
+    assert.equal(await page.locator('.settings-heading strong').innerText(),'浏览器接管');
     assert.equal(await page.locator('#desktop-frame').count(), 0); assert.equal(await page.locator('#release').isVisible(), true);
   });
   await check('顶部启动和暂停保持运行模式，排空时控制禁用', async () => {
@@ -130,7 +136,7 @@ try {
       assert.equal(await page.locator('#notice').innerText(), '已启动' + (mode === 'draft' ? '（草稿模式，只生成草稿，不发送）' : ''));
       holdAction = 'pause'; await page.locator('#primary-action').click(); await waitHeld('pause'); await refresh(); await expectedPill('正在暂停…');
       assert.equal(await page.locator('#primary-action').isDisabled(), true); assert.equal(await page.locator('#connect').isDisabled(), true);
-      assert.equal(await page.locator('#settings-browser .section-summary').innerText(), '等待当前操作结束');
+      await expectedBrowserSummary('未接管');assert.match(await page.locator('[data-settings-view="browser"]').innerText(),/正在等待当前操作结束/);
       releaseAction(); await expectedPill('已暂停'); await enabled('#primary-action'); assert.equal(state.config.mode, mode); assert.equal(await page.locator('#primary-action').isEnabled(), true);
     }
   });
@@ -143,18 +149,18 @@ try {
     await fresh('manual'); assert.equal(await page.locator('#desktop-frame').count(), 0); assert.equal(await page.locator('#release').isEnabled(), true);
     holdAction = 'release'; await page.locator('#release').click(); await waitHeld('release');
     assert.equal(await page.locator('#release').isDisabled(), true); assert.equal(await page.locator('#connect').isDisabled(), true);
-    releaseAction(); await expectedPill('已暂停'); await page.locator('#release').waitFor({ state: 'detached' }); await enabled('#primary-action');
+    releaseAction(); await expectedPill('已暂停'); await page.locator('#release').waitFor({ state: 'hidden' });assert.equal(await page.locator('#release').isDisabled(),true); await enabled('#primary-action');
     assert.equal(await page.locator('#primary-action').isEnabled(), true); assert.equal(await page.locator('#takeover-link').isVisible(), false);
-    assert.equal(await page.locator('#settings-browser .section-summary').innerText(), '按需连接');
+    await expectedBrowserSummary('未接管');
     assert.equal(await page.locator('#notice').innerText(), '已释放接管，处理保持暂停，可在顶部启动');
     assert.equal((await context.request.get(BASE + '/desktop/vnc.html')).status(), 423);
   });
   await check('分区接管排空、连接合成桌面、释放后卸载且423', async () => {
     await fresh('paused'); holdAction = 'takeover'; await page.locator('#connect').click(); await waitHeld('takeover'); await refresh();
-    await expectedPill('正在暂停…'); assert.match(await page.locator('#settings-browser').innerText(), /正在等待当前操作结束/);
+    await expectedPill('正在暂停…'); assert.match(await page.locator('[data-settings-view="browser"]').innerText(), /正在等待当前操作结束/);
     releaseAction(); await page.locator('#desktop-frame').waitFor(); await page.frameLocator('#desktop-frame').getByRole('heading', { name: '合成浏览器桌面' }).waitFor();
     assert.equal(state.control, 'manual'); await expectedPill('已暂停'); assert.equal(await page.locator('#primary-action').isDisabled(), true);
-    assert.equal(await page.locator('.desk-bar #release').isVisible(), true); assert.equal(await page.locator('#open-new-tab').isVisible(), true);
+    assert.equal(await page.locator('.settings-actions #release').isVisible(), true); assert.equal(await page.locator('#open-new-tab').isVisible(), true);
     assert.equal((await context.request.get(BASE + '/desktop/vnc.html')).status(), 200);
     failStatus = true; await refresh(); await expectedPill('连接失败'); assert.equal(await page.locator('#desktop-frame').count(), 1); assert.equal(await page.locator('#release').isDisabled(), true);
     failStatus = false; await refresh(); await page.locator('#release').click(); await expectedPill('已暂停'); await page.locator('#desktop-frame').waitFor({ state: 'detached' }); await enabled('#primary-action');
@@ -163,6 +169,8 @@ try {
     assert.equal((await context.request.get(BASE + '/desktop/vnc.html')).status(), 423);
   });
   assert.equal(report.requests.some(r => r.method !== 'GET' && !r.path.startsWith('/api/control/')), false, '验收意外写入业务配置');
+  const controls=report.requests.filter(r=>r.path.startsWith('/api/control/')),counts=Object.fromEntries(['resume','pause','takeover','release'].map(action=>[action,controls.filter(r=>r.path==='/api/control/'+action).length]));
+  assert.deepEqual(counts,{resume:2,pause:3,takeover:1,release:2},'出现遗漏或多余控制请求');
 } catch (error) { report.errors.push({ name: '总体断言', error: error.stack || String(error) }); }
 finally {
   releaseAction?.(); await context.close(); await browser.close(); await new Promise(done => server.close(done));

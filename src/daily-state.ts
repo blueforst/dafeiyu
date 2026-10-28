@@ -4,6 +4,7 @@ import type { Generator } from './model.js';
 import { applyMigration } from './migrations.js';
 import { readPanelSettings } from './settings.js';
 import { resolvePersona } from './persona-presets.js';
+import { PersonaService } from './persona.js';
 import type { Store } from './store.js';
 import type { Config } from './types.js';
 
@@ -16,6 +17,7 @@ export type DailyRevision = {
  accountId:string; date:string; revision:number; content:DailyContent;
  source:'automatic'|'manual-generation'|'manual-edit'; generatedAt:number;
  configRevision:number; callId:string|null; interactionId:string|null;
+ persona:{id:string;name:string;revision:number}|null; personaName:string;
 };
 export type DailyStatus = 'ready'|'generating'|'paused'|'backoff'|'exhausted'|'failed'|'superseded'|'missing';
 export type DailyResult = {date:string;state:DailyRevision|null;status:DailyStatus;attempts:number;nextRetryAt:number|null;interactionId:string|null;callId:string|null;error?:string};
@@ -61,7 +63,7 @@ function account(value:string):string {
  const v=String(value||'').trim();if(!v||v==='unknown'||v.length>200)throw new DailyStateError('请先确认工作账号');return v;
 }
 function fromRow(row:any):DailyRevision|null {
- return row?{accountId:row.account_id,date:row.local_date,revision:Number(row.revision),content:JSON.parse(row.content),source:row.source,generatedAt:Number(row.generated_at),configRevision:Number(row.config_revision),callId:row.call_id??null,interactionId:row.interaction_id??null}:null;
+ return row?{accountId:row.account_id,date:row.local_date,revision:Number(row.revision),content:JSON.parse(row.content),source:row.source,generatedAt:Number(row.generated_at),configRevision:Number(row.config_revision),callId:row.call_id??null,interactionId:row.interaction_id??null,persona:null,personaName:'未记录'}:null;
 }
 
 export class DailyStateService {
@@ -88,14 +90,31 @@ export class DailyStateService {
  }
  get(accountId:string,date=shanghaiDate(this.now())):DailyRevision|null {
   if(!validDate(date))throw new DailyStateError('日程日期无效');
-  return fromRow(this.store.db.prepare('SELECT * FROM daily_revisions WHERE account_id=? AND local_date=? ORDER BY revision DESC LIMIT 1').get(account(accountId),date));
+  return this.withPersona(fromRow(this.store.db.prepare('SELECT * FROM daily_revisions WHERE account_id=? AND local_date=? ORDER BY revision DESC LIMIT 1').get(account(accountId),date)));
  }
  history(accountId:string,limit=7):DailyRevision[] {
   const n=Math.max(1,Math.min(7,Math.floor(Number(limit)||7)));
   const start=shanghaiDate(this.now()-6*DAY),today=shanghaiDate(this.now());
   return (this.store.db.prepare(`SELECT d.* FROM daily_revisions d WHERE account_id=? AND local_date>=? AND local_date<=?
    AND revision=(SELECT MAX(x.revision) FROM daily_revisions x WHERE x.account_id=d.account_id AND x.local_date=d.local_date)
-   ORDER BY local_date DESC LIMIT ?`).all(account(accountId),start,today,n) as any[]).map(row=>fromRow(row)!);
+   ORDER BY local_date DESC LIMIT ?`).all(account(accountId),start,today,n) as any[]).map(row=>this.withPersona(fromRow(row))!);
+ }
+ private withPersona(state:DailyRevision|null):DailyRevision|null {
+  if(!state)return null;
+  let identity:DailyRevision['persona']=null;
+  try {
+   const raw=JSON.parse(this.store.get(`daily-persona:${state.accountId}:${state.date}:${state.revision}`,'null'));
+   if(raw&&typeof raw.id==='string'&&typeof raw.name==='string'&&Number.isSafeInteger(raw.revision)&&raw.revision>=0)identity={id:raw.id,name:raw.name,revision:raw.revision};
+  }catch{}
+  return {...state,persona:identity,personaName:identity?.name??'未记录'};
+ }
+ private recordPersona(accountId:string,date:string,revision:number,identity:{id:string;name:string;revision:number}):void {
+  this.store.set(`daily-persona:${accountId}:${date}:${revision}`,JSON.stringify(identity));
+  const cutoff=shanghaiDate(this.now()-30*DAY);
+  for(const row of this.store.db.prepare("SELECT key FROM runtime WHERE key LIKE 'daily-persona:%'").all() as {key:string}[]){
+   const recordedDate=/:(\d{4}-\d{2}-\d{2}):\d+$/.exec(row.key)?.[1];
+   if(recordedDate&&recordedDate<cutoff)this.store.db.prepare('DELETE FROM runtime WHERE key=?').run(row.key);
+  }
  }
  private result(accountId:string,date:string,status?:DailyStatus,error?:string):DailyResult {
   const state=this.get(accountId,date);
@@ -105,10 +124,11 @@ export class DailyStateService {
   const inferred:DailyStatus=active?'generating':state?'ready':attempts>=3?'exhausted':last&&last+RETRY>this.now()?'backoff':['failed','generating'].includes(attempt?.status)?'failed':'missing';
   return {date,state,status:status??inferred,attempts,nextRetryAt:!state&&attempts<3&&last?last+RETRY:null,interactionId:attempt?.interaction_id??null,callId:attempt?.call_id??null,...(error||attempt?.error?{error:error||String(attempt.error)}:{})};
  }
- describe(accountId:string) {
-  const a=account(accountId),date=shanghaiDate(this.now()),result=this.result(a,date);
+ calendar(accountId:string):DailyResult[] {const a=account(accountId);return Array.from({length:7},(_,offset)=>this.result(a,shanghaiDate(this.now()-offset*DAY)));}
+ describe(accountId:string,date=shanghaiDate(this.now())) {
+  const a=account(accountId),result=this.result(a,date);
   const t=new Date(this.now()+8*3600000),at=t.getUTCHours()*60+t.getUTCMinutes();
-  return {...result,today:result.state,currentPeriod:result.state?.content.periods.find(p=>minute(p.start)<=at&&minute(p.end,true)>at)??null,history:this.history(a),fictional:true as const};
+  return {...result,today:result.state,currentPeriod:date===shanghaiDate(this.now())?result.state?.content.periods.find(p=>minute(p.start)<=at&&minute(p.end,true)>at)??null:null,history:this.history(a),fictional:true as const};
  }
  ensure(accountId:string,opts:DailyEnsureOptions={}):Promise<DailyResult> {
   const a=account(accountId),date=shanghaiDate(this.now()),key=JSON.stringify([a,date]);
@@ -153,6 +173,7 @@ export class DailyStateService {
    if(!opts.manual&&!this.canAuto())throw new DailyStateError('业务已暂停，日程未生成',409);
    const original=this.config(),c:Config={...original,model:{...original.model,maxTokens:Math.min(original.model.maxTokens,3072)}};
    const settings=readPanelSettings() as any;
+   const personaIdentity=new PersonaService(this.store,this.generator,()=>c).activeIdentity();
    const sections=resolvePersona(settings.persona,c.persona).sections.map(section=>section.content);
    // 未保存的旧自定义人格只有角色定义非空，保留此前直接传入原文的语义；已保存分区仍按原格式拼接。
    const persona=(settings.persona===undefined?sections.filter(content=>content!==''):sections).join('\n\n');
@@ -169,8 +190,13 @@ export class DailyStateService {
    // 人工编辑、另一份修订或跨日都使旧生成快照失效。
    if(shanghaiDate(this.now())!==date||(this.get(accountId,date)?.revision??0)!==baseRevision)return this.result(accountId,date,'superseded');
    if(!opts.manual&&!this.canAuto())return this.result(accountId,date,'paused');
-   this.store.db.prepare(`INSERT INTO daily_revisions(account_id,local_date,revision,content,source,generated_at,config_revision,call_id,interaction_id) VALUES(?,?,?,?,?,?,?,?,?)`).run(accountId,date,baseRevision+1,JSON.stringify(content),opts.manual?'manual-generation':'automatic',this.now(),configRevision,(response as any).callId??null,interactionId);
-   this.store.db.prepare("UPDATE daily_attempts SET status='ready',error=NULL WHERE account_id=? AND local_date=?").run(accountId,date);
+   this.store.db.exec('BEGIN IMMEDIATE');
+   try {
+    this.store.db.prepare(`INSERT INTO daily_revisions(account_id,local_date,revision,content,source,generated_at,config_revision,call_id,interaction_id) VALUES(?,?,?,?,?,?,?,?,?)`).run(accountId,date,baseRevision+1,JSON.stringify(content),opts.manual?'manual-generation':'automatic',this.now(),configRevision,(response as any).callId??null,interactionId);
+    this.recordPersona(accountId,date,baseRevision+1,personaIdentity);
+    this.store.db.prepare("UPDATE daily_attempts SET status='ready',error=NULL WHERE account_id=? AND local_date=?").run(accountId,date);
+    this.store.db.exec('COMMIT');
+   }catch(error){this.store.db.exec('ROLLBACK');throw error;}
    return this.result(accountId,date,'ready');
   }catch(e) {
    const message=redact(e instanceof Error?e.message:e);
@@ -190,7 +216,9 @@ export class DailyStateService {
    const previous=this.get(a,date);
    if((previous?.revision??0)!==expectedRevision)throw new DailyStateError('日程已更新，请重新读取后再保存',409);
    const settings=readPanelSettings() as any;
+   const personaIdentity=new PersonaService(this.store,this.generator,this.config).activeIdentity();
    this.store.db.prepare(`INSERT INTO daily_revisions(account_id,local_date,revision,content,source,generated_at,config_revision,call_id,interaction_id) VALUES(?,?,?,?,?,?,?,?,?)`).run(a,date,expectedRevision+1,JSON.stringify(content),'manual-edit',this.now(),Number(settings.revisions?.persona??0),null,null);
+   this.recordPersona(a,date,expectedRevision+1,personaIdentity);
    this.store.db.exec('COMMIT');
   }catch(e){this.store.db.exec('ROLLBACK');throw e;}
   return this.get(a,date)!;

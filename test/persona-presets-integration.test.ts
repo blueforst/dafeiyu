@@ -5,7 +5,7 @@ import { mkdtempSync,mkdirSync,writeFileSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { startApp } from '../src/app.js';
 import { defaultPersona,PERSONA_PRESETS,PERSONA_PRESETS_VERSION } from '../src/persona-presets.js';
-import { legacyPersona,type Persona } from '../src/persona.js';
+import { legacyPersona,FIXED_SYSTEM_RULES,type Persona } from '../src/persona.js';
 import { readPanelSettings } from '../src/settings.js';
 import type { DailyContent } from '../src/daily-state.js';
 import type { Event } from '../src/types.js';
@@ -101,7 +101,7 @@ test('真实应用预设 GET 沿用鉴权和来源检查、免写标记，嵌套
   snapshot.items[0].persona.triggers[0].keywords.push('客户端关键词');
   snapshot.items[1].bioSuggestion='客户端简介';
   const again=await f.app.inject({url,headers:f.readHeaders});
-  assert.deepEqual(again.json(),{version:PERSONA_PRESETS_VERSION,items:PERSONA_PRESETS});
+  assert.deepEqual(again.json(),{version:PERSONA_PRESETS_VERSION,items:PERSONA_PRESETS,fixedRules:FIXED_SYSTEM_RULES});
   assert.equal(JSON.stringify(PERSONA_PRESETS).includes('客户端'),false);
   const current=(await f.app.inject({url:'/api/persona',headers:f.readHeaders})).json();
   assert.equal(current.revision,0);assert.deepEqual(current.persona,defaultPersona());

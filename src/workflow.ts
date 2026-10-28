@@ -1,7 +1,7 @@
 import { Store } from './store.js';
 import { createHash,randomUUID } from 'node:crypto';
 import { loadConfig } from './config.js';
-import { parseDraft,type Generator } from './model.js';
+import { type Generator } from './model.js';
 import type { Transport } from './transport.js';
 import type { Config,Event,Receipt,Identity,Channel } from './types.js';
 import type { Program } from './program.js';
@@ -10,13 +10,15 @@ import type { DailyStateService } from './daily-state.js';
 import type { MemoryService } from './memory.js';
 import type { Outbox } from './outbox.js';
 import type { TaskScheduler } from './scheduler.js';
+import {DEFAULT_TASK_PLANS} from './scheduler.js';
+import {readPanelSettings} from './settings.js';
+import {replyWindow,effectiveAge,type ReplyWindow} from './reply-hours.js';
 
 import { beijingDayStart,type ReplyTriage } from './reply-triage.js';
 import type { PostingCapabilitiesService } from './posting-capabilities.js';
-import { normalizePublicText,validatePostingText,postingLimitPrompt,rpcResourceOK } from './posting-policy.js';
+import { validatePostingText,rpcResourceOK } from './posting-policy.js';
 import { recentReplySamples } from './reply-hints.js';
-import { formatIssues } from './reply-style.js';
-import { assembleReplyPrompt } from './reply-prompt.js';
+import { generateReply } from './reply-pipeline.js';
 import { captureGenerationSnapshot,pruneReplayData } from './persona-replay.js';
 import { RoundBudget,WorkflowWatchdog,healthSettings,type RuntimeHealth } from './unattended-health.js';
 import {safeBrowserDiagnostic} from './browser-operation.js';
@@ -35,6 +37,16 @@ export class Workflow {
  private activeHandle='';private stopped=false;private schedulerActive=false;private roundCalls=new Set<string>();private roundId='';
  constructor(public store:Store,public transport:Transport,public generator:Generator,public config:()=>Config=loadConfig){}
  accountId(){return this.activeHandle||this.store.get('activeAccount');}
+ /** 只读任务计划与实例；不运行任务，也不访问浏览器。 */
+ replyHours(at=Date.now(),accountId=this.accountId()):ReplyWindow{
+  const c=this.config(),saved=readPanelSettings().tasks?.plans??{},plans=this.services.scheduler?.plans(),morning={...DEFAULT_TASK_PLANS['morning-post'],...(saved['morning-post']??{}),...(plans?.['morning-post']??{})},evening={...DEFAULT_TASK_PLANS['evening-post'],...(saved['evening-post']??{}),...(plans?.['evening-post']??{})};
+  return replyWindow({now:at,enabled:c.replyHours?.enabled??true,closeDelayMinutes:c.replyHours?.closeDelayMinutes??30,morning:{enabled:morning.enabled,time:morning.time??'08:00'},eveningTime:evening.time??'23:00',morningRunEnded:scheduledAt=>{
+   if(!accountId||!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_runs'").get())return null;
+   const run=this.store.db.prepare("SELECT status,finished_at,started_at FROM task_runs WHERE account_id=? AND task_id='morning-post' AND scheduled_at=?").get(accountId,scheduledAt) as any;
+   return run&&run.status!=='running'?Number(run.finished_at??run.started_at):null;
+  }});
+ }
+ private replyAge(receivedAt:number,at=Date.now()){return effectiveAge(receivedAt,at,this.replyHours(at).closures);}
  modelSession(userId:string,visibility:Channel){
   let namespace=this.store.get('model:sessionNamespace');if(!namespace){namespace=randomUUID();this.store.set('model:sessionNamespace',namespace);}
   return 'role-workflow-'+createHash('sha256').update(JSON.stringify([namespace,this.activeHandle,userId,visibility,this.store.epoch(userId,this.activeHandle)])).digest('hex');
@@ -100,7 +112,8 @@ export class Workflow {
    const c=this.config(),host=this.services.scheduler?.host,hostHealth=host?.latest('health'),result=hostHealth?.result as any;
    const browser=readBrowser&&this.transport.health?await this.transport.health().catch(()=>null):this.services.health.get(this.accountId()).browser;
    if(this.stopped&&readBrowser)return;
-   this.services.health.evaluate({accountId:this.accountId(),control:this.control(),mode:c.mode,identity:JSON.parse(this.store.get('identity','null'))??undefined,cooldown:{public:this.cooldown('public'),private:this.cooldown('private')},publicPerHour:c.publicPerHour,privatePerHour:c.privatePerHour,publicPerDay:c.publicPerDay,maxAgeHours:c.maxAgeHours,pendingByChannel:this.services.triage?.healthQueue(this.accountId(),c.maxAgeHours),sendableChannels:{public:!this.channelWaitReason('public',c),private:!this.channelWaitReason('private',c)},watchdogFailure:this.store.get('watchdogFailure:'+this.accountId())==='1',backup:host?.latest('backup'),certificateHoursRemaining:typeof result?.certificateHoursRemaining==='number'?result.certificateHoursRemaining:null,browser});
+   const window=this.replyHours();
+   this.services.health.evaluate({accountId:this.accountId(),control:this.control(),mode:c.mode,identity:JSON.parse(this.store.get('identity','null'))??undefined,cooldown:{public:this.cooldown('public'),private:this.cooldown('private')},publicPerHour:c.publicPerHour,privatePerHour:c.privatePerHour,publicPerDay:c.publicPerDay,privatePerDay:c.privatePerDay??400,replyHours:window,maxAgeHours:c.maxAgeHours,pendingByChannel:this.services.triage?.healthQueue(this.accountId(),c.maxAgeHours),sendableChannels:{public:window.open&&!this.channelWaitReason('public',c),private:window.open&&!this.channelWaitReason('private',c)},watchdogFailure:this.store.get('watchdogFailure:'+this.accountId())==='1',backup:host?.latest('backup'),certificateHoursRemaining:typeof result?.certificateHoursRemaining==='number'?result.certificateHoursRemaining:null,browser});
   }catch{if(!this.stopped)this.store.log('health-evaluation-error','健康快照计算失败','warn');}
  }
  channelWaitReason(channel:Channel,c=this.config(),sending=true,excludeUnsubmittedId?:string):string|null {
@@ -110,33 +123,32 @@ export class Workflow {
   const reserved=excluded?.status==='sending'&&!this.services.outbox?.source(this.accountId(),channel==='public'?'reply':'dm',excluded.id);
   const hourlyAdjustment=reserved&&excluded.updated_at>Date.now()-3600000?1:0,dailyAdjustment=reserved&&excluded.updated_at>=beijingDayStart(Date.now())?1:0;
   if(sending&&(this.sentCount(channel)-hourlyAdjustment>=(channel==='public'?c.publicPerHour:c.privatePerHour)||(channel==='public'&&this.services.triage&&this.services.triage.dailyCount(this.accountId())-dailyAdjustment>=(c.publicPerDay??180))))return 'quota';
+  const recentAdjustment=reserved&&excluded.updated_at>Date.now()-86400000&&excluded.updated_at<=Date.now()?1:0;
+  if(sending&&channel==='private'&&this.services.triage&&this.services.triage.privateRecentCount(this.accountId())-recentAdjustment>=(c.privatePerDay??400))return 'private-daily-quota';
   return null;
  }
- private async generateDraft(e:Event,c:Config,persona:any,memoryPolicy:any,daily:any,roundId:string,merged:Event[]=[]){
-  const rawContext=await this.stage('context',roundId,()=>this.transport.context(e,this.accountId(),{signal:this.abort?.signal}),e);
-  const conversation=merged.length?{current:rawContext,previousMessages:merged.map(x=>({id:x.platformId,text:x.text,timestamp:x.timestamp}))}:rawContext;
-  const memory=await this.stage('memory',roundId,async()=>this.services.memory?this.services.memory.context(e.userId,e.channel,this.accountId(),Date.now(),memoryPolicy):this.store.context(e.userId,e.channel,this.accountId()),e);
-  const session=this.modelSession(e.userId,e.channel),recentReplies=recentReplySamples(this.store,this.accountId(),e.channel,e.conversationId);
-  const input={config:c,persona,message:e.text,channel:e.channel,accountId:this.accountId(),conversation,memory,dailyState:daily?.state?.content??'暂无当日日程',mediaUnavailable:e.mediaUnavailable,quote:e.quote,card:e.card,signal:this.abort!.signal,sessionId:session,interactionId:e.id,now:Date.now(),timestamp:e.timestamp,timestampReliable:e.timestampReliable===true,conversationId:e.conversationId,recentReplies,promptHints:c.promptHints,lengthRule:postingLimitPrompt(e.channel==='public'?'reply':'dm',this.services.posting?.get().reply,this.accountId())};
-  const assembled=this.services.persona?await this.stage(persona?.triggers.some((t:any)=>t.enabled&&t.match!=='keywords')?'semantic-trigger':'prompt',roundId,()=>this.services.persona!.assemble(input),e):assembleReplyPrompt({...input,staticText:c.persona,settings:c.promptHints});
-  captureGenerationSnapshot(this.store,e,{conversation,memory,hintMeta:assembled.meta,dailySlot:input.dailyState,personaRevision:this.services.persona?.get().revision});
-  const result=await this.stage('generation',roundId,()=>this.generator.complete(c,assembled.system,assembled.user,this.abort!.signal,session,{purpose:'reply',source:'workflow',accountId:this.accountId(),channel:e.channel,interactionId:e.id,jsonObject:true}),e);
-  const draft=parseDraft(result.text,{channel:e.channel});if(e.channel==='public')draft.text=normalizePublicText(draft.text);
-  draft.meta={...assembled.meta,callId:result.callId};
-  const validation=draft.action==='reply'?validatePostingText(draft.text,e.channel==='public'?'reply':'dm',{accountId:this.accountId(),capability:this.services.posting?.get().reply}):undefined;
-  if(validation)draft.validation=validation;
-  draft.format={issues:formatIssues(draft.text)};
-  return {draft,result,validation};
+ private async generateDraft(e:Event,c:Config,persona:any,memoryPolicy:any,daily:any,roundId:string,merged:Event[]=[],personaIdentity?:{id?:string;name?:string;revision?:number}){
+  const frozenIdentity=personaIdentity??{...this.services.persona?.activeIdentity?.(),revision:this.services.persona?.get().revision};
+  return generateReply({config:c,accountId:this.accountId(),persona,personaService:this.services.persona,generator:this.generator,
+   conversation:()=>this.transport.context(e,this.accountId(),{signal:this.abort?.signal}),
+   memory:()=>this.services.memory?this.services.memory.context(e.userId,e.channel,this.accountId(),Date.now(),memoryPolicy):this.store.context(e.userId,e.channel,this.accountId()),
+   recentReplies:()=>recentReplySamples(this.store,this.accountId(),e.channel,e.conversationId),dailyState:daily?.state?.content??'暂无当日日程',
+   posting:()=>this.services.posting?.get().reply,signal:this.abort!.signal,sessionId:()=>this.modelSession(e.userId,e.channel),
+   personaIdentity:()=>frozenIdentity,
+   snapshot:(event,data)=>captureGenerationSnapshot(this.store,event,data),stage:(name,fn)=>this.stage(name,roundId,fn,e)
+  },e,{merged});
  }
  private async sendDraft(e:Event,text:string,handle:string,roundId:string,c:Config,callId?:string,approved=false){
   const epoch=this.store.epoch(e.userId,handle);
   const restore=()=>{if(approved&&this.store.getMessage(e.id)?.status==='sending')this.store.update(e.id,'approved');};
   if(this.control()!=='running'||this.abort?.signal.aborted){restore();return;}
   if(e.timestampReliable===false||!Number.isFinite(e.timestamp)||!e.timestamp||(this.services.outbox&&!e.platformId)){restore();this.store.log('message-validation',JSON.stringify({id:e.id,channel:e.channel,reason:'缺少可靠时间或平台标识'}),'warn');return;}
-  if(Date.now()-e.timestamp>c.maxAgeHours*3600000){this.store.update(e.id,'skipped',{error:'超时未发送'});return;}
+  if(this.replyAge(e.timestamp)>c.maxAgeHours*3600000){this.store.update(e.id,'skipped',{error:'超时未发送'});return;}
+  const window=this.replyHours();if(!window.open){restore();const current=this.store.getMessage(e.id);if(current)this.store.update(e.id,current.status,{draft:{...JSON.parse(current.draft??'{}'),waitReason:window.reason}});return;}
   const waitReason=this.channelWaitReason(e.channel,c,true,approved?e.id:undefined);if(waitReason){restore();return;}
   if(loggedInHandle(await this.transport.identity())!==handle){restore();await this.safetyPause('生成期间登录状态或账号已变化，草稿未发送');return;}
   if(this.control()!=='running'||this.abort?.signal.aborted){restore();return;}
+  const finalWindow=this.replyHours();if(!finalWindow.open){restore();const current=this.store.getMessage(e.id);if(current)this.store.update(e.id,current.status,{draft:{...JSON.parse(current.draft??'{}'),waitReason:finalWindow.reason}});return;}
   if(!this.store.getMessage(e.id,handle)||this.store.forgotten(e.userId,handle)||this.store.epoch(e.userId,handle)!==epoch){restore();return;}
   const capability=this.services.posting?.get().reply,validation=validatePostingText(text,e.channel==='public'?'reply':'dm',{accountId:handle,capability});
   if(!validation.allowed){const row=this.store.getMessage(e.id);this.store.update(e.id,'draft',{draft:{...JSON.parse(row.draft),validation},error:validation.reason});return;}
@@ -161,7 +173,7 @@ export class Workflow {
    if(this.control()!=='running'||this.abort?.signal.aborted)break;
    const e=JSON.parse(row.body) as Event,draft=JSON.parse(row.draft??'{}');
    if(this.store.forgotten(e.userId,handle))continue;
-   if(Date.now()-e.timestamp>c.maxAgeHours*3600000){this.store.update(e.id,'skipped',{error:'超时未发送'});continue;}
+   if(this.replyAge(e.timestamp)>c.maxAgeHours*3600000){this.store.update(e.id,'skipped',{error:'超时未发送'});continue;}
    const reason=this.channelWaitReason(e.channel,c);if(reason){if(draft.waitReason!==reason)this.store.update(e.id,'approved',{draft:{...draft,waitReason:reason}});continue;}
    const claimed=this.store.db.prepare("UPDATE messages SET status='sending',updated_at=? WHERE id=? AND account_id=? AND status='approved' AND updated_at=?").run(Math.max(Date.now(),row.updated_at+1),row.id,handle,row.updated_at).changes;
    if(!claimed)continue;
@@ -172,16 +184,20 @@ export class Workflow {
   if(this.busy)return;this.busy=true;this.abort=new AbortController();const roundId=randomUUID(),startedAt=Date.now();this.startedAt=startedAt;const budget=new RoundBudget(this.abort,(()=>{try{return this.config().health;}catch{return {};}})());this.roundId=roundId;this.roundCalls=new Set();let mainStarted=false,roundFailed=false;
   try{
    if(this.control()==='running'){
-    const c=structuredClone(this.config()),persona=this.services.persona?.get().persona,memoryPolicy=this.services.memory?.policy().policy;
+    const c=structuredClone(this.config()),personaState=this.services.persona?.get(),persona=personaState?.persona,personaIdentity={...this.services.persona?.activeIdentity?.(),revision:personaState?.revision},memoryPolicy=this.services.memory?.policy().policy;
     const identity=await this.stage('identity',roundId,()=>this.transport.identity());this.store.set('identity',JSON.stringify(identity));const handle=loggedInHandle(identity);
     if(!handle||(this.activeHandle&&handle!==this.activeHandle)){await this.safetyPause('登录状态或账号已变化，请检查浏览器后重新恢复');return;}
     this.activeHandle=handle;this.store.set('activeAccount',handle);
+    if(this.services.triage)this.services.triage.closures=()=>this.replyHours().closures;
+    const window=this.replyHours(startedAt,handle);
     if(this.services.scheduler){this.services.scheduler.recordMainStart(roundId,handle,startedAt);mainStarted=true;}
     const unsettledOutbox=!!this.store.db.prepare("SELECT 1 FROM messages WHERE account_id=? AND status IN ('sending','unknown') LIMIT 1").get(handle)||!!(this.services.outbox&&this.store.db.prepare("SELECT 1 FROM outbox WHERE account_id=? AND status IN ('submitting','unknown') LIMIT 1").get(handle));
     const prepared=this.transport.prepareRound?await this.stage('browser-prepare',roundId,()=>this.transport.prepareRound!(handle,{signal:this.abort!.signal,unsettledOutbox})):undefined;
     await this.reconcile(handle,roundId);if(this.control()!=='running')return;
     if(prepared?.businessBlocked){this.lastTick=Date.now();this.store.set('lastTick',String(this.lastTick));this.store.log('browser-resource-wait',JSON.stringify({roundId,accountId:handle,reason:'pending-recovery-with-protected-session'}),'warn');return;}
-    await this.sendApproved(c,handle,roundId);if(!budget.check()||this.control()!=='running')return;
+    if(window.open)await this.sendApproved(c,handle,roundId);
+    else for(const row of this.store.db.prepare("SELECT id,draft FROM messages WHERE account_id=? AND status='approved' ORDER BY created_at,id LIMIT 100").all(handle) as any[]){const draft=JSON.parse(row.draft??'{}');if(draft.waitReason!==window.reason)this.store.update(row.id,'approved',{draft:{...draft,waitReason:window.reason}});}
+    if(!budget.check()||this.control()!=='running')return;
     const daily=this.services.daily?await this.stage('daily-state',roundId,()=>this.services.daily!.ensure(handle,{signal:this.abort!.signal,interactionId:roundId})):null;
     const collected=this.transport.collectPublic&&this.transport.collectPrivate?await (async()=>{
      const publicDeadline=budget.collectionDeadline('public',c.health);
@@ -202,7 +218,7 @@ export class Workflow {
      if(this.services.triage)this.services.triage.ingest(e,handle,c.maxAgeHours);else this.store.ingest(e,handle);
     }});
     this.services.triage?.refreshQueued(handle,c.maxAgeHours);
-    const channels=(['public','private'] as Channel[]).filter(channel=>!this.channelWaitReason(channel,c,c.mode==='auto'));
+    const channels=window.open?(['public','private'] as Channel[]).filter(channel=>!this.channelWaitReason(channel,c,c.mode==='auto')):[];
     const pending=this.services.triage?this.services.triage.pending(c.maxPerRound,handle,channels,c.maxAgeHours):this.store.pending(c.maxPerRound,handle);
     for(const candidate of pending){
      if(!budget.check())break;
@@ -211,11 +227,12 @@ export class Workflow {
      if(this.control()!=='running'||this.abort.signal.aborted)break;
      const e=JSON.parse(row.body) as Event;
      if(this.store.forgotten(e.userId,handle))continue;
-     if(Date.now()-e.timestamp>c.maxAgeHours*3600000){this.store.update(e.id,'skipped',{error:'普通消息超过处理时效'});continue;}
+     if(this.replyAge(e.timestamp)>c.maxAgeHours*3600000){this.store.update(e.id,'skipped',{error:'普通消息超过处理时效'});continue;}
+     if(!this.replyHours().open)break;
      if(this.channelWaitReason(e.channel,c,c.mode==='auto'))continue;
      const epoch=this.store.epoch(e.userId,handle);this.services.triage?.consumed(e.id);this.store.update(e.id,'generating');
      try{
-      const {draft,result,validation}=await this.generateDraft(e,c,persona,memoryPolicy,daily,roundId,merged?.context??[]);
+      const {draft,result,validation}=await this.generateDraft(e,c,persona,memoryPolicy,daily,roundId,merged?.context??[],personaIdentity);
       if(this.store.forgotten(e.userId,handle)||this.store.epoch(e.userId,handle)!==epoch)continue;
       const previous=JSON.parse(row.draft??'{}'),review=!!previous.review;
       if(draft.action==='skip'){

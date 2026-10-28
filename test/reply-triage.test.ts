@@ -25,6 +25,37 @@ function fixture(raw:Record<string,unknown>={}) {
  return {store,triage,now:(at:number)=>{clock=at;},settings:(patch:Record<string,unknown>)=>{settings=normalizeTriageSettings({...settings,...patch});},row:(id:string,account='worker')=>store.getMessage(id,account),close(){store.db.close();rmSync(dir,{recursive:true,force:true});}};
 }
 
+test('私信二十四小时窗口使用开区间下界、闭区间上界，拒绝与重复不计',()=>{
+ const f=fixture();try{
+  const add=(id:string,status:string,at:number,account='worker')=>f.store.db.prepare('INSERT INTO outbox(id,account_id,channel,kind,source_id,target_id,text,status,created_at,submitted_at,updated_at) VALUES(?,?,\'private\',\'dm\',?,?,\'历史私信\',?,?,?,?)').run(id,account,id,'target',status,at,at,at);
+  add('boundary','confirmed',NOW-24*3600000);add('within','confirmed',NOW-24*3600000+1);add('submitting','submitting',NOW-1000);add('unknown','unknown',NOW);add('future','confirmed',NOW+1);add('rejected','rejected',NOW);add('foreign','confirmed',NOW,'other');
+  assert.equal(f.triage.privateRecentCount('worker'),3);
+  const legacy=event('legacy-private','旧私信',{channel:'private'});f.store.ingest(legacy,'worker');const row=f.row('legacy-private');f.store.update(row.id,'confirmed');f.store.db.prepare('UPDATE messages SET updated_at=? WHERE id=?').run(NOW,row.id);assert.equal(f.triage.privateRecentCount('worker'),4);
+  f.store.db.prepare('UPDATE outbox SET source_id=? WHERE id=\'within\'').run(row.id);assert.equal(f.triage.privateRecentCount('worker'),3);
+  assert.equal(f.triage.summary('worker').privateRecent,3);assert.equal(f.triage.summary('worker').privatePerDay,400);
+  const base={accountId:'worker',mode:'auto' as const,publicPerHour:10,privatePerHour:30,publicPerDay:180,privatePerDay:3,cooldown:()=>0,hourlyCount:()=>0,unknown:()=>false};
+  assert.deepEqual(f.triage.allowedChannels(base),['public']);assert.deepEqual(f.triage.allowedChannels({...base,mode:'draft'}),['public','private']);
+ }finally{f.close();}
+});
+
+test('分级有效时效扣除关闭区间，开放后积压满三小时才过期',()=>{
+ const f=fixture();try{
+  const at=(s:string)=>Date.parse(s+'+08:00'),opened=at('2026-10-29T08:00:00');f.now(opened+30*60000);f.triage.closures=()=>[{start:at('2026-10-28T23:30:00'),end:opened}];
+  for(const [id,time] of [['before','2026-10-28T23:10:00'],['overnight','2026-10-29T02:00:00'],['expired','2026-10-28T20:00:00']] as const)f.triage.ingest(event(id,'hi',{timestamp:at(time)}),'worker');
+  f.triage.refreshQueued('worker');assert.deepEqual(f.triage.pending(10,'worker',['public']).map(row=>JSON.parse(row.body).platformId),['overnight','before']);assert.equal(f.row('expired').status,'skipped');assert.equal(f.triage.healthQueue('worker').public?.count,2);
+  f.now(opened+3*3600000+1);assert.deepEqual(f.triage.pending(10,'worker',['public']),[]);assert.equal(f.row('before').status,'skipped');assert.equal(f.row('overnight').status,'skipped');
+ }finally{f.close();}
+});
+
+test('ignoreAge 为试聊显式豁免，默认生产资格仍排除过期消息',()=>{
+ const f=fixture();try{
+  f.triage.ingest(event('old-chat','这是超过时效的试聊消息',{timestamp:NOW-24*3600000}),'worker');f.triage.refreshQueued('worker',6,{ignoreAge:true});
+  const ignored=f.triage.queuedEligibility(6,{ignoreAge:true}),normal=f.triage.queuedEligibility(6);
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM messages m WHERE '+normal.sql).get(...normal.params)!.n,0);assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM messages m WHERE '+ignored.sql).get(...ignored.params)!.n,1);
+  assert.equal(f.triage.pending(10,'worker',['public'],6,{ignoreAge:true}).length,1);assert.equal(f.row('old-chat').status,'queued');assert.equal(f.triage.pending(10,'worker',['public']).length,0);assert.equal(f.row('old-chat').status,'skipped');
+ }finally{f.close();}
+});
+
 test('新人招呼、老面孔招呼和正常来访按确定性规则分级',()=>{
  assert.equal(classify(event('1','hi'),history(),DEFAULT_TRIAGE_SETTINGS).tier,'normal');
  assert.equal(classify(event('2','在吗？'),history({totalCount:4,processedCount:3}),DEFAULT_TRIAGE_SETTINGS).tier,'skip');

@@ -27,6 +27,7 @@ export function mount(root, ctx) {
   const messageStatus = h('select', { class: 'input' }, h('option', { value: '' }, '全部消息状态'), ['queued', 'generating', 'draft', 'sending', 'unknown', 'confirmed', 'failed', 'skipped'].map(x => h('option', { value: x }, STATUS[x])));
   const messageChannel = h('select', { class: 'input' }, h('option', { value: '' }, '全部渠道'), h('option', { value: 'public' }, '公开'), h('option', { value: 'private' }, '私信'));
   const messageMore = h('button', { class: 'btn', type: 'button', hidden: true, onclick: () => loadMessages(true) }, '加载更多消息');
+  const replyWindowState=h('div',{class:'small muted',role:'status'});
   const page = h('div', { class: 'stack' }, h('div', {}, h('h1', { class: 'page-title' }, '主程序'), h('p', { class: 'muted page-desc' }, '阶段与控制状态分别显示。日志只含运行元数据，消息正文按需读取。')),
     h('section', { class: 'card stack' }, runtime),
     h('details', { class: 'card' }, h('summary', {}, '运行设置'), settingsBox, h('p', { class: 'muted small' }, '轮询间隔在定时任务页统一维护。保存设置不会恢复处理。 ', h('a', { href: '#/tasks' }, '打开定时任务 →'))),
@@ -39,6 +40,10 @@ export function mount(root, ctx) {
   if (ctx.settingsEmbedded) {
     const cards = [...page.children];
     cards[0]?.remove(); cards[1]?.remove(); cards[2]?.remove(); cards[5]?.remove();
+    const panels={logs:cards[6],stages:cards[3],queue:cards[4]},tabs=h('div',{class:'segmented settings-log-tabs',role:'group','aria-label':'排查视图'});
+    function show(id){for(const [key,panel]of Object.entries(panels))panel.hidden=key!==id;for(const button of tabs.children)button.setAttribute('aria-pressed',String(button.dataset.programView===id));}
+    for(const [id,label]of [['logs','日志'],['stages','阶段'],['queue','队列']])tabs.append(h('button',{class:'btn small',type:'button',dataset:{programView:id},onclick:()=>show(id)},label));
+    if(ctx.setActions)ctx.setActions(tabs);else page.prepend(tabs);page.prepend(replyWindowState);show('logs');
   }
   set(root, page);
   const cleanup = editorGuard(ctx, page, () => !!settings && JSON.stringify(settings) !== saved);
@@ -53,6 +58,7 @@ export function mount(root, ctx) {
     finally { loading = false; }
   }
   function renderStatus() {
+    const window=data.replyHours;replyWindowState.textContent=window?.open===false?'回复时段已关闭 · 开放 '+(fmtDateTime(window.opensAt)||window.openTime||'待定'):window?'回复时段已开放':'';
     const stage = data.stage;
     const activeStage = stage?.status === 'running' ? stage : null;
     set(runtime, h('div', { class: 'toolbar' }, h('div', { class: 'grow' }, h('div', { class: 'muted small' }, '当前控制'), h('div', { class: 'big' }, STATUS[data.control] || data.control)), h('button', { class: 'btn', type: 'button', onclick: loadStatus }, '刷新状态')),

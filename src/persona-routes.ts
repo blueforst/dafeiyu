@@ -2,8 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import type { Store } from './store.js';
 import { readPanelSettings } from './settings.js';
 import { redact } from './config.js';
-import { PersonaService, PersonaValidationError } from './persona.js';
-import { DailyStateService } from './daily-state.js';
+import { PersonaService, PersonaValidationError,FIXED_SYSTEM_RULES } from './persona.js';
+import { DailyStateService,shanghaiDate } from './daily-state.js';
 import { LlmStore } from './llm-store.js';
 import { PERSONA_PRESETS,PERSONA_PRESETS_VERSION } from './persona-presets.js';
 
@@ -23,12 +23,12 @@ export function registerPersonaRoutes(app:FastifyInstance,deps:Deps):void {
   return {estimatedUsd:totals.costUSD,unpriced:totals.unpriced,unknown:totals.unknown,requests:totals.calls};
  };
  const history=(id:string)=>deps.daily.history(id,7).map(state=>({...state,fees:cost(state.interactionId,state.callId)}));
- const daily=()=>{
+ const daily=(date?:string)=>{
   const id=deps.accountId();if(!id||id==='unknown')return null;
-  const result=deps.daily.describe(id),interactionId=result.interactionId??result.today?.interactionId,callId=result.callId??result.today?.callId;
-  return {...result,history:history(id),fees:cost(interactionId,callId),calls:interactionId?ledger.calls({interactionId,limit:100}).items:[],scheduleTime:scheduleTime()};
+  const result=deps.daily.describe(id,date),interactionId=result.interactionId??result.today?.interactionId,callId=result.callId??result.today?.callId;
+  return {...result,readOnly:result.date!==shanghaiDate(deps.daily.now()),days:deps.daily.calendar(id).map(day=>({...day,fees:cost(day.interactionId??day.state?.interactionId,day.callId??day.state?.callId)})),history:history(id),fees:cost(interactionId,callId),calls:interactionId?ledger.calls({interactionId,limit:100}).items:[],scheduleTime:scheduleTime()};
  };
- app.get('/api/persona/presets',handle(()=>({version:PERSONA_PRESETS_VERSION,items:structuredClone(PERSONA_PRESETS)})));
+ app.get('/api/persona/presets',handle(()=>({version:PERSONA_PRESETS_VERSION,items:structuredClone(PERSONA_PRESETS),fixedRules:FIXED_SYSTEM_RULES})));
  app.get('/api/persona',handle(()=>({...deps.persona.get(),daily:daily(),scheduleTime:scheduleTime()})));
  app.put('/api/persona',{bodyLimit:128*1024},handle(req=>{
   const revision=req.body?.revision;
@@ -36,10 +36,11 @@ export function registerPersonaRoutes(app:FastifyInstance,deps:Deps):void {
   return {ok:true,...deps.persona.save(req.body?.persona,revision),daily:daily(),scheduleTime:scheduleTime()};
  }));
  app.post('/api/persona/preview',{bodyLimit:128*1024},handle(req=>deps.persona.preview(req.body)));
- app.get('/api/persona/daily',handle(()=>daily()??{today:null,history:[],status:'unavailable',error:'当前账号未确认',scheduleTime:scheduleTime()}));
+ app.get('/api/persona/daily',handle(req=>{const date=req.query?.date;if(date!==undefined&&typeof date!=='string')throw new PersonaValidationError('日程日期无效');return daily(date)??{today:null,history:[],days:[],status:'unavailable',error:'当前账号未确认',scheduleTime:scheduleTime()};}));
  app.get('/api/persona/daily/history',handle(()=>({items:history(account())})));
  app.put('/api/persona/daily',{bodyLimit:128*1024},handle(req=>{
   if(!Number.isInteger(req.body?.revision)||req.body.revision<0)throw new PersonaValidationError('编辑日程需要当前修订号');
+  if(req.body?.date!==shanghaiDate(deps.daily.now())){const error=new PersonaValidationError('只有今天的日程可以编辑，过去日期只读');error.statusCode=409;throw error;}
   return {ok:true,state:deps.daily.edit(account(),req.body?.date,req.body?.content,req.body.revision),daily:daily()};
  }));
  app.post('/api/persona/daily/generate',handle(req=>{

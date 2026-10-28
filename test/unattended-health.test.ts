@@ -139,3 +139,35 @@ test('健康设置保存受域修订和边界约束，保存不产生业务控�
   assert.equal(f.store.get('control','paused'),'paused');assert.equal(f.store.logs().length,0);
  }finally{await app.close();f.close();if(old===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=old;rmSync(dir,{recursive:true,force:true});}
 });
+
+test('回复时段关闭覆盖可发送输入，开放后停滞从实际开放点起算',()=>{
+ const f=fixture();try{
+  message(f,'hours');const base={accountId:'worker',control:'running',mode:'auto',sendableChannels:{public:true},replyHours:{open:false,reason:'reply-hours-closed',opensAt:f.now+3600000,closeTime:'23:30',openTime:'08:00',closures:[]}} as any;
+  const closed=f.health.evaluate(base);assert.equal(closed.metrics.find(m=>m.key==='send-stall')?.level,'normal');assert.equal(closed.metrics.find(m=>m.key==='reply-hours')?.level,'normal');assert.match(closed.metrics.find(m=>m.key==='reply-hours')?.summary??'',/回复时段已关闭/);
+  const openedAt=f.now-19*60000;assert.equal(f.health.evaluate({...base,replyHours:{...base.replyHours,open:true,reason:null,openedAt}}).metrics.find(m=>m.key==='send-stall')?.level,'normal');
+  f.at(f.now+60000);assert.equal(f.health.evaluate({...base,replyHours:{...base.replyHours,open:true,reason:null,openedAt}}).metrics.find(m=>m.key==='send-stall')?.level,'error');
+ }finally{f.close();}
+});
+
+test('私信滚动额度满时健康回退不判停滞，拒绝记录不占二十四小时额度',()=>{
+ const f=fixture();try{
+  f.store.db.exec('CREATE TABLE outbox(id TEXT PRIMARY KEY,account_id TEXT,channel TEXT,kind TEXT,source_id TEXT,status TEXT,submitted_at INTEGER,updated_at INTEGER)');
+  message(f,'quota-private','private');const insert=f.store.db.prepare('INSERT INTO outbox VALUES(?,?,?,?,?,?,?,?)');
+  for(let i=0;i<400;i++)insert.run('daily-'+i,'worker','private','dm','history-'+i,'confirmed',f.now-2*3600000,f.now-2*3600000);
+  const input={accountId:'worker',control:'running',mode:'auto',privatePerHour:30,privatePerDay:400};
+  assert.equal(f.health.evaluate(input).metrics.find(m=>m.key==='send-stall')?.level,'normal');
+  f.store.db.prepare("UPDATE outbox SET status='rejected' WHERE id='daily-0'").run();assert.equal(f.health.evaluate(input).metrics.find(m=>m.key==='send-stall')?.level,'error');
+  for(let i=0;i<3;i++)f.health.recordAutomationBlock('worker','private');
+  const warning=f.health.evaluate({...input,control:'paused'}).metrics.find(m=>m.key==='automation-private')?.summary??'';assert.match(warning,/最近 24 小时 400/);assert.doesNotMatch(warning,/未设置/);
+ }finally{f.close();}
+});
+
+test('日报延迟扣除回复关闭时长，时段查询只用只读输入',()=>{
+ const f=fixture();try{
+  const received=Date.parse('2026-10-28T02:00:00+08:00'),sent=Date.parse('2026-10-28T08:05:00+08:00');f.at(sent);
+  f.store.ingest({id:'night',channel:'public',userId:'alice',handle:'alice',text:'日报不得保存的正文',url:'https://x.com/alice/status/night',conversationId:'night',timestamp:received,timestampReliable:true,platformId:'night'},'worker');
+  const row=f.store.db.prepare("SELECT id FROM messages WHERE account_id='worker'").get() as any;f.store.update(row.id,'confirmed',{},'worker');f.store.db.prepare('UPDATE messages SET updated_at=? WHERE id=?').run(sent,row.id);
+  let reads=0;const health=new RuntimeHealth(f.store,()=>f.now,()=>{reads++;return {open:true,reason:null,closeTime:'23:30',openTime:'08:00',closures:[{start:Date.parse('2026-10-27T23:30:00+08:00'),end:Date.parse('2026-10-28T08:00:00+08:00')}]};});
+  const report=health.generateReport('2026-10-28','worker') as any;assert.equal(report.responseLatencyMs.samples,1);assert.equal(report.responseLatencyMs.median,5*60000);assert.equal(reads,1);assert.doesNotMatch(JSON.stringify(report),/日报不得保存的正文/);
+ }finally{f.close();}
+});

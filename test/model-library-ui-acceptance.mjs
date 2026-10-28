@@ -64,6 +64,11 @@ await page.route('**/api/**',async route=>{
    if(parts[7]==='test'&&method==='POST'){model.lastTest={ok:true,at:now,latencyMs:241};revision++;return send({result:model.lastTest,library:view()});}
   }
  }
+ if(method==='GET'&&path==='/api/tasks')return send({tasks:[],revision:0});
+ if(method==='GET'&&path==='/api/tasks/runs')return send({items:[],nextCursor:null});
+ if(method==='GET'&&path==='/api/triage/summary')return send({queues:[],reasons:[],publicToday:0,publicPerDay:180,privateRecent:0,privatePerDay:400});
+ if(method==='GET'&&path==='/api/billing/summary')return send({totals:{costUSD:0,unpriced:0},daily:[],models:[],purposes:[]});
+ if(method==='GET'&&path==='/api/health')return send({status:'normal',metrics:[],activeAlerts:[]});
  unexpected.push({path,method});return send({error:'未定义的合成接口 '+path},404);
 });
 

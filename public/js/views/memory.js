@@ -18,12 +18,15 @@ export function mount(root, ctx) {
   const policyBox = h('div', {}, empty('正在读取记忆策略…'));
   const more = h('button', { type: 'button', class: 'btn', hidden: true, onclick: () => loadUsers(true) }, '加载更多用户');
   const selectionConfirm = h('div', { class: 'confirm', hidden: true });
-  const page = h('div', { class: 'stack' }, h('div', {}, h('h1', { class: 'page-title' }, '记忆')),
-    h('section', { class: 'card stack' },h('div',{class:'toolbar'},search,h('button',{id:'memory-search-button',class:'btn',type:'button',onclick:()=>loadUsers()},'搜索')),h('div',{class:'toolbar'},h('div',{class:'segmented'},[['','全部渠道'],['public','公开'],['private','私信']].map(([id,label])=>h('button',{class:'btn small',type:'button','aria-pressed':String(channel.value===id),onclick:e=>{channel.value=id;for(const child of e.currentTarget.parentNode.children)child.setAttribute('aria-pressed',String(child===e.currentTarget));loadUsers();}},label))),h('details',{},h('summary',{},'更多筛选'),field('工作账号',account)))),
-    selectionConfirm, h('div', { class: 'memory-layout' }, h('section', { class: 'card stack' }, h('h2', { class: 'card-h' }, '用户与会话'), list, more), h('section', { class: 'card stack' }, details)));
-  set(root, page);
-  const experiences=mountExperiences(page);
-  const dirty = () => experiences.dirty() || (!!policy && JSON.stringify(policy) !== policySaved) || [...edits.entries()].some(([id, text]) => text !== current?.items?.find(x => x.id === id)?.text);
+  const identity=h('select',{class:'input settings-secondary-mobile',id:'memory-identity','aria-label':'选择记忆身份',onchange:()=>{const user=users[Number(identity.value)];if(user)select(user);}});
+  const tabs=h('div',{class:'segmented',role:'group','aria-label':'记忆视图'},[['users','用户记忆'],['experiences','角色经历'],['policy','策略']].map(([view,label])=>h('a',{href:'#/settings/memory?view='+view,class:'btn small',dataset:{memoryView:view}},label)));
+  const controls=h('div',{class:'stack memory-user-controls'},h('div',{class:'toolbar'},search,h('button',{id:'memory-search-button',class:'btn small',type:'button',onclick:()=>loadUsers()},'搜索')),h('div',{class:'segmented'},[['','全部'],['public','公开'],['private','私信']].map(([id,label])=>h('button',{class:'btn small',type:'button','aria-pressed':String(channel.value===id),onclick:e=>{channel.value=id;for(const child of e.currentTarget.parentNode.children)child.setAttribute('aria-pressed',String(child===e.currentTarget));loadUsers();}},label))),h('details',{},h('summary',{},'更多筛选'),field('工作账号',account)));
+  const secondaryList=h('aside',{class:'settings-secondary-list stack'},controls,list,more),mobileControls=h('div',{class:'settings-memory-mobile-controls stack'},identity),userPane=h('div',{class:'settings-secondary-layout settings-memory-users'},secondaryList,h('section',{class:'settings-secondary-detail stack'},mobileControls,details)),narrow=matchMedia('(max-width:860px)');
+  function responsive(){if(narrow.matches)mobileControls.replaceChildren(controls,identity,more);else{secondaryList.prepend(controls);secondaryList.append(more);mobileControls.replaceChildren(identity);}}
+  narrow.addEventListener('change',responsive);responsive();
+  const experiencePane=h('div',{class:'settings-memory-experiences',hidden:true}),policyPane=h('div',{class:'settings-panel settings-memory-policy',hidden:true},policyBox),page=h('div',{class:'stack settings-memory'},ctx.workspace?null:h('h1',{class:'page-title'},'记忆'),ctx.setActions?null:tabs,selectionConfirm,userPane,experiencePane,policyPane);
+  set(root, page);ctx.setActions?.(tabs);let experiences=null,usersLoaded=false,view='';
+  const dirty = () => !!experiences?.dirty() || (!!policy && JSON.stringify(policy) !== policySaved) || [...edits.entries()].some(([id, text]) => text !== current?.items?.find(x => x.id === id)?.text);
   const cleanup = editorGuard(ctx, page, dirty);
   const query = scope => new URLSearchParams({ accountId: scope.accountId || '', channel: scope.channel || 'public' });
   function itemDirty() { return [...edits.entries()].some(([id, text]) => text !== current?.items?.find(x => x.id === id)?.text); }
@@ -32,7 +35,7 @@ export function mount(root, ctx) {
       set(selectionConfirm, h('span', {}, '当前用户有未保存的记忆修改。'), h('div', { class: 'confirm-actions' },
         h('button', { type: 'button', class: 'btn small', onclick: () => { selectionConfirm.hidden = true; } }, '保留编辑'),
         h('button', { type: 'button', class: 'btn small danger', onclick: () => { selectionConfirm.hidden = true; select(user, true); } }, '放弃并切换')));
-      selectionConfirm.hidden = false; return;
+      selectionConfirm.hidden = false; identity.value=selected?String(users.findIndex(u=>u.userId===selected.userId&&u.channel===selected.channel&&u.accountId===selected.accountId)):'';return;
     }
     selected = user; edits = new Map(); loadDetails(); renderUsers();
   }
@@ -41,7 +44,7 @@ export function mount(root, ctx) {
       h('b', {}, user.label || user.userId), h('span', { class: 'muted small' }, (user.accountId || '未知归属') + ' · ' + CHANNEL[user.channel] + (user.identityConfirmed ? '' : ' · 身份未确认')),
       h('span', { class: 'small' }, (user.forgotten ? '已遗忘／停止记录' : user.itemCount + ' 条记忆') + ' · 最近互动 ' + (fmtDateTime(user.lastInteractionAt) || '暂无')),
       h('span', { class: 'muted small' }, '整理时间 ' + (fmtDateTime(user.lastSummaryAt) || '尚未整理')))) : empty('没有符合筛选条件的用户或会话。'));
-    more.hidden = nextCursor === null || nextCursor === undefined;
+    set(identity,h('option',{value:''},'选择用户或会话'),users.map((user,index)=>h('option',{value:String(index)},(user.label||user.userId)+' · '+CHANNEL[user.channel])));const index=selected?users.findIndex(user=>user.userId===selected.userId&&user.accountId===selected.accountId&&user.channel===selected.channel):-1;if(selected&&index<0)identity.append(h('option',{value:'selected'},(selected.label||selected.userId)+' · '+CHANNEL[selected.channel]));identity.value=selected?(index<0?'selected':String(index)):'';more.hidden = nextCursor === null || nextCursor === undefined;
   }
   async function loadUsers(append = false) {
     if (busy) return; busy = true; more.disabled = true;
@@ -50,7 +53,7 @@ export function mount(root, ctx) {
       if (account.value || accountEdited) params.set('accountId', account.value.trim());
       if (append && nextCursor !== null) params.set('cursor', nextCursor);
       const data = await api('/api/memory/users?' + params); if (!alive) return;
-      users = append ? [...users, ...data.users] : data.users; nextCursor = data.nextCursor; renderUsers();
+      usersLoaded=true; users = append ? [...users, ...data.users] : data.users; nextCursor = data.nextCursor; renderUsers();
     } catch (e) { if (alive) errorBox(list, e, () => loadUsers()); }
     finally { busy = false; more.disabled = false; }
   }
@@ -114,7 +117,7 @@ export function mount(root, ctx) {
       const save = h('button', { id: 'memory-policy-save', type: 'button', class: 'btn primary', onclick: async () => {
         save.disabled = true;
         const snapshot = structuredClone(policy);
-        try { const res = await api('/api/memory/policy', { method: 'PUT', body: { policy: snapshot, revision: policyRevision } }); policyRevision = res.revision; policySaved = JSON.stringify(snapshot); notice('记忆策略已保存，下一轮生效', 'ok'); }
+        try { const res = await api('/api/memory/policy', { method: 'PUT', body: { policy: snapshot, revision: policyRevision } }); policyRevision = res.revision; policySaved = JSON.stringify(snapshot); ctx.onSaved?.();notice('记忆策略已保存，下一轮生效', 'ok'); }
         catch (e) { notice(e.message, 'error'); } finally { save.disabled = false; }
       } }, '保存记忆策略');
       set(policyBox, h('div', { class: 'grid3' }, [['recentCount', '近期互动数量', 1, 20], ['recentDays', '近期窗口（天）', 1, 365], ['retentionDays', '原文保留（天）', 1, 365]].map(([key, label, min, max]) => field(label, h('input', { type: 'number', class: 'input', min, max, step: 1, value: policy[key], oninput: e => { policy[key] = Number(e.target.value); } })))),
@@ -123,7 +126,8 @@ export function mount(root, ctx) {
   }
   const offStatus = onStatus(status => { if (!accountEdited && !account.value && status?.accountId) account.value = status.accountId; });
   function useRoute(route=ctx.route) {const params=route.params;if(!params?.has('user'))return;const userId=params.get('user'),accountId=params.get('account')||getStatus()?.accountId||'',ch=params.get('channel')==='private'?'private':'public';account.value=accountId;accountEdited=true;channel.value=ch;select({userId,accountId,channel:ch,label:userId,identityConfirmed:true});loadUsers();}
-  const onRoute=e=>{if(e.detail.page==='memory')useRoute(e.detail);};window.addEventListener('panel-route',onRoute);
-  if(ctx.route?.params?.has('user'))useRoute();else loadUsers();
-  return () => { alive = false; cleanup(); experiences.dispose(); offStatus(); window.removeEventListener('panel-route',onRoute); };
+  function useView(route=ctx.route){const requested=route?.params?.get('view'),next=['users','experiences','policy'].includes(requested)?requested:'users';if(view&&next!==view&&dirty()){edits.clear();policy=null;policySaved='';experiences?.dispose();experiences=null;set(experiencePane);if(current)renderDetails();}if(next==='users'&&route?.params?.has('user')&&route.params.get('user')!==selected?.userId&&itemDirty()){edits.clear();if(current)renderDetails();}view=next;userPane.hidden=next!=='users';experiencePane.hidden=next!=='experiences';policyPane.hidden=next!=='policy';for(const button of tabs.children)button.setAttribute('aria-pressed',String(button.dataset.memoryView===next));if(next==='users'){if(route?.params?.has('user'))useRoute(route);else if(!usersLoaded)loadUsers();}else if(next==='policy'&&!policy)loadPolicy();else if(next==='experiences'&&!experiences){experiences=mountExperiences(experiencePane);const box=experiencePane.querySelector('details');if(box)box.open=true;}}
+  const onRoute=e=>{if(e.detail.page==='memory'||(e.detail.page==='settings'&&e.detail.section==='memory'))useView(e.detail);};window.addEventListener('panel-route',onRoute);
+  useView();
+  return () => { alive = false; cleanup(); experiences?.dispose();narrow.removeEventListener('change',responsive); offStatus(); window.removeEventListener('panel-route',onRoute); };
 }

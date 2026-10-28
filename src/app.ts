@@ -37,6 +37,9 @@ import {ManualImportsService} from './manual-imports.js';
 import {registerManualImportRoutes} from './manual-import-routes.js';
 import {RoleExperienceService} from './role-experiences.js';
 import {registerRoleExperienceRoutes} from './role-experience-routes.js';
+import {registerPersonaLibraryRoutes} from './persona-library-routes.js';
+import {ChatTestService} from './chat-test.js';
+import {registerChatTestRoutes} from './chat-test-routes.js';
 export async function startApp(){
  const app=Fastify({logger:false,bodyLimit:16384});const data=process.env.DATA_DIR||'/data';mkdirSync(data,{recursive:true});
  const store=new Store(data+'/workflow.sqlite');store.boot();
@@ -51,7 +54,7 @@ export async function startApp(){
  const persona=new PersonaService(store,generator),memory=new MemoryService(store,generator);
  let scheduler:TaskScheduler;
  const daily=new DailyStateService(store,generator,loadConfig,Date.now,()=>workflow.control()==='running'&&(scheduler?.plans()['daily-state'].enabled??true));
- const posting=new PostingCapabilitiesService(store,accountId),triage=new ReplyTriage(store,()=>normalizeTriageSettings(loadConfig().triage,loadConfig().maxAgeHours)),health=new RuntimeHealth(store);
+ const posting=new PostingCapabilitiesService(store,accountId),triage=new ReplyTriage(store,()=>normalizeTriageSettings(loadConfig().triage,loadConfig().maxAgeHours),Date.now,()=>workflow.replyHours().closures),health=new RuntimeHealth(store,Date.now,(at,account)=>workflow.replyHours(at,account));
  persona.postingPolicy=()=>posting.get();
  workflow.services={program,outbox,persona,memory,daily,posting,triage,health};
  scheduler=new TaskScheduler(store,{account:accountId,control:()=>workflow.control(),mode:()=>loadConfig().mode,nextTick:()=>workflow.nextTick,businessBusy:()=>workflow.busy,...productionTaskHandlers(workflow)});
@@ -60,6 +63,7 @@ export async function startApp(){
  const feed=new ActivityFeed(store,accountId,()=>loadConfig().maxAgeHours,posting,triage,account=>imports?.summary(account)??{latest:0,pending:0});
  const replay=new ReplayRunner(store,persona,generator,{accountId,config:loadConfig,memory:(userId,channel,account,at)=>memory.context(userId,channel,account,at)});
  const experiences=new RoleExperienceService(store,accountId);
+ const chat=new ChatTestService({dataDir:data,store,generator,persona,daily,posting,config:loadConfig});
  imports=new ManualImportsService(store,{account:accountId,control:()=>workflow.control(),maxAgeHours:()=>loadConfig().maxAgeHours,triage,inspectPost:(url,account,options)=>transport.inspectPost(url,account,options)});
  workflow.services.experiences=experiences;workflow.services.manualImports=imports;
  app.addHook('onRequest',async(req,reply)=>{
@@ -91,6 +95,8 @@ export async function startApp(){
  registerModelRoutes(app,{store});
  registerBillingRoutes(app,{store});
  registerPersonaRoutes(app,{store,persona,daily,accountId});
+ registerPersonaLibraryRoutes(app,{store,persona});
+ registerChatTestRoutes(app,{service:chat});
  registerMemoryRoutes(app,{memory,account:accountId});
  registerProgramRoutes(app,{store,program,workflow,accountId,manualImports:imports});
  registerManualImportRoutes(app,{imports,wake:()=>workflow.wake()});
@@ -99,7 +105,7 @@ export async function startApp(){
  registerTaskRoutes(app,{scheduler,workflow});
  registerFeedRoutes(app,{feed,wake:()=>workflow.wake()});
  registerPostingRoutes(app,{capabilities:posting,control:()=>workflow.control(),busy:()=>workflow.busy,refresh:()=>transport.capabilities(),operation:fn=>workflow.taskOperation('manual',fn)});
- registerTriageRoutes(app,{triage,accountId,publicPerDay:()=>loadConfig().publicPerDay??180,maxAgeHours:()=>loadConfig().maxAgeHours,settings:()=>({settings:normalizeTriageSettings(readPanelSettings().triage,loadConfig().maxAgeHours),revision:readPanelSettings().revisions?.triage??0}),saveSettings:(settings,revision)=>{const saved=mergePanelSettings('triage',settings,revision);return {settings,revision:saved.revision};},wake:()=>workflow.wake()});
+ registerTriageRoutes(app,{triage,accountId,publicPerDay:()=>loadConfig().publicPerDay??180,privatePerDay:()=>loadConfig().privatePerDay??400,maxAgeHours:()=>loadConfig().maxAgeHours,settings:()=>({settings:normalizeTriageSettings(readPanelSettings().triage,loadConfig().maxAgeHours),revision:readPanelSettings().revisions?.triage??0}),saveSettings:(settings,revision)=>{const saved=mergePanelSettings('triage',settings,revision);return {settings,revision:saved.revision};},wake:()=>workflow.wake()});
  registerHealthRoutes(app,{health,accountId});
  registerReplayRoutes(app,{store,replay});
  registerPromptHintsRoutes(app,{store});
@@ -108,7 +114,7 @@ export async function startApp(){
  let closing=false,readyTimer:ReturnType<typeof setTimeout>|undefined;
  const readyLoop=async()=>{if(closing)return;try{await transport.control('paused');if(!closing)workflow.start();}catch{if(!closing)readyTimer=setTimeout(readyLoop,3000);}};await readyLoop();
  const statusInterval=setInterval(()=>{store.set('heartbeat',String(Date.now()));},30000);
- app.addHook('onClose',async()=>{closing=true;clearTimeout(readyTimer);clearInterval(statusInterval);workflow.stop();await replay.close();await workflow.waitIdle().catch(()=>{});store.db.close();});
+ app.addHook('onClose',async()=>{closing=true;clearTimeout(readyTimer);clearInterval(statusInterval);workflow.stop();await chat.close();await replay.close();await workflow.waitIdle().catch(()=>{});store.db.close();});
  process.on('SIGTERM',async()=>{await app.close();process.exit(0);});
  await app.listen({port:Number(process.env.PORT||8080),host:'0.0.0.0'});
  return {app,store,workflow,imports,experiences};

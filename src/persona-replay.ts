@@ -24,7 +24,7 @@ export const REPLAY_SCHEMA = `
  CREATE TABLE IF NOT EXISTS replay_items(run_id TEXT NOT NULL,message_id TEXT NOT NULL,account_id TEXT NOT NULL,user_id TEXT NOT NULL,channel TEXT NOT NULL,created_at INTEGER NOT NULL,source_revision INTEGER NOT NULL,source_hash TEXT NOT NULL,baseline_json TEXT,candidate_json TEXT,label TEXT,issues_json TEXT NOT NULL DEFAULT '[]',metrics_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'queued',PRIMARY KEY(run_id,message_id));
  CREATE INDEX IF NOT EXISTS replay_items_source ON replay_items(account_id,user_id,channel,message_id);
 `;
-export type SnapshotInput = { conversation?:unknown; memory?:unknown; hintMeta?:unknown; dailySlot?:unknown; personaRevision?:number };
+export type SnapshotInput = { conversation?:unknown; memory?:unknown; hintMeta?:unknown; dailySlot?:unknown; personaRevision?:number; personaId?:string; personaName?:string };
 export type ReplayFilter = { from?:string; to?:string; channel?:Channel|'all'; includePrivate?:boolean; tier?:string; limit?:number; order?:'uniform'|'latest' };
 export type ReplayBaseline = 'actual'|'saved';
 export type ReplayLabel = 'candidate'|'baseline'|'same'|'both-bad';
@@ -46,7 +46,7 @@ export function boundedGenerationSnapshot(input:SnapshotInput,maxBytes=16*1024):
   else if(current!==undefined){delete value[key];value.truncated=true;}
  };
  for(const key of ['conversation','memory','hintMeta','dailySlot'])trim(key);
- if(size(value)>maxBytes)return {personaRevision:input.personaRevision,truncated:true};
+ if(size(value)>maxBytes)return {personaRevision:input.personaRevision,personaId:input.personaId,personaName:input.personaName,truncated:true};
  return value;
 }
 export function captureGenerationSnapshot(store:Store,event:Event,input:SnapshotInput,now=Date.now()):boolean {
@@ -109,7 +109,7 @@ function summaryQuality(items:QualityInput[]) {
 
 type FrozenSample = {id:string;hash:string;revision:number};
 type ReplayContext = {event:Event;at:number;body:any;hasSnapshot:boolean;memory:unknown;recentReplies:ReplySample[]};
-type Prepared = {id:string;accountId:string;at:number;samples:FrozenSample[];filter:ReplayFilter;candidate:Persona;baseline:Persona;baselineMode:ReplayBaseline;personaRevision:number;promptHints:unknown;dailyState:string;config:Config;estimate:any;compare?:'persona'|'model';modelCandidate?:{key:string;modelId:string;reasoningLevel:string};candidateConfig?:Config;frozenModels?:{baseline:FrozenReplayModel;candidate:FrozenReplayModel};assertCurrent?:()=>void;dispose?:()=>void;expiryTimer?:ReturnType<typeof setTimeout>};
+type Prepared = {id:string;accountId:string;at:number;samples:FrozenSample[];filter:ReplayFilter;candidate:Persona;baseline:Persona;baselineMode:ReplayBaseline;personaRevision:number;personaIdentity?:{id:string;name:string;revision:number};libraryBound?:boolean;promptHints:unknown;dailyState:string;config:Config;estimate:any;compare?:'persona'|'model';modelCandidate?:{key:string;modelId:string;reasoningLevel:string};candidateConfig?:Config;frozenModels?:{baseline:FrozenReplayModel;candidate:FrozenReplayModel};assertCurrent?:()=>void;dispose?:()=>void;expiryTimer?:ReturnType<typeof setTimeout>};
 export type ReplayModelSelection={key:string;modelId:string;reasoningLevel:string};
 type ReplayOptions = {accountId:()=>string;config?:()=>Config;memory?:(userId:string,channel:Channel,accountId:string,at:number)=>unknown;now?:()=>number;resolveModel?:(selection:ReplayModelSelection)=>Promise<{model:Config['model'];revision:number;selection:ReplayModelSelection}>;modelLibraryRevision?:()=>number;freezeModel?:(config:Config,generator:Generator,valid:()=>void)=>Promise<FrozenReplayModel>};
 export class ReplayRunner {
@@ -126,6 +126,8 @@ export class ReplayRunner {
   store.db.prepare("UPDATE replay_items SET status='interrupted' WHERE status='running'").run();
   this.purgeMissingSources();
  }
+ private selectedPersona(id:unknown){if(id===undefined)return {...this.persona.get(),identity:this.persona.activeIdentity(),libraryBound:false};if(typeof id!=='string')throw new ReplayError('人设标识无效');const item=this.persona.library.detail(id);return {persona:item.persona,revision:item.revision,identity:{id:item.id,name:item.name,revision:item.revision},libraryBound:true};}
+ private personaIdentityView(value:any){if(!value)return {id:null,name:'未记录',revision:null,deleted:false};let deleted=false;try{this.persona.library.detail(value.id);}catch(error:any){deleted=error?.statusCode===404;}return {...value,deleted};}
  private account():string {const id=this.options.accountId();if(!id||id==='unknown')throw new ReplayError('当前工作账号尚未确认',409);return id;}
  private ensureAccount(expected:string){if(this.account()!==expected)throw new ReplayError('工作账号已变化，回放已停止',409);}
  private allowed(row:any,accountId:string):boolean{return !!row&&row.account_id===accountId&&!sourceExcluded(this.store,row);}
@@ -172,7 +174,7 @@ export class ReplayRunner {
   if(!raw||typeof raw!=='object')throw new ReplayError('回放参数无效');
   if(raw.compare!==undefined&&!['persona','model'].includes(raw.compare))throw new ReplayError('比较对象无效');
   if(raw.compare==='model')return this.estimateModel(raw);
-  const accountId=this.account(),current=this.persona.get(),candidate=validatePersona(raw.persona??current.persona),baselineMode=raw.baselineMode??'actual';
+  const accountId=this.account(),current=this.selectedPersona(raw.personaId),candidate=validatePersona(raw.persona??current.persona),baselineMode=raw.baselineMode??'actual';
   if(!['actual','saved'].includes(baselineMode))throw new ReplayError('基线模式无效');
   if(!Number.isInteger(raw.personaRevision)||raw.personaRevision!==current.revision)throw new ReplayError('人设修订已变化，请重新读取',409);
   if(raw.promptHints!==undefined){if(size(raw.promptHints)>4096)throw new ReplayError('动态提醒设置无效');validatePromptHints(raw.promptHints);}
@@ -180,11 +182,11 @@ export class ReplayRunner {
   if(!samples.length)throw new ReplayError('没有符合条件且允许回放的消息');
   const config=structuredClone((this.options.config??loadConfig)()),estimate=this.costEstimate(config,accountId,samples.length,candidate,current.persona,baselineMode),id=randomUUID(),dailyState=typeof raw.dailyState==='string'?raw.dailyState:'回放模拟日程：在家阅读与休息，非真实活动';
   if(dailyState.length>8000)throw new ReplayError('模拟日程不能超过 8,000 字符');
-  const prepared:Prepared={id,accountId,at:this.now(),samples,filter:selected.filter,candidate,baseline:current.persona,baselineMode,personaRevision:current.revision,promptHints:validatePromptHints(raw.promptHints??config.promptHints??{}),dailyState,config,estimate};
+  const prepared:Prepared={id,accountId,at:this.now(),samples,filter:selected.filter,candidate,baseline:current.persona,baselineMode,personaRevision:current.revision,personaIdentity:current.identity,libraryBound:current.libraryBound,promptHints:validatePromptHints(raw.promptHints??config.promptHints??{}),dailyState,config,estimate};
   for(const [key,value] of this.estimates)if(this.now()-value.at>600000)this.dropEstimate(key);
   if(this.estimates.size>=20)this.dropEstimate(this.estimates.keys().next().value!);
   this.estimates.set(id,prepared);
-  return {estimateId:id,expiresAt:prepared.at+600000,...estimate,compare:'persona',samples:selected.items,excluded:selected.excluded,requiresConfirmation:true};
+  return {estimateId:id,expiresAt:prepared.at+600000,...estimate,compare:'persona',personaIdentity:current.identity,samples:selected.items,excluded:selected.excluded,requiresConfirmation:true};
  }
  private dropEstimate(id:string){const prepared=this.estimates.get(id);if(prepared){clearTimeout(prepared.expiryTimer);prepared.dispose?.();this.estimates.delete(id);}}
  cancelEstimate(id:string){const prepared=this.estimates.get(id);if(!prepared||prepared.accountId!==this.account())throw new ReplayError('费用预估不存在或已过期',404);this.dropEstimate(id);return {ok:true};}
@@ -198,7 +200,7 @@ export class ReplayRunner {
   return {model:{provider:config.model.provider,id:config.model.id,reasoningLevel:config.model.reasoningLevel},requests,replyRequests:requests,routingRequests:0,estimatedUsd:requests===0?0:cost,pricingStatus:requests===0?'not-needed':!price.known?'unpriced':cost===null?'unknown':'estimated',price};
  }
  private async estimateModel(raw:any){
-  const current=this.persona.get(),saved=validatePersona(current.persona),candidate=validatePersona(raw.persona??saved);
+  const current=this.selectedPersona(raw.personaId),saved=validatePersona(current.persona),candidate=validatePersona(raw.persona??saved);
   if(JSON.stringify(candidate)!==JSON.stringify(saved))throw new ReplayError('比较模型设置时请保持人设未改，一次只比较一个变量');
   if(raw.baselineMode!=='saved')throw new ReplayError('比较模型设置必须使用已保存人设重新生成基线');
   const initial=structuredClone((this.options.config??loadConfig)());
@@ -230,12 +232,12 @@ export class ReplayRunner {
   const prepared=this.estimates.get(estimateId);if(!prepared||this.now()-prepared.at>600000){this.dropEstimate(estimateId);throw new ReplayError('费用预估已过期，请重新预估',410);}
   try{
    prepared.assertCurrent?.();this.ensureAccount(prepared.accountId);
-   if(this.persona.get().revision!==prepared.personaRevision)throw new ReplayError('人设修订已变化，请重新预估',409);
+   if(this.selectedPersona(prepared.libraryBound?prepared.personaIdentity?.id:undefined).revision!==prepared.personaRevision)throw new ReplayError('人设修订已变化，请重新预估',409);
    for(const sample of prepared.samples){const row=this.store.getMessage(sample.id,prepared.accountId);if(!this.allowed(row,prepared.accountId)||sourceHash(row)!==sample.hash)throw new ReplayError('样本已变化或移除，请重新预估',409);}
   }catch(error){this.dropEstimate(estimateId);throw new ReplayError(error instanceof Error?error.message:'模型配置已变化，请重新预估',409);}
   const id=randomUUID(),now=this.store.nextTimestamp(this.now());
   const modelSnapshot=(model:Config['model'])=>({provider:model.provider,id:model.id,api:model.api,reasoning:model.reasoning,reasoningLevel:model.reasoningLevel,maxTokens:model.maxTokens,timeoutMs:model.timeoutMs,custom:model.custom,baseUrlHost:(()=>{try{return new URL(model.baseUrl).hostname;}catch{return '';}})()});
-  const settings={filter:prepared.filter,personaRevision:prepared.personaRevision,promptHints:prepared.promptHints,dailyState:prepared.dailyState,model:{provider:prepared.config.model.provider,id:prepared.config.model.id},baseline:prepared.baseline,compare:prepared.compare??'persona',modelCandidate:prepared.modelCandidate,models:prepared.compare==='model'?{baseline:modelSnapshot(prepared.config.model),candidate:modelSnapshot(prepared.candidateConfig!.model)}:undefined};
+  const settings={filter:prepared.filter,personaRevision:prepared.libraryBound?-1:prepared.personaRevision,personaItemRevision:prepared.libraryBound?prepared.personaRevision:undefined,personaIdentity:prepared.personaIdentity,personaLibraryBound:prepared.libraryBound,promptHints:prepared.promptHints,dailyState:prepared.dailyState,model:{provider:prepared.config.model.provider,id:prepared.config.model.id},baseline:prepared.baseline,compare:prepared.compare??'persona',modelCandidate:prepared.modelCandidate,models:prepared.compare==='model'?{baseline:modelSnapshot(prepared.config.model),candidate:modelSnapshot(prepared.candidateConfig!.model)}:undefined};
   this.store.db.exec('BEGIN IMMEDIATE');
   try{
    this.store.db.prepare("INSERT INTO replay_runs(id,account_id,created_at,updated_at,status,settings_json,persona_json,baseline_mode,estimate_json) VALUES(?,?,?,?,?,?,?,?,?)").run(id,prepared.accountId,now,now,'queued',JSON.stringify(settings),JSON.stringify(prepared.candidate),prepared.baselineMode,JSON.stringify(prepared.estimate));
@@ -328,8 +330,8 @@ export class ReplayRunner {
   const side=(value:'baseline'|'candidate'|'shared')=>{const result=this.store.db.prepare("SELECT COUNT(*) AS calls,AVG(latency_ms) AS averageLatencyMs,COALESCE(SUM(input_tokens),0) AS input,COALESCE(SUM(output_tokens),0) AS output,COALESCE(SUM(cache_read),0) AS cacheRead,SUM(CASE WHEN pricing_status='priced' AND json_valid(cost_json) THEN json_extract(cost_json,'$.total') END) AS costUSD,SUM(CASE WHEN pricing_status='priced' THEN 1 ELSE 0 END) AS priced,SUM(CASE WHEN pricing_status='unpriced' THEN 1 ELSE 0 END) AS unpriced,SUM(CASE WHEN pricing_status='unknown' THEN 1 ELSE 0 END) AS unknown FROM llm_calls WHERE account_id=? AND interaction_id=? AND purpose='persona-replay' AND source=?").get(accountId,id,'panel-replay:'+value) as any;return {...result,priced:result.priced??0,unpriced:result.unpriced??0,unknown:result.unknown??0};};
   return {total:rows.length,completed:rows.filter(r=>r.status==='completed').length,failed:rows.filter(r=>r.status==='failed').length,labels,issues,baseline:summaryQuality(baseline),candidate:summaryQuality(candidate),sides:{baseline:side('baseline'),candidate:side('candidate'),shared:side('shared')},fees:this.ledger.summary({accountId,interactionId:id}).totals};
  }
- list(){const accountId=this.account();this.purgeMissingSources();return {items:(this.store.db.prepare('SELECT id,created_at,updated_at,status,baseline_mode,estimate_json,settings_json FROM replay_runs WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT 20').all(accountId) as any[]).map(row=>({id:row.id,createdAt:row.created_at,updatedAt:row.updated_at,status:row.status,baselineMode:row.baseline_mode,compare:parse(row.settings_json).compare??'persona',modelCandidate:parse(row.settings_json).modelCandidate,canAdopt:parse(row.settings_json).compare!=='model',estimate:parse(row.estimate_json),summary:this.summary(row.id,accountId)}))};}
- detail(id:string){const run=this.runRow(id);this.purgeMissingSources();const settings=parse(run.settings_json);return {id,status:run.status,createdAt:run.created_at,updatedAt:run.updated_at,baselineMode:run.baseline_mode,compare:settings.compare??'persona',modelCandidate:settings.modelCandidate,canAdopt:settings.compare!=='model',persona:parse(run.persona_json),personaRevision:settings.personaRevision,estimate:parse(run.estimate_json),summary:this.summary(id,run.account_id),items:(this.store.db.prepare('SELECT * FROM replay_items WHERE run_id=? ORDER BY created_at,message_id').all(id) as any[]).map(row=>row.channel==='private'?{id:row.message_id,channel:'private',status:row.status,label:row.label,issues:parse(row.issues_json,[]),collapsed:true}:this.itemView(row))};}
+ list(){const accountId=this.account();this.purgeMissingSources();return {items:(this.store.db.prepare('SELECT id,created_at,updated_at,status,baseline_mode,estimate_json,settings_json FROM replay_runs WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT 20').all(accountId) as any[]).map(row=>({id:row.id,createdAt:row.created_at,updatedAt:row.updated_at,status:row.status,baselineMode:row.baseline_mode,compare:parse(row.settings_json).compare??'persona',modelCandidate:parse(row.settings_json).modelCandidate,personaIdentity:this.personaIdentityView(parse(row.settings_json).personaIdentity),canAdopt:parse(row.settings_json).compare!=='model',estimate:parse(row.estimate_json),summary:this.summary(row.id,accountId)}))};}
+ detail(id:string){const run=this.runRow(id);this.purgeMissingSources();const settings=parse(run.settings_json);return {id,status:run.status,createdAt:run.created_at,updatedAt:run.updated_at,baselineMode:run.baseline_mode,compare:settings.compare??'persona',modelCandidate:settings.modelCandidate,personaIdentity:this.personaIdentityView(settings.personaIdentity),canAdopt:settings.compare!=='model',persona:parse(run.persona_json),personaRevision:settings.personaItemRevision??settings.personaRevision,estimate:parse(run.estimate_json),summary:this.summary(id,run.account_id),items:(this.store.db.prepare('SELECT * FROM replay_items WHERE run_id=? ORDER BY created_at,message_id').all(id) as any[]).map(row=>row.channel==='private'?{id:row.message_id,channel:'private',status:row.status,label:row.label,issues:parse(row.issues_json,[]),collapsed:true}:this.itemView(row))};}
  private itemView(row:any){const source=this.store.getMessage(row.message_id,row.account_id);if(!this.allowed(source,row.account_id))throw new ReplayError('来源已移除',410);return {...this.sampleView(source,true),status:row.status,baseline:parse(row.baseline_json,null),candidate:parse(row.candidate_json,null),label:row.label,issues:parse(row.issues_json,[]),metrics:parse(row.metrics_json)};}
  item(id:string,messageId:string){const run=this.runRow(id),row=this.store.db.prepare('SELECT * FROM replay_items WHERE run_id=? AND message_id=? AND account_id=?').get(id,messageId,run.account_id) as any;if(!row)throw new ReplayError('回放条目不存在或已移除',404);return this.itemView(row);}
  label(id:string,messageId:string,label:unknown,issues:unknown){
@@ -337,7 +339,7 @@ export class ReplayRunner {
   this.item(id,messageId);this.store.db.prepare('UPDATE replay_items SET label=?,issues_json=? WHERE run_id=? AND message_id=? AND account_id=?').run(String(label),JSON.stringify([...new Set(issues)]),id,messageId,run.account_id);return {ok:true,summary:this.summary(id,run.account_id)};
  }
  delete(id:string){this.runRow(id);if(this.active?.id===id)throw new ReplayError('请先中止运行，再删除记录',409);this.store.db.prepare('DELETE FROM replay_items WHERE run_id=?').run(id);this.store.db.prepare('DELETE FROM replay_runs WHERE id=?').run(id);return {ok:true};}
- adopt(id:string){const run=this.runRow(id),settings=parse(run.settings_json);if(settings.compare==='model')throw new ReplayError('模型对比不能一键采用，请前往模型设置',409);if(run.status==='running'||run.status==='queued')throw new ReplayError('回放尚未结束',409);return this.persona.save(parse(run.persona_json),settings.personaRevision);}
+ adopt(id:string){const run=this.runRow(id),settings=parse(run.settings_json);if(settings.compare==='model')throw new ReplayError('模型对比不能一键采用，请前往模型设置',409);if(run.status==='running'||run.status==='queued')throw new ReplayError('回放尚未结束',409);if(settings.personaLibraryBound)return this.persona.library.save(settings.personaIdentity?.id,{persona:parse(run.persona_json),revision:settings.personaItemRevision??settings.personaRevision});return this.persona.save(parse(run.persona_json),settings.personaRevision);}
  quality(filter:ReplayFilter={}){
   const accountId=this.account(),range=billingRange(filter.from??beijingDate(this.now()-6*86400000),filter.to??beijingDate(this.now()+86400000),this.now());
   if(filter.channel!==undefined&&!['all','public','private'].includes(filter.channel))throw new ReplayError('统计渠道无效');

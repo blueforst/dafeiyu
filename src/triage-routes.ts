@@ -2,12 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { ReplyTriage,TriageError,normalizeTriageSettings,type TriageSettings } from './reply-triage.js';
 import type { Channel } from './types.js';
 
-type Deps={triage:ReplyTriage;accountId:()=>string;publicPerDay?:()=>number;maxAgeHours?:()=>number;settings?:()=>{settings:TriageSettings;revision:number};saveSettings?:(settings:TriageSettings,revision:number)=>unknown;wake?:()=>void};
+type Deps={triage:ReplyTriage;accountId:()=>string;publicPerDay?:()=>number;privatePerDay?:()=>number;maxAgeHours?:()=>number;settings?:()=>{settings:TriageSettings;revision:number};saveSettings?:(settings:TriageSettings,revision:number)=>unknown;wake?:()=>void};
 export function registerTriageRoutes(app:FastifyInstance,deps:Deps){
  const route=(fn:(request:any)=>unknown)=>async(request:any,reply:any)=>{try{return await fn(request);}catch(error:any){const code=error?.statusCode??400;return reply.code(code).send({error:code>=500?'分级操作失败，请查看日志':error instanceof Error?error.message:'分级参数无效'});}};
  const account=()=>{const id=deps.accountId();if(!id)throw new TriageError('请先确认浏览器当前账号',409);return id;};
  const scope=(request:any)=>{const raw=request.body??request.query??{},userId=String(raw.userId??request.params?.userId??'');if(!userId||userId.length>300||!['public','private'].includes(raw.channel))throw new TriageError('用户或渠道无效');return {userId,channel:raw.channel as Channel,accountId:account()};};
- app.get('/api/triage/summary',route(()=>deps.triage.summary(account(),deps.publicPerDay?.()??180)));
+ app.get('/api/triage/summary',route(()=>deps.triage.summary(account(),deps.publicPerDay?.()??180,deps.privatePerDay?.()??400)));
  app.post('/api/messages/:id/requeue',route(request=>{const result=deps.triage.requeue(String(request.params.id),account());deps.wake?.();return result;}));
  app.get('/api/triage/ignores',route(()=>({items:deps.triage.ignores(account())})));
  app.delete('/api/triage/ignores',route(request=>{const value=scope(request);return deps.triage.clearIgnore(value.userId,value.channel,value.accountId);}));

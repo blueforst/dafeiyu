@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { loadConfig, redact } from './config.js';
-import { readPanelSettings, mergePanelSettings } from './settings.js';
+import { readPanelSettings, SettingsConflictError } from './settings.js';
+import { PersonaLibraryService,type PersonaIdentity } from './persona-library.js';
 import { parseDraft, type Generator } from './model.js';
 import { listModels } from './model-catalog.js';
 import { LlmStore } from './llm-store.js';
@@ -106,7 +107,8 @@ export type AssembledPrompt = { system:string; user:string; segments:PromptSegme
 
 export class PersonaService {
  postingPolicy?:()=>{accountId:string;reply?:PostingCapability;simulation?:boolean};
- constructor(public store:Store,public generator:Generator,public config:()=>Config=loadConfig){}
+ library:PersonaLibraryService;
+ constructor(public store:Store,public generator:Generator,public config:()=>Config=loadConfig){this.library=new PersonaLibraryService(store,this);}
  get(){
   const settings=readPanelSettings();
   const persona=resolvePersona(settings.persona,settings.persona===undefined?this.config().persona:'');
@@ -114,10 +116,12 @@ export class PersonaService {
  }
  save(raw:unknown,expectedRevision?:number){
   const persona=validatePersona(raw);
-  const saved=mergePanelSettings('persona',persona,expectedRevision);
-  this.store.log('persona-save','人设已保存，下一轮生效');
-  return {persona,revision:saved.revision,fixedRules:FIXED_SYSTEM_RULES};
+  const current=this.get();if(expectedRevision!==undefined&&(!Number.isSafeInteger(expectedRevision)||expectedRevision!==current.revision))throw new SettingsConflictError('persona',current.revision);
+  const active=this.library.getActive(),saved=this.library.save(active.id,{revision:active.revision,persona},{expectedPersonaRevision:expectedRevision});
+  return {persona,revision:saved.personaRevision,fixedRules:FIXED_SYSTEM_RULES};
  }
+ /** 元数据失效不能阻断继续使用已验证的兼容人设镜像。 */
+ activeIdentity():PersonaIdentity {try{return this.library.activeIdentity();}catch{const current=this.get();return {id:'current',name:'当前人设',revision:current.revision};}}
  async assemble(input:AssembleInput):Promise<AssembledPrompt>{
   const c=structuredClone(input.config??this.config()),p=validatePersona(input.persona??this.get().persona),interactionId=input.interactionId??randomUUID();
   const now=input.now??Date.now(),promptHints=validatePromptHints(input.promptHints??c.promptHints??{}),recentReplies=structuredClone(input.recentReplies??[]),extras=publicExtras(input);

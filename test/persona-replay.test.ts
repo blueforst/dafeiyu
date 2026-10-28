@@ -43,6 +43,34 @@ function fixture(){
  return {store,persona,memory,replay,generator,ledger,calls,add,estimate,tableState,config,now:()=>now,setNow:(value:number)=>now=value,setAccount:(value:string)=>account=value,setProduce:(fn:typeof produce)=>produce=fn,async close(){await replay.close();store.db.close();if(prior===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=prior;rmSync(dir,{recursive:true,force:true});}};
 }
 
+test('未使用人设回放冻结自身基线与修订，采用只写回发起人设',async()=>{
+ const f=fixture();try{
+  f.add(801);const active=f.persona.get(),made=f.persona.library.create({from:'blank',name:'未使用的候选'});
+  const item=f.persona.library.save(made.item.id,{revision:made.item.revision,persona:legacyPersona('这个是未使用人设的已保存基线')}).item;
+  const estimate=f.estimate({personaId:item.id,personaRevision:item.revision,persona:legacyPersona('准备采用的候选正文'),baselineMode:'saved'});assert.equal(estimate.personaIdentity.name,item.name);
+  const run=f.replay.start(estimate.estimateId,true);await f.replay.waitIdle();assert.ok(f.calls[0].system.includes('这个是未使用人设的已保存基线'));assert.ok(!f.calls[0].system.includes('准备采用的候选正文'));assert.ok(f.calls[1].system.includes('准备采用的候选正文'));
+  const detail=f.replay.detail(run.id);assert.equal(detail.personaIdentity.id,item.id);assert.equal(detail.personaIdentity.deleted,false);assert.equal(detail.personaRevision,item.revision);
+  const oldSettings=JSON.parse((f.store.db.prepare('SELECT settings_json FROM replay_runs WHERE id=?').get(run.id) as any).settings_json);assert.equal(oldSettings.personaRevision,-1);assert.equal(oldSettings.personaItemRevision,item.revision);assert.throws(()=>f.persona.save(detail.persona,oldSettings.personaRevision),{statusCode:409});assert.deepEqual(f.persona.get(),active);
+  const saved=f.replay.adopt(run.id);assert.equal(saved.item.id,item.id);assert.equal(saved.item.persona.sections[0].content,'准备采用的候选正文');assert.deepEqual(f.persona.get(),active);assert.equal(f.store.get('control'),'paused');
+ }finally{await f.close();}
+});
+
+test('未使用人设修订变化拒绝启动和采用，其他人设的修改不阻断所选回放',async()=>{
+ const f=fixture();try{
+  f.add(802);const one=f.persona.library.create({from:'blank',name:'甲'}).item,two=f.persona.library.create({from:'blank',name:'乙'}).item;
+  const estimate=f.estimate({personaId:one.id,personaRevision:one.revision});f.persona.library.save(two.id,{revision:two.revision,persona:legacyPersona('与甲无关的变更')});
+  const run=f.replay.start(estimate.estimateId,true);await f.replay.waitIdle();f.persona.library.save(one.id,{revision:one.revision,persona:legacyPersona('已经保存的甲')});assert.throws(()=>f.replay.adopt(run.id),{statusCode:409});
+  const latest=f.persona.library.detail(one.id),stale=f.estimate({personaId:one.id,personaRevision:latest.revision});f.persona.library.save(one.id,{revision:latest.revision,name:'甲改名'});assert.throws(()=>f.replay.start(stale.estimateId,true),{statusCode:409});assert.equal(f.persona.library.detail(one.id).persona.sections[0].content,'已经保存的甲');
+ }finally{await f.close();}
+});
+
+test('人设删除后回放仍保留名称与候选快照，并标注已删除',async()=>{
+ const f=fixture();try{
+  f.add(803);const item=f.persona.library.create({from:'blank',name:'可删除人设'}).item,estimate=f.estimate({personaId:item.id,personaRevision:item.revision}),run=f.replay.start(estimate.estimateId,true);await f.replay.waitIdle();
+  f.persona.library.delete(item.id,item.revision);assert.equal(f.replay.detail(run.id).personaIdentity.name,'可删除人设');assert.equal(f.replay.detail(run.id).personaIdentity.deleted,true);assert.equal(f.replay.list().items[0].personaIdentity.deleted,true);assert.equal(f.replay.detail(run.id).persona.sections[0].content,'未保存候选');assert.throws(()=>f.replay.adopt(run.id),{statusCode:404});
+ }finally{await f.close();}
+});
+
 test('回放样本绑定工作账号，私信需明确勾选且默认只返回折叠元数据',async()=>{
  const f=fixture();try{
   const pub=f.add(1),dm=f.add(2,{channel:'private',text:'不应出现在预览汇总的秘密'});f.add(3,{},'confirmed','worker-b');f.add(4,{},'queued');

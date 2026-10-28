@@ -24,12 +24,19 @@ test('剩余提案整体 API：注册、管理鉴权、只读缓存与暂停保�
   running=await startApp();const {app,store,workflow}=running;workflow.stop();store.set('activeAccount','proposalsbot');
   const auth={host:'panel.test','x-ingress-key':ingress},write={...auth,'x-workflow-control':'1',origin:'https://panel.test'};
   const reads=[
-   '/api/feed','/api/feed?filter=pending','/api/health','/api/health/alerts','/api/health/reports',
+   '/api/feed','/api/feed?filter=pending','/api/feed/conversations','/api/feed/conversations/posts/items','/api/personas','/api/personas/current','/api/chat-test/status','/api/chat-test/users','/api/health','/api/health/alerts','/api/health/reports',
    '/api/persona/replay/samples','/api/persona/replay/runs','/api/persona/quality',
    '/api/persona/prompt-hints','/api/triage/summary','/api/triage/ignores','/api/triage/settings',
    '/api/account/posting-limits','/api/billing/activity?weeks=52','/api/model',
   ];
-  const writes:Array<{method:'POST'|'PUT'|'DELETE';url:string;pattern?:string}>=[
+  const writes:Array<{method:'POST'|'PUT'|'PATCH'|'DELETE';url:string;pattern?:string}>=[
+   {method:'POST',url:'/api/personas'},
+   ...(['PUT','DELETE'] as const).map(method=>({method,url:'/api/personas/missing',pattern:'/api/personas/:id'})),
+   {method:'POST',url:'/api/personas/missing/activate',pattern:'/api/personas/:id/activate'},
+   {method:'POST',url:'/api/chat-test/users'},
+   ...(['PATCH','DELETE'] as const).map(method=>({method,url:'/api/chat-test/users/missing',pattern:'/api/chat-test/users/:id'})),
+   ...['reset','clear-cooldown','messages','process','memory/summarize'].map(action=>({method:'POST' as const,url:'/api/chat-test/users/missing/'+action,pattern:'/api/chat-test/users/:id/'+action})),
+   ...['retry','cancel'].map(action=>({method:'POST' as const,url:'/api/chat-test/users/missing/turns/missing/'+action,pattern:'/api/chat-test/users/:id/turns/:turnId/'+action})),
    ...['approve','cancel','regenerate','requeue'].map(action=>({method:'POST' as const,url:'/api/messages/missing/'+action,pattern:'/api/messages/:id/'+action})),
    {method:'PUT',url:'/api/persona/prompt-hints'},{method:'PUT',url:'/api/triage/settings'},{method:'DELETE',url:'/api/triage/ignores'},{method:'DELETE',url:'/api/triage/ignores/missing',pattern:'/api/triage/ignores/:userId'},
    {method:'POST',url:'/api/account/posting-limits/refresh'},
@@ -47,7 +54,7 @@ test('剩余提案整体 API：注册、管理鉴权、只读缓存与暂停保�
 
   await t.test('新增路由实际注册，GET与所有写入口要求管理凭据、控制标记和同源',async()=>{
    assert.equal((await app.inject({url:'/healthz'})).statusCode,200);
-   for(const url of reads){assert.equal(app.hasRoute({method:'GET',url:url.split('?')[0]}),true,url+' 已注册');assert.equal((await app.inject({url})).statusCode,401,url+' 无凭据');assert.equal((await app.inject({url,headers:{...auth,origin:'https://other.invalid'}})).statusCode,403,url+' 跨来源');}
+   for(const url of reads){const pattern=url.startsWith('/api/feed/conversations/posts/')?'/api/feed/conversations/:key/items':url.startsWith('/api/personas/')?'/api/personas/:id':url.split('?')[0];assert.equal(app.hasRoute({method:'GET',url:pattern}),true,url+' 已注册');assert.equal((await app.inject({url})).statusCode,401,url+' 无凭据');assert.equal((await app.inject({url,headers:{...auth,origin:'https://other.invalid'}})).statusCode,403,url+' 跨来源');}
    for(const request of writes){const {pattern,...route}=request;assert.equal(app.hasRoute({method:route.method,url:pattern??route.url}),true,route.url+' 已注册');assert.equal((await app.inject({...route,payload:{}})).statusCode,401,route.url+' 无凭据');assert.equal((await app.inject({...route,headers:auth,payload:{}})).statusCode,403,route.url+' 缺控制标记');assert.equal((await app.inject({...route,headers:{...write,origin:'https://other.invalid'},payload:{}})).statusCode,403,route.url+' 跨来源');}
    assert.equal(workflow.control(),'paused');
   });
@@ -75,6 +82,21 @@ test('剩余提案整体 API：注册、管理鉴权、只读缓存与暂停保�
    const cancel=await app.inject({method:'POST',url:url+'/cancel',headers:write,payload:{revision:approve.json().revision}});assert.equal(cancel.statusCode,200,cancel.body);assert.equal(store.getMessage(row.id)!.status,'draft');
    const regenerated=await app.inject({method:'POST',url:url+'/regenerate',headers:write,payload:{revision:cancel.json().revision}});assert.equal(regenerated.statusCode,200,regenerated.body);assert.equal(store.getMessage(row.id)!.status,'queued');assert.equal(JSON.parse(store.getMessage(row.id)!.draft).review,true);assert.equal(workflow.control(),'paused');assert.deepEqual(requests,before);assert.deepEqual(external,[]);assert.equal(store.db.prepare('SELECT count(*) n FROM llm_calls').get()!.n,0);assert.equal(store.db.prepare('SELECT count(*) n FROM outbox').get()!.n,0);
    store.ingest({...e,id:'other-source',platformId:'456',targetId:'456',url:'https://x.com/fixture/status/456',conversationId:'456',accountId:'otherbot'},'otherbot');const other=store.getMessage('other-source','otherbot')!;store.update(other.id,'draft',{draft:{action:'reply',text:'另一个账号正文',reason:''}},'otherbot');const denied=await app.inject({method:'POST',url:'/api/messages/'+encodeURIComponent(other.id)+'/approve',headers:write,payload:{text:'不能跨账号批准',revision:store.getMessage(other.id)!.updated_at}});assert.equal(denied.statusCode,404,denied.body);
+  });
+
+  await t.test('会话详情只追加分级和人设身份，不返回派生提示词正文',async()=>{
+   const row=store.getMessage('fixture-public','proposalsbot')!;
+   store.db.prepare('UPDATE messages SET tier=?,tier_reason=? WHERE id=?').run('priority','first-visit',row.id);
+   store.db.prepare('INSERT INTO generation_snapshots(message_id,account_id,user_id,channel,created_at,body_json) VALUES(?,?,?,?,?,?)').run(row.id,row.account_id,row.user_id,row.channel,Date.now(),JSON.stringify({personaId:'saved-persona',personaName:'隔离人设',personaRevision:3,conversation:'禁止返回的提示词分段'}));
+   const response=await app.inject({url:'/api/messages/'+encodeURIComponent(row.id),headers:auth});assert.equal(response.statusCode,200,response.body);
+   assert.equal(response.json().message.tier,'priority');assert.equal(response.json().message.tierReason,'first-visit');assert.deepEqual(response.json().message.persona,{id:'saved-persona',name:'隔离人设',revision:3});assert.ok(!response.body.includes('禁止返回的提示词分段'));
+   store.db.prepare('UPDATE generation_snapshots SET body_json=? WHERE message_id=?').run(JSON.stringify({personaRevision:2}),row.id);
+   const legacy=(await app.inject({url:'/api/messages/'+encodeURIComponent(row.id),headers:auth})).json();assert.equal(legacy.message.persona.name,'未记录');assert.equal(legacy.message.persona.revision,2);
+  });
+
+  await t.test('人设库和试聊写入口保留独立请求体上限',async()=>{
+   for(const [url,size] of [['/api/personas',129*1024],['/api/chat-test/users',65*1024]] as const){const response=await app.inject({method:'POST',url,headers:write,payload:{name:'字'.repeat(size)}});assert.equal(response.statusCode,413,url+' '+response.body);}
+   assert.equal(store.db.prepare('SELECT count(*) n FROM llm_calls').get()!.n,0);assert.equal(workflow.control(),'paused');
   });
 
   await t.test('feed SSE只含摘要，其他页面可刷新待处理数字而不泄露正文',async()=>{

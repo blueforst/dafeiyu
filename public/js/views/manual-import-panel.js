@@ -6,7 +6,7 @@ import {field,empty,errorBox} from '../view-utils.js';
 const STATUS={pending:'待下一轮核对',imported:'已补录入队',duplicate:'已有消息记录',rejected:'未通过核对',failed:'核对失败'};
 export function mount(actions,root,{onImported}={}){
  let alive=true,loading=false,reloadRequested=false,busy=false,loaded=false,currentFilter='all',accountId=getStatus()?.accountId||'',items=[],cursor=null;
- const dialogRoot=h('div'),input=h('input',{class:'input',id:'manual-import-url',type:'url',placeholder:'https://x.com/账号/status/…'}),feedback=h('div',{class:'small',role:'status'});
+ const dialogRoot=h('div'),input=h('input',{class:'input',id:'manual-import-url','aria-label':'帖子链接',type:'url',placeholder:'https://x.com/账号/status/…'}),feedback=h('div',{class:'small',role:'status'});
  const openButton=h('button',{class:'btn',id:'manual-import-open',type:'button',disabled:!accountId,onclick:openDialog},'按链接补录');
  const list=h('div',{class:'stack'}),more=h('button',{class:'btn small',type:'button',hidden:true,onclick:()=>load(true)},'加载更早补录结果');
  const heading=h('summary',{},'补录请求与结果'),box=h('details',{class:'card',id:'manual-imports'},heading,h('div',{class:'settings-body stack'},h('div',{class:'toolbar'},h('span',{class:'muted small grow'},'补录通过后仍按正常模式、时效与额度处理，不会因提交链接立即发送。'),h('button',{class:'btn small',type:'button',onclick:()=>load(false)},'刷新补录结果')),list,more));
@@ -49,6 +49,8 @@ export function mount(actions,root,{onImported}={}){
  const off=onStatus(s=>{if(!s)return;const next=s?.accountId||'';openButton.disabled=!next;if(next===accountId)return;accountId=next;items=[];cursor=null;loaded=false;input.value='';feedback.textContent='';heading.textContent='补录请求与结果';set(dialogRoot);render();if(box.open)load(false);});
  return{
   dirty:()=>!!input.value.trim(),
+  discard(){input.value='';feedback.textContent='';},
+  show(){box.hidden=false;box.open=true;if(!loaded)load(false);},
   setFilter(filter){const changed=filter!==currentFilter;currentFilter=filter;box.hidden=!['all','pending'].includes(filter);if(filter==='pending')box.open=true;if(changed&&box.open&&!box.hidden)load(false);},
   refresh(){if(loaded&&box.open&&!box.hidden)load(false);},
   dispose(){alive=false;off();set(dialogRoot);}
