@@ -6,6 +6,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
 COPY test ./test
+COPY public ./public
 COPY deploy/maintenance-helper.py ./deploy/maintenance-helper.py
 COPY deploy/rollback-schema.py ./deploy/rollback-schema.py
 COPY deploy/prepare-proposals-rollback.py ./deploy/prepare-proposals-rollback.py
