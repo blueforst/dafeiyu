@@ -22,6 +22,8 @@ export function mountWorkspace(root, { page, left, main, right } = {}) {
   const el = h('div', { class: 'ws-shell', dataset: { page } }, mask, l.el, m.el, r.el);
   const toggle = (side, holder) => { const b = h('button', { class:'ws-icon-button',type:'button','aria-controls':`${uid}-${side}`,onclick:()=>collapse(side,!isCollapsed(side)) }, side==='left'?'☰':'▥');holder.append(b);return b; };
   const leftClose = toggle('left',l.tools), leftOpen = toggle('left',m.tools), rightToggle = toggle('right',m.tools), rightClose = toggle('right',r.tools);
+  // 左栏展开入口放在标题前，独立于各页面会重绘的标题内容。
+  m.header.before(leftOpen);
   const isCollapsed = side => narrow.matches ? !mobile[side] : closed[side];
   function render() {
     for (const side of ['left','right']) {

@@ -45,6 +45,21 @@ await check('禁用存储时默认展开且交互不异常',async()=>{
  await page.getByRole('button',{name:'收起左栏',exact:true}).first().click();assert.equal(await page.locator('.ws-left').isVisible(),false);
  await page.reload();await page.waitForSelector('html[data-ready="1"]');assert.equal(await page.locator('.ws-left').isVisible(),true);
 });
+await check('左栏展开入口靠左，右栏入口靠右，宽窄屏浅深色布局一致',async()=>{
+ for(const scheme of ['light','dark'])for(const width of [1440,1280,860,375])for(const right of ['0','1']){
+  await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:900});await open('?right='+right);
+  const close=page.getByRole('button',{name:'收起左栏',exact:true});if(await close.isVisible())await close.click();
+  const launcher=page.getByRole('button',{name:'展开左栏',exact:true}),header=await page.locator('.ws-main>.ws-header').boundingBox(),left=await launcher.boundingBox(),title=await page.locator('.ws-main .ws-header-content').boundingBox();
+  assert.ok(left&&header&&title,'主区及左栏入口可见');
+  await page.screenshot({path:OUT+`/shell-collapsed-${scheme}-${width}-right-${right}.png`});
+  assert.ok(left.x>=header.x&&left.x<=header.x+16,`${scheme}/${width}/${right} 左栏入口应贴近主区左缘，实际 x=${left.x}`);
+  assert.ok(left.x+left.width<=title.x+1,'左栏入口在标题之前');
+  if(right==='1'){const control=await page.locator('.ws-main .ws-header-tools button').boundingBox();assert.ok(control.x>left.x+left.width&&control.x+control.width>=header.x+header.width-16,'右栏入口仍在主区右端');}
+  await launcher.click();assert.equal(await page.locator('.ws-left').isVisible(),true);
+  if(width<=860)await page.keyboard.press('Escape');else await page.getByRole('button',{name:'收起左栏',exact:true}).click();
+  assert.equal(await launcher.isVisible(),true);
+ }
+});
 await check('375px抽屉与浮层焦点、Esc恢复、无整体横溢',async()=>{
  await page.setViewportSize({width:375,height:900});await open();assert.equal(await page.locator('.ws-left').isVisible(),false);assert.equal(await page.locator('.ws-right').isVisible(),false);
  const trigger=page.getByRole('button',{name:'展开右栏',exact:true});await trigger.click();assert.equal(await page.locator('.ws-right[role="dialog"]').isVisible(),true);
