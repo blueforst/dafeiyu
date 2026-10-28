@@ -6,13 +6,15 @@
 
 ## 当前发布与验收边界
 
-截至 2026-10-28，正式 app／browser 为 **0.1.18.2**，来源 `9d69f92`，成对 healthy，schema **13**，正式构建 **533 项通过**。当前导航为动态、人设、记忆、设置、计费五页，业务保持 **paused／auto**；未定制部署读回通用默认 v2、修订 0。
+截至 2026-10-28，正式 app／browser 为 **0.1.18.5**，来源 `5657b90396f7a7e4bcb2d862a88894798da7c88d`，成对 healthy，schema **13**，正式构建 **546 项通过**。当前导航为动态、人设、记忆、设置、计费五页，业务保持 **paused／auto**；未定制部署读回通用默认 v2、修订 0。
 
 下列提案的现有代码已进入生产，包括四项新增提案、参考帖子补齐和计费图表交互；**这不表示提案的所有任务已经验收**。真实长帖、模型效果、平台发送与双方回执、业务及长期观察仍按各自清单继续完成。部分 `tasks.md` 的发布勾选尚未随最新证据回填；发布事实看 [发布与实机修复记录](../docs/实施记录/2026-10-28-发布与实机修复.md)，逐项完成条件仍看对应任务，不在本次索引整理中代替验收勾选。
 
-公开提及、搜索与自己帖子下回复已真实只读读通；私信界面就绪、原生结构和账号质量过滤仍在修复／实机复验。原生 X Chat 仍缺可靠时间与入站归属，自动事件为零，不声明自动收发可用。通知“全部”栏继续待真实样本、未启用。
+公开提及、搜索与自己帖子下回复真实只读正常。0.1.18.5 已通过原生 Chat 空收件箱专用证据验证，标题、副文、全部、搜索及无截断检查均通过，实际稳定就绪用时 11.089 秒；隔离私信 DOM 41 项、健康 15 项通过，账号 DOM 66 项已由 0.1.18.4 的同份账号代码验证。账号资料和开关均已可靠读取：简介为空、未标注自动化账号、质量过滤开启，需管理员处理真实账号设置，程序没有自动修改资料或开关。手动账号检查复用旧结果已修复并通过服务器 17 项验证，最新生产复核见发布记录。
 
-六预设 **240 次**与文风前后对比 **10 次**真实模型调用已获授权，按用户最新要求等待问题全部修好并完成实机复验后执行。当前新增真实模型调用为 **0**，原生产 completed 三条不变；不能写成缺授权，也不能把模拟结果当作已跑完真实批量。
+原生 X Chat 仍缺实际入站时间、归属与双方回执样本，自动私信事件为零，不声明自动私信收发可用；空收件箱与只读检查不能替代这些验收。通知“全部”栏继续待真实样本、未启用。
+
+六预设 **240 次**与文风前后对比 **10 次**真实模型调用已获授权，完成本轮修复及实机复验后按既定授权执行。实际调用进度、费用与管理员效果审定以 [最新发布与实机记录](../docs/实施记录/2026-10-28-发布与实机修复.md) 为准，不把模拟结果或授权本身写成批量已完成、效果已审定。
 
 ## 已部署代码所涵盖的提案
 
@@ -29,7 +31,7 @@
 | [人设回放与回复质量统计](changes/add-persona-replay/proposal.md)：样本比较、费用确认、人工标注与确定性指标；不替代真实模型效果审定 | [设计](changes/add-persona-replay/design.md) | [任务](changes/add-persona-replay/tasks.md) | [规格](changes/add-persona-replay/specs/) |
 | [参考帖子遗漏补齐](changes/fill-reference-post-gaps/proposal.md)：引用／卡片、目标上下文、关键词卡、角色经历、链接补录及模型对比；通知“全部”仍待样本且关闭 | [设计](changes/fill-reference-post-gaps/design.md) | [任务](changes/fill-reference-post-gaps/tasks.md) | [规格](changes/fill-reference-post-gaps/specs/) |
 | [计费图表交互](changes/add-billing-chart-interaction/proposal.md)：即时提示、日期列悬停、环图联动、触屏与键盘操作 | [设计](changes/add-billing-chart-interaction/design.md) | [任务](changes/add-billing-chart-interaction/tasks.md) | [规格](changes/add-billing-chart-interaction/specs/) |
-| [人设预设与默认人设](changes/add-persona-presets/proposal.md)：六个原创 v2 预设、通用默认、关键词卡（含“不给步骤”“被夸”）、编辑器填入与统一人设；240 次真实模型及效果审定未完成 | [设计](changes/add-persona-presets/design.md) | [任务](changes/add-persona-presets/tasks.md) | [规格](changes/add-persona-presets/specs/) |
+| [人设预设与默认人设](changes/add-persona-presets/proposal.md)：六个原创 v2 预设、通用默认、关键词卡（含“不给步骤”“被夸”）、编辑器填入与统一人设；真实调用及效果审定以最新记录为准 | [设计](changes/add-persona-presets/design.md) | [任务](changes/add-persona-presets/tasks.md) | [规格](changes/add-persona-presets/specs/) |
 | [取消消息里的遗忘指令](changes/remove-message-forget-command/proposal.md)：消息不能执行遗忘或恢复，管理员操作与独立账本保留；真实回复抽查待完成 | [设计](changes/remove-message-forget-command/design.md) | [任务](changes/remove-message-forget-command/tasks.md) | [规格](changes/remove-message-forget-command/specs/) |
 | [运行状态与浏览器接管分离](changes/separate-run-control-from-takeover/proposal.md)：顶部启动／暂停，设置页接管／释放，释放后继续暂停 | [设计](changes/separate-run-control-from-takeover/design.md) | [任务](changes/separate-run-control-from-takeover/tasks.md) | [规格](changes/separate-run-control-from-takeover/specs/) |
 | [回复文风与格式标记](changes/improve-reply-style/proposal.md)：同人近期往来、角色帖去重与格式只标记；真实前后五轮比较及发布后观察待完成 | [设计](changes/improve-reply-style/design.md) | [任务](changes/improve-reply-style/tasks.md) | [规格](changes/improve-reply-style/specs/) |
