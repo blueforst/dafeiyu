@@ -81,9 +81,15 @@ export class TaskScheduler {
   this.refreshHostRuns();const plans=this.plans(),now=this.now(),effectiveHostPlans=this.host.plans()??{};
   return {timezone:'Asia/Shanghai',revision:this.revision(),control:this.deps.control(),backupScope:BACKUP_SCOPE,hostAvailable:this.host.available(),tasks:TASK_IDS.map(id=>{
    const plan=plans[id],accountId=HOST.has(id)?'host':id==='daily-report'?(this.deps.account()||'system'):this.deps.account();
-   const last=this.store.db.prepare('SELECT * FROM task_runs WHERE task_id=? AND account_id=? ORDER BY started_at DESC LIMIT 1').get(id,accountId) as any;
+   const last=this.store.db.prepare('SELECT * FROM task_runs WHERE task_id=? AND account_id=? ORDER BY started_at DESC'+(id==='account-check'?',rowid DESC':'')+' LIMIT 1').get(id,accountId) as any;
    let nextRunAt:number|null=null;
-   if(plan.enabled){if(plan.time){const at=plannedAt(plan.time,now);nextRunAt=at>now?at:!last||last.scheduled_at!==at?at:at+86400000;if(id==='daily-state'&&last?.scheduled_at===at&&['failed','interrupted'].includes(last.status)&&last.attempts<3)nextRunAt=Math.max(now,(last.finished_at??last.started_at)+30*60000);}else if(plan.intervalSeconds)nextRunAt=(last?.finished_at??now)+plan.intervalSeconds*1000;}
+   if(plan.enabled){
+    if(plan.time){
+     const at=plannedAt(plan.time,now),scheduledExists=id==='account-check'?!!this.store.db.prepare('SELECT 1 FROM task_runs WHERE task_id=? AND account_id=? AND scheduled_at=?').get(id,accountId,at):last?.scheduled_at===at;
+     nextRunAt=at>now?at:scheduledExists?at+86400000:at;
+     if(id==='daily-state'&&last?.scheduled_at===at&&['failed','interrupted'].includes(last.status)&&last.attempts<3)nextRunAt=Math.max(now,(last.finished_at??last.started_at)+30*60000);
+    }else if(plan.intervalSeconds)nextRunAt=(last?.finished_at??now)+plan.intervalSeconds*1000;
+   }
    if(id==='main'&&plan.enabled&&this.deps.nextTick){const actual=this.deps.nextTick();nextRunAt=Number.isFinite(actual)&&actual>0?actual:null;}
    if(plan.enabled&&plan.time&&['daily-state','memory-summary'].includes(id)&&last?.status==='cancelled'&&last.scheduled_at===plannedAt(plan.time,now))nextRunAt=now;
    const latest=HOST.has(id)?this.host.latest(id as 'backup'|'health'):null;
@@ -154,6 +160,17 @@ export class TaskScheduler {
    throw new Error('主循环由唯一工作流运行器执行，请使用全局运行控制');
   }
   const plan=this.plans()[id],now=this.now();
+  if(id==='account-check'){
+   const accountId=this.deps.account();
+   // 重复点击复用仍在进行的只读检查，不能绕过共用浏览器互斥。
+   for(const runId of this.active.keys()){const current=this.getRun(runId);if(current?.taskId===id&&current.accountId===accountId)return current;}
+   // 手动刷新使用独立实例键，不能复用当天旧结果或占用自动计划槽位。
+   const reserved=plan.time?plannedAt(plan.time,now):null;let at=now;
+   const occupied=this.store.db.prepare('SELECT scheduled_at FROM task_runs WHERE task_id=? AND account_id=? AND scheduled_at>=? ORDER BY scheduled_at').all(id,accountId,now) as {scheduled_at:number}[];
+   for(const row of occupied){if(at===reserved)at++;if(row.scheduled_at>at)break;if(row.scheduled_at===at)at++;}
+   if(at===reserved)at++;
+   return this.run(id,'manual',at);
+  }
   const at=plan.time?plannedAt(plan.time,now):Math.floor(now/(plan.intervalSeconds??300)/1000)*(plan.intervalSeconds??300)*1000;
   return this.run(id,'manual',at);
  }

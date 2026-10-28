@@ -46,6 +46,67 @@ test('手动和自动争用同一个实例，完成后重复手动不重复调�
  }finally{f.close();}
 });
 
+test('当天自动账号检查完成后，暂停下重复手动刷新读取新状态且不改变计划',async()=>{
+ const f=fixture();let reads=0;
+ f.deps.observe=async id=>{if(id==='account-check')reads++;return {status:'completed'};};
+ try{
+  const planned=Date.parse('2026-10-28T10:00:00+08:00');f.at(planned+60000);
+  await f.scheduler.tickObservability();assert.equal(reads,1);
+  const automatic=f.scheduler.history({taskId:'account-check'}).items[0];assert.equal(automatic.source,'automatic');assert.equal(automatic.scheduledAt,planned);
+  f.control('paused');f.at(planned+2*3600000);
+  const plans=f.scheduler.plans(),revision=f.scheduler.revision(),settings=readPanelSettings();
+  const first=await f.scheduler.runNow('account-check');assert.equal(first.status,'completed');assert.equal(first.source,'manual');assert.notEqual(first.id,automatic.id);
+  f.at(planned+3*3600000);const second=await f.scheduler.runNow('account-check');assert.equal(second.status,'completed');assert.notEqual(second.id,first.id);assert.equal(reads,3);
+  assert.equal(f.scheduler.list().control,'paused');assert.deepEqual(f.scheduler.plans(),plans);assert.equal(f.scheduler.revision(),revision);assert.deepEqual(readPanelSettings(),settings);
+  assert.equal(f.scheduler.list().tasks.find(task=>task.id==='account-check')?.nextRunAt,planned+86400000);
+  assert.equal(f.scheduler.getRun(automatic.id)?.scheduledAt,planned);assert.deepEqual(first.callIds,[]);assert.deepEqual(second.callIds,[]);assert.equal(second.outboxId,null);
+  f.control('running');await f.scheduler.tickObservability();assert.equal(reads,3);
+  f.at(planned+86400000+60000);await f.scheduler.tickObservability();assert.equal(reads,4);
+  assert.deepEqual(f.calls,[]);assert.equal(new LlmStore(f.store).calls().items.length,0);
+ }finally{f.close();}
+});
+
+test('同毫秒完成后的账号刷新仍是新检查，手动不能占用当天自动计划时刻',async()=>{
+ const f=fixture();let reads=0;
+ f.deps.observe=async id=>{if(id==='account-check')reads++;return {status:'completed'};};
+ try{
+  const now=Date.parse('2026-10-28T10:00:00+08:00');f.at(now);f.control('paused');
+  const first=await f.scheduler.runNow('account-check'),second=await f.scheduler.runNow('account-check');
+  assert.equal(reads,2);assert.notEqual(first.id,second.id);assert.notEqual(first.scheduledAt,second.scheduledAt);assert.notEqual(first.scheduledAt,now);assert.notEqual(second.scheduledAt,now);
+  assert.equal(first.startedAt,now);assert.equal(second.startedAt,now);assert.equal(f.scheduler.list().tasks.find(task=>task.id==='account-check')?.lastRun?.id,second.id);
+  f.control('running');await f.scheduler.tickObservability();assert.equal(reads,3);
+  const scheduled=f.store.db.prepare("SELECT source,status FROM task_runs WHERE task_id='account-check' AND account_id='test-account' AND scheduled_at=?").get(now) as any;
+  assert.equal(scheduled.source,'automatic');assert.equal(scheduled.status,'completed');
+  assert.equal(f.scheduler.list().tasks.find(task=>task.id==='account-check')?.nextRunAt,now+86400000);assert.deepEqual(f.calls,[]);
+ }finally{f.close();}
+});
+
+test('进行中的手动账号检查复用实例，结束后再次点击才重新读取',async()=>{
+ const f=fixture();let reads=0,release:()=>void=()=>{};
+ const pending=new Promise<void>(resolve=>{release=resolve;});
+ f.deps.observe=async id=>{if(id==='account-check'){reads++;if(reads===1)await pending;}return {status:'completed'};};
+ try{
+  const now=Date.parse('2026-10-28T12:00:00+08:00');f.at(now);f.control('paused');
+  const first=f.scheduler.runNow('account-check');assert.equal(f.scheduler.busy,true);assert.equal(reads,1);
+  f.at(now+100);const duplicate=await f.scheduler.runNow('account-check');assert.equal(duplicate.status,'running');assert.equal(reads,1);assert.equal(f.scheduler.history({taskId:'account-check'}).items.length,1);
+  release();const completed=await first;assert.equal(completed.id,duplicate.id);assert.equal(completed.status,'completed');assert.equal(f.scheduler.busy,false);
+  f.at(now+1000);const refreshed=await f.scheduler.runNow('account-check');assert.notEqual(refreshed.id,completed.id);assert.equal(refreshed.status,'completed');assert.equal(reads,2);
+  assert.equal(f.scheduler.list().control,'paused');assert.deepEqual(f.calls,[]);assert.equal(new LlmStore(f.store).calls().items.length,0);
+ }finally{release();await f.scheduler.waitIdle();f.close();}
+});
+
+test('旧版手动检查已占当天计划槽位时，刷新不破坏下次自动计划提示',async()=>{
+ const f=fixture();let reads=0;
+ f.deps.observe=async id=>{if(id==='account-check')reads++;return {status:'completed'};};
+ try{
+  const planned=Date.parse('2026-10-28T10:00:00+08:00');f.at(planned+2*3600000);f.control('paused');
+  f.store.db.prepare("INSERT INTO task_runs(id,task_id,account_id,scheduled_at,source,status,started_at,finished_at) VALUES('legacy-account-check','account-check','test-account',?,'manual','completed',?,?)").run(planned,planned+60000,planned+61000);
+  const refreshed=await f.scheduler.runNow('account-check');assert.equal(refreshed.status,'completed');assert.equal(reads,1);assert.notEqual(refreshed.id,'legacy-account-check');
+  assert.equal(f.scheduler.list().tasks.find(task=>task.id==='account-check')?.nextRunAt,planned+86400000);
+  f.control('running');await f.scheduler.tickObservability();assert.equal(reads,1);assert.equal(f.scheduler.getRun('legacy-account-check')?.source,'manual');assert.equal(f.scheduler.getRun('legacy-account-check')?.status,'completed');assert.deepEqual(f.calls,[]);
+ }finally{f.close();}
+});
+
 test('关闭任务取消未提交实例，并且修改设置不恢复暂停或覆盖别域',async()=>{
  let allow:()=>void=()=>{};let context:TaskContext|undefined;
  const f=fixture(async(_id,ctx)=>{context=ctx;await new Promise<void>(r=>{allow=r;});return {status:ctx.ensureEnabled()?'completed':'cancelled'};});

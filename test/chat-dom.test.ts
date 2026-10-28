@@ -96,3 +96,8 @@ test('错误私信路由在DOM读取前拒绝，不被遍历超时或无关正�
  const value=await readPrivateUIState(page,{kind:'conversation',conversationId:'111-222'});assert.equal(value.state,'wrong-location');assert.equal(value.code,'private-wrong-location');assert.equal(domReads,0);assert.equal(value.traversedElements,0);
  const waited=await waitForPrivateUI({page,kind:'conversation',conversationId:'111-222',timeoutMs:1,stableMs:500,minimumObserveMs:500});assert.equal(waited.state,'wrong-location');assert.equal(waited.samples,1);assert.equal(domReads,0);
 });
+
+test('原生UI九秒后才就绪仍在默认二十秒预算内等待稳定，不把晚水合认未知',async()=>{
+ let now=0,reads=0;const value=await waitForPrivateUI({page:{} as any,kind:'inbox',deadline:30000,now:()=>now,sleep:async ms=>{now+=ms;},intervalMs:1000,inspect:async()=>{reads++;return now<9000?ui({state:'loading',code:'private-page-loading',loading:true,validConversations:0}):ui();}});
+ assert.equal(value.state,'ready');assert.equal(value.code,'private-inbox-ready');assert.ok(now>=9000&&now<20000);assert.ok(reads>=10);
+});
