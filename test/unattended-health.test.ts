@@ -53,6 +53,18 @@ test('告警按账号去重和恢复，自动化拦截三次告警与普通额�
  }finally{f.close();}
 });
 
+test('账号检查缺少或损坏的开关状态不能冒充已关闭或明确缺失',()=>{
+ for(const value of [undefined,'false',0,{},[]]){
+  const result=assessCompliance({accountId:'worker',profileReliable:false,automatedLabel:value,qualityFilter:value} as any,['AI'],123);
+  assert.equal(result.automatedLabel,'unknown');assert.equal(result.qualityFilter,'unknown');assert.equal(result.disclosure,'unknown');
+  const unreliable=assessCompliance({accountId:'worker',profileReliable:value,name:'AI 角色',bio:'AI 自动回复',automatedLabel:null,qualityFilter:null} as any,['AI'],123);
+  assert.equal(unreliable.disclosure,'unknown');assert.deepEqual(unreliable.missingPhrases,[]);
+ }
+ assert.equal(assessCompliance({accountId:'worker',profileReliable:true,name:'AI 角色',automatedLabel:null,qualityFilter:null},['AI'],123).disclosure,'unknown');
+ const known=assessCompliance({accountId:'worker',profileReliable:true,name:'AI 角色',bio:'AI 自动回复',automatedLabel:false,qualityFilter:false},['AI'],123);
+ assert.equal(known.automatedLabel,'missing');assert.equal(known.qualityFilter,'off');assert.equal(known.disclosure,'confirmed');
+});
+
 test('cgroup与进程树RSS读取保持只读，无法确认时返回unknown',()=>{
  const files:Record<string,string>={'/cg/memory.current':'800','/cg/memory.max':'1000'};
  assert.equal(readBrowserMemory({cgroupRoot:'/cg',read:p=>{if(!(p in files))throw Error();return files[p];}}).ratio,.8);

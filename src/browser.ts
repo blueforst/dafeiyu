@@ -20,6 +20,7 @@ import {collectReadyPublic,observeNativeReads} from './public-collection.js';
 import {collectionSources} from './collection-sources.js';
 import {inspectPrivateConversation,collectPrivateWithDiagnostics,type ChatProtection} from './chat-dom.js';
 import type {CollectionDiagnostic} from './collection-health.js';
+import {readReadyComplianceProfile,readReadyComplianceFilters,readReadyComplianceQuality,type ComplianceWaitOptions} from './account-compliance-dom.js';
 const exec=promisify(execFile);
 export function browserProxy(value?:string):{server:string}|undefined {
  if(!value?.trim())return undefined;
@@ -190,15 +191,15 @@ export async function collectPrivateWithBudget(input:CollectionBudgetInput){
 }
 
 /** 仅访问自己的资料及页面提供的通知设置链接；不点击任何开关。 */
-export async function readCompliance(page:Page,handle:string,navigate:(page:Page,url:string)=>Promise<void>):Promise<ComplianceObservation>{
+export async function readCompliance(page:Page,handle:string,navigate:(page:Page,url:string)=>Promise<void>,readiness:ComplianceWaitOptions={}):Promise<ComplianceObservation>{
  const result:ComplianceObservation={accountId:handle.toLowerCase(),profileReliable:false,automatedLabel:null,qualityFilter:null,reasons:[]};
  await navigate(page,'https://x.com/'+handle);
- const profile=await page.evaluate(()=>{const main=document.querySelector('main');const name=main?.querySelector('[data-testid="UserName"]') as HTMLElement|null;const bio=main?.querySelector('[data-testid="UserDescription"]') as HTMLElement|null;const text=(main as HTMLElement|null)?.innerText??'';return {name:name?.innerText??'',bio:bio?.innerText??'',reliable:!!name&&!!main,label:/\bAutomated by\s+@|由\s*@[^\s]+\s*自动/i.test(text)};});
- result.profileReliable=profile.reliable;result.name=profile.name;result.bio=profile.bio;result.automatedLabel=profile.reliable?profile.label:null;if(!profile.reliable)result.reasons!.push('自己的资料页结构无法可靠解析');
+ const profile=await readReadyComplianceProfile(page,handle,readiness);
+ result.profileReliable=profile.reliable;result.name=profile.name;result.bio=profile.bio;result.automatedLabel=profile.automatedLabel;if(!profile.reliable)result.reasons!.push('自己的资料页结构无法可靠解析');else if(profile.automatedLabel===null)result.reasons!.push('自己的资料页自动化标签结构无法可靠确认');
  await navigate(page,'https://x.com/settings/notifications');
- const filterLink=await page.locator('main a[href]').evaluateAll(nodes=>{const a=nodes.find(node=>/^(Filters|过滤|筛选)$/i.test((node.textContent??'').trim()));const href=a?.getAttribute('href');return href&&/^\/settings\/notifications(?:\/|$)/.test(href)?href:null;});
+ const filterLink=await readReadyComplianceFilters(page,readiness);
  if(filterLink)await navigate(page,'https://x.com'+filterLink);
- result.qualityFilter=await page.evaluate(()=>{const candidates=Array.from(document.querySelectorAll('main [role="switch"],main input[type="checkbox"]')).filter(node=>{const id=node.getAttribute('id'),label=id?document.querySelector('label[for="'+CSS.escape(id)+'"]'):null;const text=(node.getAttribute('aria-label')??'')+' '+(label?.textContent??'')+' '+(node.closest('label')?.textContent??'');return /quality filter|质量过滤|优质内容过滤/i.test(text);});if(candidates.length!==1)return null;const node=candidates[0];if(node instanceof HTMLInputElement)return node.checked;const checked=node.getAttribute('aria-checked');return checked==='true'?true:checked==='false'?false:null;});
+ result.qualityFilter=await readReadyComplianceQuality(page,readiness);
  if(result.qualityFilter===null)result.reasons!.push('通知质量过滤开关无法可靠确认');return result;
 }
 export async function startBrowserServer(options:{launch?:typeof launchBrowser}={}){
