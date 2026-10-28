@@ -1,0 +1,1744 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>面板改版草图</title>
+<style>
+html,body{margin:0;height:100%;background:#fff}
+@media (prefers-color-scheme: dark){html,body{background:#151517}}
+iframe{display:block;width:100%;height:100%;border:0}
+iframe[hidden]{display:none}
+</style>
+</head>
+<body>
+<!-- 动态、人设、设置三页草图合在一个文件里；每页各自独立，点顶栏切换。 -->
+<iframe id="p-feed" title="动态" srcdoc="&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;zh-CN&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;title&gt;动态&lt;/title&gt;
+&lt;style&gt;
+
+:root{
+  --bg:#ffffff; --side:#f9fafb; --hover:rgba(38,49,72,.06); --active:#ebeef2; --card:#f5f7fa;
+  --l1:#0f1115; --l2:#61666b; --l3:#81858c; --cap:#adb2b8;
+  --b2:rgba(0,0,0,.08); --b3:rgba(0,0,0,.12);
+  --bubble:#edf3fe; --brand:#4176e6; --brand-soft:#e4edfd; --sel:#f5f8fe;
+  --ok:#22c55e; --ok-soft:#e6faed; --okt:#15803d; --warn:#dd8629; --warn-bg:#fef5e7; --err:#dc2626; --err-bg:#fef2f2;
+  --shadow:0 4px 20px rgba(15,17,21,.06),0 1px 2px rgba(15,17,21,.04); --pop:0 12px 32px rgba(15,17,21,.14),0 0 0 1px rgba(0,0,0,.06);
+  --topbar:#ffffff; --panel-border:#e5e7eb; --primary:#0f1115; --primary-t:#fff; --mask:rgba(15,17,21,.24);
+  --lw:232px; --rw:0px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#151517; --side:#1b1b1c; --hover:rgba(255,255,255,.06); --active:#2c2c2e; --card:#1f1f21;
+    --l1:#f9fafb; --l2:#adb2b8; --l3:#81858c; --cap:#61666b;
+    --b2:rgba(255,255,255,.08); --b3:rgba(255,255,255,.16);
+    --bubble:#283142; --brand:#7aaaff; --brand-soft:#28314a; --sel:#1d2230;
+    --ok-soft:#233c2c; --okt:#4ade80; --warn-bg:#27241f; --err:#f87171; --err-bg:#3a1d1d;
+    --shadow:0 0 0 1px rgba(255,255,255,.06); --pop:0 12px 32px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.08);
+    --topbar:#141417; --panel-border:#26262b; --primary:#f9fafb; --primary-t:#0f1115; --mask:rgba(0,0,0,.5);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;background:var(--bg);color:var(--l1);font:14px/1.55 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+svg{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- 面板顶栏（本提案不变） ---------- */
+.topbar{flex:none;display:flex;align-items:center;gap:16px;padding:9px 20px;background:var(--topbar);border-bottom:1px solid var(--panel-border);min-width:0}
+.topbar b{font-size:15px;white-space:nowrap}
+.tabs{display:flex;gap:4px;overflow:auto}
+.tabs span{padding:5px 12px;border-radius:7px;color:var(--l3);white-space:nowrap}
+.tabs span.on{background:var(--active);color:var(--l1);font-weight:600}
+.state{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:99px;background:var(--warn-bg);color:var(--warn);white-space:nowrap}
+
+/* ---------- 工作区：左栏 + 主区 + 可选右栏 ---------- */
+body[data-mode=&quot;chat&quot;]{--rw:288px}
+body[data-left=&quot;closed&quot;]{--lw:0px}
+body[data-right=&quot;closed&quot;]{--rw:0px}
+.app{flex:1;min-height:0;display:grid;grid-template-columns:var(--lw) minmax(0,1fr) var(--rw);position:relative}
+.col{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.leftcol{grid-column:1;background:var(--side);border-right:1px solid var(--b2)}
+.maincol{grid-column:2}
+.rightcol{grid-column:3;border-left:1px solid var(--b2)}
+body[data-left=&quot;closed&quot;] .leftcol,body[data-right=&quot;closed&quot;] .rightcol,body:not([data-mode=&quot;chat&quot;]) .rightcol{display:none}
+.h{flex:none;height:44px;display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;border-bottom:1px solid var(--b2);min-width:0}
+.body{flex:1;min-height:0;overflow:auto}
+[data-m]{display:none !important}
+body[data-mode=&quot;persona&quot;] [data-m~=&quot;persona&quot;],body[data-mode=&quot;daily&quot;] [data-m~=&quot;daily&quot;],body[data-mode=&quot;chat&quot;] [data-m~=&quot;chat&quot;]{display:flex !important}
+:not(body)[data-pv]{display:none !important}
+body[data-pv=&quot;edit&quot;] [data-pv~=&quot;edit&quot;],body[data-pv=&quot;preset&quot;] [data-pv~=&quot;preset&quot;],body[data-pv=&quot;hints&quot;] [data-pv~=&quot;hints&quot;],body[data-pv=&quot;replay&quot;] [data-pv~=&quot;replay&quot;]{display:flex !important}
+:not(body)[data-dv]{display:none !important}
+body[data-dv=&quot;today&quot;] [data-dv~=&quot;today&quot;],body[data-dv=&quot;past&quot;] [data-dv~=&quot;past&quot;]{display:flex !important}
+.expand-left{display:none !important}
+body[data-left=&quot;closed&quot;] .expand-left{display:grid !important}
+
+.seg{display:inline-flex;padding:2px;gap:1px;background:var(--active);border-radius:8px;flex:1}
+.seg button{flex:1;padding:3px 0;border-radius:6px;color:var(--l3);font-size:12.5px}
+.seg button.on{background:var(--bg);color:var(--l1);box-shadow:0 1px 2px rgba(0,0,0,.06);font-weight:500}
+.iconbtn{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;color:var(--l2);flex:none;position:relative}
+.iconbtn:hover,.iconbtn.on{background:var(--hover)}
+.iconbtn:focus-visible,.btn:focus-visible,.item:focus-visible,.seg button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.sp{flex:1}
+.who{font-weight:600;white-space:nowrap;display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
+.who small{font-weight:400;color:var(--l3);font-size:12px;overflow:hidden;text-overflow:ellipsis}
+.btn{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;padding:4px 12px;border-radius:99px;border:1px solid var(--b3);background:var(--bg);color:var(--l1);white-space:nowrap}
+.btn:hover{background:var(--hover)}
+.btn.p{background:var(--primary);color:var(--primary-t);border-color:transparent}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.fee{font-size:9.5px;border:1px solid currentColor;border-radius:3px;padding:0 3px;opacity:.6}
+.badge{font-size:11px;padding:0 6px;border-radius:5px;background:var(--active);color:var(--l2);font-weight:400;white-space:nowrap}
+.badge.ok{background:var(--ok-soft);color:var(--okt)}
+.badge.b{background:var(--brand-soft);color:var(--brand)}
+.badge.w{background:var(--warn-bg);color:var(--warn)}
+.unsaved{font-size:12px;color:var(--warn);white-space:nowrap}
+.avatar{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:600;color:#fff;flex:none}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+
+/* 左栏列表 */
+.list{display:flex;flex-direction:column;gap:1px;padding:8px 6px}
+.grp{display:flex;align-items:center;gap:2px;font-size:12px;color:var(--l3);padding:6px 2px 4px 8px}
+.item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;font-size:13px;text-align:left;width:100%}
+.item:hover{background:var(--hover)}
+.item.on{background:var(--active)}
+.item .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item time,.item .c{font-size:11.5px;color:var(--cap);white-space:nowrap}
+.item.tpl{color:var(--l2)}
+.pin{margin-top:auto;border-top:1px solid var(--b2);padding:6px}
+
+/* 弹出菜单 */
+.menu{position:absolute;z-index:30;top:32px;right:0;min-width:180px;background:var(--bg);border-radius:12px;box-shadow:var(--pop);padding:5px;display:none;flex-direction:column}
+.menu.open{display:flex}
+.menu button{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;font-size:13px;text-align:left;white-space:nowrap}
+.menu button:hover{background:var(--hover)}
+.menu button[disabled]{opacity:.45;cursor:not-allowed}
+.menu small{display:block;color:var(--cap);font-size:11px}
+.menu hr{border:0;border-top:1px solid var(--b2);margin:4px 2px}
+.menu .danger{color:var(--err)}
+
+/* 人设配置页 */
+.cfg{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:flex;flex-direction:column;gap:18px}
+.cfg h3{margin:0 0 8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.cfg h3 small{font-weight:400;color:var(--l3);font-size:12px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.card{background:var(--card);border-radius:14px;padding:10px 12px;min-width:0}
+.card b{font-size:12.5px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.card b span{font-weight:400;color:var(--cap);font-size:11.5px}
+.ta{margin-top:6px;background:var(--bg);border:1px solid var(--b2);border-radius:9px;padding:7px 9px;font-size:12.5px;line-height:1.6;color:var(--l2);height:76px;overflow:hidden}
+.ro .ta{background:transparent;border-style:dashed}
+.trig{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden}
+.tr{display:grid;grid-template-columns:30px minmax(80px,150px) 56px minmax(0,1fr) 16px;gap:10px;align-items:center;padding:7px 12px;border-top:1px solid var(--b2);font-size:12.5px}
+.tr:first-child{border-top:0}
+.tr .k{color:var(--l3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw{width:26px;height:15px;border-radius:99px;background:var(--brand);position:relative;display:inline-block}
+.sw::after{content:&quot;&quot;;position:absolute;right:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff}
+.sw.off{background:var(--b3)}
+.sw.off::after{right:auto;left:2px}
+.fold{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--l3);padding:8px 12px;border:1px dashed var(--b3);border-radius:12px}
+.notice{display:flex;align-items:center;gap:10px;font-size:12.5px;padding:8px 12px;border-radius:12px;background:var(--warn-bg);color:var(--warn)}
+.bio{display:flex;align-items:center;gap:10px;font-size:13px}
+.bio code{font-family:inherit;background:var(--bg);border:1px solid var(--b2);border-radius:8px;padding:4px 10px;flex:1}
+.hints{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.hrow{display:flex;align-items:center;gap:10px;font-size:13px;padding:2px 0}
+.hrow .num{margin-left:auto;width:64px;text-align:right;border:1px solid var(--b2);border-radius:8px;padding:2px 8px;background:var(--bg);font-variant-numeric:tabular-nums}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--l3);font-size:13px;padding:60px 20px;text-align:center}
+
+/* 日程 */
+.day{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px}
+.tl{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden}
+.tl div{display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px;padding:8px 12px;border-top:1px solid var(--b2);font-size:13px}
+.tl div:first-child{border-top:0}
+.tl div span{color:var(--l3);font-variant-numeric:tabular-nums;font-size:12.5px}
+.tl div.now{background:var(--sel)}
+.tl div.now span{color:var(--brand);font-weight:500}
+.kvs{display:flex;flex-direction:column;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{font-size:12px;padding:2px 9px;border-radius:99px;background:var(--active);color:var(--l2)}
+
+/* 试聊 */
+.thread{max-width:760px;margin:0 auto;padding:14px 20px 6px;display:flex;flex-direction:column;gap:10px}
+.user{align-self:flex-end;display:flex;align-items:flex-end;gap:6px;max-width:80%}
+.user .meta{order:-1;padding-bottom:4px}
+.bubble{background:var(--bubble);border-radius:18px;padding:7px 14px;line-height:21px;overflow-wrap:anywhere}
+.meta{font-size:11.5px;color:var(--cap);display:flex;gap:5px;align-items:center;white-space:nowrap}
+.tag{font-size:10.5px;padding:0 5px;border-radius:4px;background:var(--active);color:var(--l2)}
+.tag.dm{background:var(--brand-soft);color:var(--brand)}
+.turn{display:flex;flex-direction:column;gap:3px;padding:6px 8px;margin:0 -8px;border-radius:10px;cursor:pointer;text-align:left}
+.turn:hover{background:var(--hover)}
+.turn.sel{background:var(--sel)}
+.proc{display:flex;align-items:center;flex-wrap:wrap;gap:5px;font-size:12px;color:var(--l3)}
+.proc .ok{color:var(--ok)}
+.proc .hit{font-size:11px;padding:0 5px;border-radius:4px;background:var(--brand-soft);color:var(--brand)}
+.proc .d{width:2px;height:2px;border-radius:1px;background:var(--cap)}
+.reply{line-height:23px;overflow-wrap:anywhere}
+.pills{font-size:11.5px;color:var(--cap);font-variant-numeric:tabular-nums}
+.skip{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--l3);padding:4px 10px;border:1px dashed var(--b3);border-radius:10px;width:fit-content}
+.warnline{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--warn);background:var(--warn-bg);padding:2px 8px;border-radius:7px;width:fit-content}
+.sys{align-self:center;font-size:11.5px;color:var(--l3);padding:2px 10px;border-radius:99px;background:var(--side);border:1px solid var(--b2)}
+.merged{font-size:11px;color:var(--cap)}
+.dock{flex:none;padding:4px 20px 12px}
+.composer{max-width:760px;margin:0 auto;border:1px solid var(--b3);border-radius:16px;background:var(--bg);box-shadow:var(--shadow);padding:8px 8px 6px 12px}
+.ph{color:var(--cap);padding:2px 2px 8px}
+.cbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--l2);padding:2px 9px;border-radius:99px;border:1px solid var(--b2);white-space:nowrap}
+.chip.on{background:var(--brand-soft);color:var(--brand);border-color:transparent}
+.hint{font-size:11.5px;color:var(--cap);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;text-align:right}
+.send{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff;opacity:.45;flex:none}
+.processbtn{display:none}
+body[data-hold=&quot;on&quot;] .processbtn{display:inline-flex}
+.rt{display:flex;gap:1px}
+.rt button{padding:3px 10px;border-radius:7px;font-size:12.5px;color:var(--l3)}
+.rt button.on{background:var(--active);color:var(--l1);font-weight:500}
+.rpane{display:none;flex-direction:column;gap:12px;padding:10px 12px 14px}
+.rpane.on{display:flex}
+.sec h4{margin:0 0 5px;font-size:11.5px;font-weight:500;color:var(--l3);display:flex;justify-content:space-between;gap:8px}
+.kv{display:grid;grid-template-columns:70px minmax(0,1fr);gap:4px 8px;font-size:12.5px;margin:0}
+.kv dt{color:var(--l3);white-space:nowrap}
+.kv dd{margin:0}
+.mem{padding:6px 9px;border-radius:9px;background:var(--side);border:1px solid var(--b2);font-size:12.5px;margin-bottom:4px}
+.mem small{color:var(--cap);font-size:11px;margin-left:4px}
+.seg2{border:1px solid var(--b2);border-radius:10px;margin-bottom:6px;overflow:hidden}
+.seg2 b{display:flex;justify-content:space-between;font-size:11.5px;font-weight:500;color:var(--l3);padding:4px 8px;background:var(--side);border-bottom:1px solid var(--b2)}
+.seg2 pre{margin:0;padding:6px 8px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;color:var(--l2);max-height:84px;overflow:hidden}
+.bar{height:4px;border-radius:2px;background:var(--active);overflow:hidden;margin:4px 0 6px}
+.bar i{display:block;height:100%;background:var(--brand)}
+
+/* 回放视图（示意） */
+.rp{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:flex;flex-direction:column;gap:12px}
+.rpgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+
+/* ---------- 窄屏：左栏抽屉、右栏浮层 ---------- */
+.mask{display:none}
+.drawer-btn{display:none !important}
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .maincol{grid-column:1}
+  .leftcol{position:fixed;z-index:40;left:0;top:0;bottom:0;width:280px;transform:translateX(-100%);transition:transform .2s;display:flex !important;box-shadow:var(--pop)}
+  body[data-drawer=&quot;open&quot;] .leftcol{transform:none}
+  .rightcol{position:fixed;z-index:40;right:0;top:0;bottom:0;width:min(340px,92vw);display:none !important;background:var(--bg);box-shadow:var(--pop)}
+  body[data-mode=&quot;chat&quot;][data-sheet=&quot;open&quot;] .rightcol{display:flex !important}
+  body[data-drawer=&quot;open&quot;] .mask,body[data-sheet=&quot;open&quot;][data-mode=&quot;chat&quot;] .mask{display:block;position:fixed;inset:0;z-index:35;background:var(--mask)}
+  .drawer-btn{display:grid !important}
+  .expand-left,.collapse-left,.collapse-right{display:none !important}
+  .grid2,.hints,.day,.rpgrid{grid-template-columns:minmax(0,1fr)}
+  .cfg,.day,.rp{padding:12px 14px 24px}
+  .tr{grid-template-columns:30px minmax(0,1fr) 56px 16px}
+  .tr .k{display:none}
+  .h .hide-narrow{display:none}
+  .thread{padding:12px 12px 6px}
+  .dock{padding:4px 10px 10px}
+  .hint{display:none}
+  .topbar{padding:9px 12px;gap:10px}
+}
+
+
+.tabs a{padding:5px 12px;border-radius:7px;color:var(--l3);white-space:nowrap;text-decoration:none}
+.tabs a:hover{background:var(--hover);color:var(--l1)}
+.tabs a.on{background:var(--active);color:var(--l1);font-weight:600}
+.runbtn{margin-left:4px}
+.ttl{font-weight:600;font-size:13.5px;flex:1}
+/* 表单与设置通用 */
+.page{max-width:960px;margin:0 auto;padding:16px 24px 40px;display:flex;flex-direction:column;gap:14px}
+.page.wide{max-width:1180px}
+.sec-title{font-size:13px;font-weight:600;margin:4px 0 -4px;display:flex;align-items:center;gap:8px}
+.sec-title small{font-weight:400;color:var(--l3);font-size:12px}
+.fgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.fgrid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--l3)}
+.f .in{border:1px solid var(--b2);border-radius:9px;background:var(--bg);padding:6px 10px;font-size:13.5px;color:var(--l1);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:6px;min-height:34px}
+.f .in small{color:var(--cap);margin-left:auto}
+.f .in.area{min-height:64px;align-items:flex-start;line-height:1.6;color:var(--l2)}
+.f em{font-style:normal;color:var(--cap);font-size:11.5px}
+.radios{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.rc{border:1px solid var(--b2);border-radius:12px;padding:10px 12px;background:var(--bg);display:flex;gap:10px;align-items:flex-start}
+.rc.on{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
+.rc i{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--b3);margin-top:3px;flex:none}
+.rc.on i{border:4px solid var(--brand)}
+.rc b{font-size:13px}
+.rc span{display:block;font-size:12px;color:var(--l3)}
+.rows{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden;background:var(--bg)}
+.row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--b2);font-size:13px;min-width:0}
+.row:first-child{border-top:0}
+.row .sub{color:var(--l3);font-size:12px}
+.row .grow{flex:1;min-width:0}
+.row .grow small{display:block;color:var(--l3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.metric{background:var(--card);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.metric span{font-size:12px;color:var(--l3)}
+.metric b{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}
+.metric small{font-size:11.5px;color:var(--cap)}
+.metric.w{background:var(--warn-bg)} .metric.w span,.metric.w small{color:var(--warn)}
+.metric.e{background:var(--err-bg)} .metric.e span,.metric.e small{color:var(--err)}
+.lv{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok)}
+.lv.w{background:var(--warn)} .lv.e{background:var(--err)} .lv.n{background:var(--cap)}
+.split{display:grid;grid-template-columns:270px minmax(0,1fr);min-height:100%}
+.split&gt;.page{margin:0;max-width:none;width:100%}
+.inner{border-right:1px solid var(--b2);padding:10px 8px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.search{display:flex;align-items:center;gap:6px;border:1px solid var(--b2);border-radius:9px;padding:5px 9px;font-size:12.5px;color:var(--cap);margin:0 2px 6px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.logrow{display:grid;grid-template-columns:70px 12px 170px minmax(0,1fr);gap:8px;align-items:center;padding:6px 12px;border-top:1px solid var(--b2);font-size:12.5px}
+.logrow:first-child{border-top:0}
+.logrow time{color:var(--l3);font-variant-numeric:tabular-nums}
+.desk{border-radius:14px;background:#0b0c0f;color:#8b8f97;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:360px;font-size:13px}
+.heat{display:grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;grid-auto-columns:12px;gap:3px;overflow:hidden}
+.heat i{border-radius:3px;background:var(--active)}
+.heat i.l1{background:#c9dafb} .heat i.l2{background:#93b4f3} .heat i.l3{background:#5b8be8} .heat i.l4{background:#4176e6}
+@media (prefers-color-scheme: dark){.heat i.l1{background:#28314a}.heat i.l2{background:#34508a}.heat i.l3{background:#4d73c4}.heat i.l4{background:#7aaaff}}
+.legend{display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+.legend div{display:flex;align-items:center;gap:8px}
+.legend i{width:9px;height:9px;border-radius:3px}
+.legend span{margin-left:auto;color:var(--l3);font-variant-numeric:tabular-nums}
+@media (max-width:860px){
+  .fgrid,.fgrid.two,.radios{grid-template-columns:minmax(0,1fr)}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .split{grid-template-columns:minmax(0,1fr)}
+  .inner{border-right:0;border-bottom:1px solid var(--b2)}
+  .page{padding:12px 14px 28px}
+  .logrow{grid-template-columns:56px 10px minmax(0,1fr)}
+  .logrow .mono{display:none}
+}
+
+
+body[data-mode=&quot;feed&quot;]{--rw:300px}
+body[data-mode=&quot;feed&quot;] .rightcol{display:flex}
+body[data-mode=&quot;feed&quot;][data-right=&quot;closed&quot;]{--rw:0px}
+body[data-mode=&quot;feed&quot;][data-right=&quot;closed&quot;] .rightcol{display:none}
+:not(body)[data-fv]{display:none !important}
+body[data-fv=&quot;conv&quot;] [data-fv~=&quot;conv&quot;],body[data-fv=&quot;alerts&quot;] [data-fv~=&quot;alerts&quot;],body[data-fv=&quot;import&quot;] [data-fv~=&quot;import&quot;],body[data-fv=&quot;posts&quot;] [data-fv~=&quot;posts&quot;]{display:flex !important}
+.hx{flex:1;display:flex;align-items:center;gap:8px;min-width:0}
+.filters{display:flex;gap:4px;flex-wrap:wrap;padding:8px 8px 2px}
+.filters button{font-size:12px;padding:2px 9px;border-radius:99px;border:1px solid var(--b2);color:var(--l2)}
+.filters button.on{background:var(--l1);color:var(--bg);border-color:transparent}
+.conv{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:2px 8px;align-items:center;padding:7px 8px;border-radius:9px;text-align:left;width:100%}
+.conv:hover{background:var(--hover)}
+.conv.on{background:var(--active)}
+.conv .n{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conv time{font-size:11px;color:var(--cap)}
+.conv .s{grid-column:2/4;display:flex;gap:6px;align-items:center;min-width:0}
+.conv .s span:last-child{font-size:12px;color:var(--l3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st{font-size:10.5px;padding:0 5px;border-radius:4px;white-space:nowrap;flex:none}
+.st.draft{background:var(--warn-bg);color:var(--warn)}
+.st.wait{background:var(--brand-soft);color:var(--brand)}
+.st.sent{background:var(--ok-soft);color:var(--okt)}
+.st.bad{background:var(--err-bg);color:var(--err)}
+.st.mute{background:var(--active);color:var(--l3)}
+.attn{display:flex;align-items:center;gap:8px;margin:4px 6px;padding:7px 10px;border-radius:10px;background:var(--warn-bg);color:var(--warn);font-size:12.5px;text-align:left}
+.attn.on{box-shadow:inset 0 0 0 1px var(--warn)}
+.statusbox{margin-top:auto;border-top:1px solid var(--b2);padding:8px 12px;font-size:12px;color:var(--l3);display:flex;flex-direction:column;gap:2px}
+.statusbox b{color:var(--l1);font-weight:500}
+.draftbox{border:1px solid var(--b3);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:var(--bg);box-shadow:var(--shadow)}
+.draftbox .ed{font-size:14px;line-height:23px;border:1px solid var(--b2);border-radius:10px;padding:8px 10px;min-height:70px}
+.draftbox .cbar{gap:8px}
+.orig{display:flex;gap:6px;align-items:center}
+.alertcard{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:12px;font-size:13px}
+.alertcard.e{background:var(--err-bg);color:var(--err)}
+.alertcard.w{background:var(--warn-bg);color:var(--warn)}
+.alertcard .grow{flex:1}
+.alertcard small{display:block;opacity:.85}
+@media (max-width:860px){
+  body[data-mode=&quot;feed&quot;][data-sheet=&quot;open&quot;] .rightcol{display:flex !important}
+  body[data-sheet=&quot;open&quot;][data-mode=&quot;feed&quot;] .mask{display:block;position:fixed;inset:0;z-index:35;background:var(--mask)}
+}
+
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body data-mode=&quot;feed&quot; data-fv=&quot;conv&quot; data-left=&quot;open&quot; data-right=&quot;open&quot;&gt;
+&lt;div class=&quot;topbar&quot;&gt;
+  &lt;b&gt;角色工作流&lt;/b&gt;
+  &lt;nav class=&quot;tabs&quot;&gt;&lt;a data-href=&quot;layout-feed.html&quot; class=&quot;on&quot;&gt;动态&lt;/a&gt;&lt;a data-href=&quot;layout-persona.html&quot; class=&quot;&quot;&gt;人设&lt;/a&gt;&lt;a data-href=&quot;layout-settings.html&quot; class=&quot;&quot;&gt;设置&lt;/a&gt;&lt;/nav&gt;
+  &lt;span class=&quot;state&quot;&gt;● 已暂停 · 自动模式&lt;/span&gt;
+  &lt;button class=&quot;btn runbtn&quot;&gt;启动&lt;/button&gt;
+&lt;/div&gt;
+&lt;div class=&quot;app&quot;&gt;
+  &lt;div class=&quot;mask&quot; data-close&gt;&lt;/div&gt;
+  &lt;aside class=&quot;col leftcol&quot; id=&quot;left&quot;&gt;
+    &lt;div class=&quot;h&quot;&gt;&lt;span class=&quot;ttl&quot;&gt;动态&lt;/span&gt;
+      &lt;button class=&quot;iconbtn&quot; data-fvgo=&quot;import&quot; title=&quot;按链接补录公开消息&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;button class=&quot;iconbtn collapse-left&quot; data-toggle=&quot;left&quot; aria-expanded=&quot;true&quot; aria-controls=&quot;left&quot; title=&quot;收起左栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M9 4v16&quot;/&gt;&lt;path d=&quot;m15 10-2 2 2 2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/div&gt;
+    &lt;div class=&quot;body&quot; style=&quot;display:flex;flex-direction:column&quot;&gt;
+      &lt;div class=&quot;filters&quot;&gt;&lt;button class=&quot;on&quot;&gt;全部&lt;/button&gt;&lt;button&gt;待处理 3&lt;/button&gt;&lt;button&gt;公开&lt;/button&gt;&lt;button&gt;私信&lt;/button&gt;&lt;button&gt;角色帖&lt;/button&gt;&lt;/div&gt;
+      &lt;button class=&quot;attn&quot; data-fvgo=&quot;alerts&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z&quot;/&gt;&lt;/svg&gt;需要关注 · 3 项&lt;/button&gt;
+      &lt;div class=&quot;list&quot; style=&quot;padding-top:2px&quot;&gt;
+        &lt;button class=&quot;conv on&quot; data-fvgo=&quot;conv&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#7c3aed&quot;&gt;K&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;@kiri_dev&lt;/span&gt;&lt;time&gt;21:07&lt;/time&gt;&lt;span class=&quot;s&quot;&gt;&lt;span class=&quot;st draft&quot;&gt;草稿&lt;/span&gt;&lt;span&gt;你好可爱啊，还记得我在忙什么吗&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;conv&quot; data-fvgo=&quot;conv&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#dd8629&quot;&gt;雨&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;小雨 · 私信&lt;/span&gt;&lt;time&gt;21:02&lt;/time&gt;&lt;span class=&quot;s&quot;&gt;&lt;span class=&quot;st wait&quot;&gt;等待发送&lt;/span&gt;&lt;span&gt;本小时私信额度已用尽&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;conv&quot; data-fvgo=&quot;conv&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#61666b&quot;&gt;T&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;@tom_x&lt;/span&gt;&lt;time&gt;20:58&lt;/time&gt;&lt;span class=&quot;s&quot;&gt;&lt;span class=&quot;st bad&quot;&gt;待回查&lt;/span&gt;&lt;span&gt;提交结果未知，只回查不重发&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;conv&quot; data-fvgo=&quot;posts&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#4176e6&quot;&gt;帖&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;角色帖&lt;/span&gt;&lt;time&gt;昨天&lt;/time&gt;&lt;span class=&quot;s&quot;&gt;&lt;span class=&quot;st sent&quot;&gt;已发送&lt;/span&gt;&lt;span&gt;晚安帖：今天也被 GLM 娘赢走夜宵……&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;conv&quot; data-fvgo=&quot;conv&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#0e7490&quot;&gt;M&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;@mochi_cat&lt;/span&gt;&lt;time&gt;20:31&lt;/time&gt;&lt;span class=&quot;s&quot;&gt;&lt;span class=&quot;st sent&quot;&gt;已发送&lt;/span&gt;&lt;span&gt;哈哈哈哈鲸鱼也会摸鱼吗&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;conv&quot; data-fvgo=&quot;conv&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#9ca3af&quot;&gt;S&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;@promo_8821&lt;/span&gt;&lt;time&gt;20:12&lt;/time&gt;&lt;span class=&quot;s&quot;&gt;&lt;span class=&quot;st mute&quot;&gt;已过滤&lt;/span&gt;&lt;span&gt;广告关键词&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;conv&quot; data-fvgo=&quot;conv&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#22a05e&quot;&gt;L&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;@lan_lan&lt;/span&gt;&lt;time&gt;19:47&lt;/time&gt;&lt;span class=&quot;s&quot;&gt;&lt;span class=&quot;st mute&quot;&gt;已跳过&lt;/span&gt;&lt;span&gt;老面孔无内容招呼&lt;/span&gt;&lt;/span&gt;&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;statusbox&quot;&gt;&lt;b&gt;自动模式 · GLM-4.6&lt;/b&gt;&lt;span&gt;@dafeiyu · 回复 280 加权字符&lt;/span&gt;&lt;span&gt;本小时 公开 4/10 · 私信 30/30&lt;/span&gt;&lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/aside&gt;
+
+  &lt;section class=&quot;col maincol&quot;&gt;
+    &lt;div class=&quot;h&quot;&gt;
+      &lt;button class=&quot;iconbtn drawer-btn&quot; data-drawer title=&quot;打开列表&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M4 12h16M4 17h16&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;button class=&quot;iconbtn expand-left&quot; data-toggle=&quot;left&quot; aria-expanded=&quot;false&quot; aria-controls=&quot;left&quot; title=&quot;展开左栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M9 4v16&quot;/&gt;&lt;path d=&quot;m13 10 2 2-2 2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;span class=&quot;hx&quot; data-fv=&quot;conv&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#7c3aed&quot;&gt;K&lt;/span&gt;&lt;span class=&quot;who&quot;&gt;@kiri_dev&lt;small class=&quot;hide-narrow&quot;&gt;公开 · 老朋友 · 往来 14 条 · 首次 10/12&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn hide-narrow&quot;&gt;在 X 上查看 ↗&lt;/button&gt;&lt;button class=&quot;btn hide-narrow&quot; title=&quot;打开设置页记忆&quot;&gt;记忆 →&lt;/button&gt;&lt;button class=&quot;iconbtn on&quot; data-toggle=&quot;right&quot; aria-expanded=&quot;true&quot; aria-controls=&quot;right&quot; title=&quot;收起右栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M15 4v16&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-fv=&quot;alerts&quot;&gt;&lt;span class=&quot;who&quot;&gt;需要关注 &lt;span class=&quot;badge w&quot;&gt;3 项&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-fv=&quot;import&quot;&gt;&lt;span class=&quot;who&quot;&gt;按链接补录&lt;small class=&quot;hide-narrow&quot;&gt;找回没被采集到的公开消息，不直接生成或发送&lt;/small&gt;&lt;/span&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-fv=&quot;posts&quot;&gt;&lt;span class=&quot;who&quot;&gt;角色帖&lt;small class=&quot;hide-narrow&quot;&gt;早安帖与晚安帖 · 与公开回复共享每日额度&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;iconbtn on&quot; data-toggle=&quot;right&quot; aria-expanded=&quot;true&quot; aria-controls=&quot;right&quot; title=&quot;收起右栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M15 4v16&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/span&gt;
+    &lt;/div&gt;
+
+    &lt;div class=&quot;body&quot;&gt;
+      &lt;!-- 与某人的往来 --&gt;
+      &lt;div class=&quot;thread&quot; data-fv=&quot;conv&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;sys&quot;&gt;10 月 26 日&lt;/div&gt;
+        &lt;div class=&quot;user&quot;&gt;&lt;div class=&quot;meta&quot;&gt;&lt;span class=&quot;tag&quot;&gt;公开&lt;/span&gt;10/26 22:40&lt;/div&gt;&lt;div class=&quot;bubble&quot;&gt;鲸鱼娘晚上也加班吗&lt;/div&gt;&lt;/div&gt;
+        &lt;button class=&quot;turn&quot;&gt;&lt;span class=&quot;proc&quot;&gt;&lt;svg class=&quot;ok&quot; viewBox=&quot;0 0 24 24&quot; style=&quot;width:12px;height:12px&quot;&gt;&lt;path d=&quot;m5 12 5 5 9-10&quot;/&gt;&lt;/svg&gt;已发送 · 10/26 22:41&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;回执可靠&lt;/span&gt;&lt;span class=&quot;reply&quot;&gt;鲸鱼不加班，鲸鱼只是在深海里假装很忙～&lt;/span&gt;&lt;span class=&quot;pills&quot;&gt;GLM-4.6 · $0.0010 · 在 X 上查看 ↗&lt;/span&gt;&lt;/button&gt;
+        &lt;div class=&quot;sys&quot;&gt;今天&lt;/div&gt;
+        &lt;div class=&quot;user&quot;&gt;&lt;div class=&quot;meta&quot;&gt;&lt;span class=&quot;tag&quot;&gt;公开&lt;/span&gt;21:04&lt;/div&gt;&lt;div class=&quot;bubble&quot;&gt;今天又加班到十点，项目下周就要上线了&lt;/div&gt;&lt;/div&gt;
+        &lt;button class=&quot;turn&quot;&gt;&lt;span class=&quot;proc&quot;&gt;&lt;svg class=&quot;ok&quot; viewBox=&quot;0 0 24 24&quot; style=&quot;width:12px;height:12px&quot;&gt;&lt;path d=&quot;m5 12 5 5 9-10&quot;/&gt;&lt;/svg&gt;已发送 · 21:05&lt;/span&gt;&lt;span class=&quot;reply&quot;&gt;辛苦啦……上线前一周真的是最熬人的时候。先去吃点热的&lt;/span&gt;&lt;span class=&quot;pills&quot;&gt;GLM-4.6 · $0.0011&lt;/span&gt;&lt;/button&gt;
+        &lt;div class=&quot;user&quot;&gt;&lt;div class=&quot;meta&quot;&gt;&lt;span class=&quot;tag&quot;&gt;公开&lt;/span&gt;&lt;span class=&quot;st wait&quot;&gt;优先 · 明确提问&lt;/span&gt;21:07&lt;/div&gt;&lt;div class=&quot;bubble&quot;&gt;你好可爱啊，还记得我在忙什么吗&lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;turn sel&quot; style=&quot;cursor:default&quot;&gt;
+          &lt;span class=&quot;proc&quot;&gt;大肥鱼 修订 4&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;召回 2 条记忆&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;命中&lt;span class=&quot;hit&quot;&gt;被夸&lt;/span&gt;&lt;/span&gt;
+          &lt;div class=&quot;draftbox&quot;&gt;
+            &lt;div class=&quot;cbar&quot;&gt;&lt;span class=&quot;st draft&quot;&gt;草稿&lt;/span&gt;&lt;span style=&quot;font-size:12px;color:var(--l3)&quot;&gt;58 / 280 加权字符 · 格式无问题&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;span style=&quot;font-size:12px;color:var(--l3)&quot;&gt;当前暂停，批准后恢复处理时发送&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;ed&quot;&gt;诶嘿，被夸了先收下～当然记得，你在赶下周要上线的项目嘛。今晚别再打开电脑了好不好&lt;/div&gt;
+            &lt;div class=&quot;cbar&quot;&gt;&lt;button class=&quot;btn p&quot;&gt;发送&lt;/button&gt;&lt;button class=&quot;btn&quot;&gt;重写 &lt;span class=&quot;fee&quot;&gt;计费&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;btn&quot;&gt;取消&lt;/button&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;span class=&quot;pills&quot;&gt;GLM-4.6 · $0.0012&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 需要关注 --&gt;
+      &lt;div class=&quot;page&quot; data-fv=&quot;alerts&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;alertcard e&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z&quot;/&gt;&lt;/svg&gt;&lt;span class=&quot;grow&quot;&gt;待回查 1 条&lt;small&gt;@tom_x 的回复提交结果未知，公开通道暂停新的提交，直到回查收束&lt;/small&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;查看&lt;/button&gt;&lt;/div&gt;
+        &lt;div class=&quot;alertcard w&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;9&quot;/&gt;&lt;path d=&quot;M12 8v4M12 16h.01&quot;/&gt;&lt;/svg&gt;&lt;span class=&quot;grow&quot;&gt;账号检查 3 项需关注&lt;small&gt;简介披露不完整 · 自动化标签未设置 · 质量过滤开启 · 上次检查 21:12&lt;/small&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;设置 → 健康&lt;/button&gt;&lt;/div&gt;
+        &lt;div class=&quot;alertcard w&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;9&quot;/&gt;&lt;path d=&quot;M12 8v4M12 16h.01&quot;/&gt;&lt;/svg&gt;&lt;span class=&quot;grow&quot;&gt;历史采集告警&lt;small&gt;最后发生于 18:02（共 2 轮）；当前采集尚未复验&lt;/small&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;设置 → 健康&lt;/button&gt;&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 按链接补录 --&gt;
+      &lt;div class=&quot;page&quot; data-fv=&quot;import&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;cbar&quot;&gt;&lt;div class=&quot;search&quot; style=&quot;flex:1;margin:0&quot;&gt;https://x.com/&amp;lt;handle&amp;gt;/status/&amp;lt;id&amp;gt;&lt;/div&gt;&lt;button class=&quot;btn p&quot;&gt;提交&lt;/button&gt;&lt;/div&gt;
+        &lt;div class=&quot;rows&quot;&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv n&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;x.com/kiri_dev/status/1849…&lt;small&gt;等待下一轮检查 · 每轮最多 3 条&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;badge&quot;&gt;pending&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;x.com/mochi_cat/status/1848…&lt;small&gt;已优先入队 → 已发送&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;badge ok&quot;&gt;imported&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv w&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;x.com/dafeiyu/status/1847…&lt;small&gt;自己的帖子，不入队&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;badge w&quot;&gt;rejected&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 角色帖 --&gt;
+      &lt;div class=&quot;thread&quot; data-fv=&quot;posts&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;sys&quot;&gt;昨天&lt;/div&gt;
+        &lt;button class=&quot;turn&quot;&gt;&lt;span class=&quot;proc&quot;&gt;&lt;svg class=&quot;ok&quot; viewBox=&quot;0 0 24 24&quot; style=&quot;width:12px;height:12px&quot;&gt;&lt;path d=&quot;m5 12 5 5 9-10&quot;/&gt;&lt;/svg&gt;晚安帖 · 23:00 计划 · 23:01 已发送&lt;/span&gt;&lt;span class=&quot;reply&quot;&gt;今天也被 GLM 娘赢走了夜宵，鲸鱼决定明天开始减肥（明天的事明天再说）。晚安～&lt;/span&gt;&lt;span class=&quot;pills&quot;&gt;GLM-4.6 · $0.0013 · 在 X 上查看 ↗&lt;/span&gt;&lt;/button&gt;
+        &lt;div class=&quot;sys&quot;&gt;今天&lt;/div&gt;
+        &lt;div class=&quot;turn&quot; style=&quot;cursor:default&quot;&gt;&lt;span class=&quot;proc&quot;&gt;早安帖 · 08:00 计划&lt;/span&gt;&lt;span class=&quot;skip&quot;&gt;任务停用，未发帖&lt;/span&gt;&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;aside class=&quot;col rightcol&quot; id=&quot;right&quot;&gt;
+    &lt;div class=&quot;h&quot;&gt;&lt;div class=&quot;rt&quot;&gt;&lt;button class=&quot;on&quot;&gt;详情&lt;/button&gt;&lt;button&gt;阶段&lt;/button&gt;&lt;button&gt;调用&lt;/button&gt;&lt;/div&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;iconbtn&quot; data-close title=&quot;关闭&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M6 6l12 12M18 6 6 18&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/div&gt;
+    &lt;div class=&quot;body&quot;&gt;&lt;div class=&quot;rpane on&quot;&gt;
+      &lt;div class=&quot;sec&quot;&gt;&lt;h4&gt;&lt;span&gt;21:07 这一条&lt;/span&gt;&lt;span&gt;草稿 · $0.0012&lt;/span&gt;&lt;/h4&gt;
+        &lt;dl class=&quot;kv&quot;&gt;
+          &lt;dt&gt;状态&lt;/dt&gt;&lt;dd&gt;草稿，等待批准&lt;/dd&gt;
+          &lt;dt&gt;分级&lt;/dt&gt;&lt;dd&gt;优先 · 明确提问&lt;/dd&gt;
+          &lt;dt&gt;人设&lt;/dt&gt;&lt;dd&gt;大肥鱼 · 修订 4&lt;/dd&gt;
+          &lt;dt&gt;命中&lt;/dt&gt;&lt;dd&gt;被夸（关键词：可爱）&lt;/dd&gt;
+          &lt;dt&gt;生成&lt;/dt&gt;&lt;dd&gt;GLM-4.6 · 1 次调用 · 2.0 秒&lt;/dd&gt;
+          &lt;dt&gt;校验&lt;/dt&gt;&lt;dd&gt;58 / 280 加权字符&lt;/dd&gt;
+          &lt;dt&gt;出站&lt;/dt&gt;&lt;dd&gt;未准备 · 批准后冻结正文&lt;/dd&gt;
+          &lt;dt&gt;回执&lt;/dt&gt;&lt;dd&gt;—&lt;/dd&gt;
+        &lt;/dl&gt;&lt;/div&gt;
+      &lt;div class=&quot;sec&quot;&gt;&lt;h4&gt;&lt;span&gt;这个人的记忆&lt;/span&gt;&lt;span&gt;只读&lt;/span&gt;&lt;/h4&gt;
+        &lt;div class=&quot;mem&quot;&gt;在赶一个下周上线的项目，经常加班&lt;small&gt;长期&lt;/small&gt;&lt;/div&gt;
+        &lt;div class=&quot;mem&quot;&gt;喜欢猫，家里有一只橘猫&lt;small&gt;长期&lt;/small&gt;&lt;/div&gt;
+        &lt;button class=&quot;btn&quot; style=&quot;margin-top:4px&quot;&gt;在设置 → 记忆中管理&lt;/button&gt;&lt;/div&gt;
+    &lt;/div&gt;&lt;/div&gt;
+  &lt;/aside&gt;
+&lt;/div&gt;
+&lt;script&gt;
+(()=&gt;{const B=document.body,page=B.dataset.sp?&#x27;settings&#x27;:&#x27;feed&#x27;,narrow=matchMedia(&#x27;(max-width:860px)&#x27;);
+const store={get(k){try{return localStorage.getItem(k)}catch{return null}},set(k,v){try{localStorage.setItem(k,v)}catch{}}};
+for(const side of [&#x27;left&#x27;,&#x27;right&#x27;]){const v=store.get(&#x27;ws:&#x27;+page+&#x27;:&#x27;+side);if(v)B.dataset[side]=v;}
+const closeOverlays=()=&gt;{B.dataset.drawer=&#x27;&#x27;;B.dataset.sheet=&#x27;&#x27;;};
+document.addEventListener(&#x27;click&#x27;,e=&gt;{const t=e.target.closest(&#x27;button,[data-close]&#x27;);if(!t)return;
+  if(t.dataset.toggle){const side=t.dataset.toggle;if(narrow.matches&amp;&amp;side===&#x27;right&#x27;){B.dataset.sheet=B.dataset.sheet===&#x27;open&#x27;?&#x27;&#x27;:&#x27;open&#x27;;return;}
+    const next=B.dataset[side]===&#x27;closed&#x27;?&#x27;open&#x27;:&#x27;closed&#x27;;B.dataset[side]=next;store.set(&#x27;ws:&#x27;+page+&#x27;:&#x27;+side,next);
+    document.querySelectorAll(&#x27;[data-toggle=&quot;&#x27;+side+&#x27;&quot;]&#x27;).forEach(x=&gt;x.setAttribute(&#x27;aria-expanded&#x27;,String(next===&#x27;open&#x27;)));}
+  if(t.hasAttribute(&#x27;data-drawer&#x27;))B.dataset.drawer=B.dataset.drawer===&#x27;open&#x27;?&#x27;&#x27;:&#x27;open&#x27;;
+  if(t.hasAttribute(&#x27;data-close&#x27;)){if(!narrow.matches&amp;&amp;t.closest(&#x27;.rightcol&#x27;)){B.dataset.right=&#x27;closed&#x27;;store.set(&#x27;ws:&#x27;+page+&#x27;:right&#x27;,&#x27;closed&#x27;);}closeOverlays();}
+  if(narrow.matches&amp;&amp;t.closest(&#x27;.turn&#x27;)&amp;&amp;B.dataset.mode===&#x27;feed&#x27;)B.dataset.sheet=&#x27;open&#x27;;
+});
+document.addEventListener(&#x27;keydown&#x27;,e=&gt;{if(e.key===&#x27;Escape&#x27;)closeOverlays();});})();
+&lt;/script&gt;
+
+&lt;script&gt;
+(()=&gt;{const base=location.protocol===&#x27;file:&#x27;?&#x27;&#x27;:&#x27;/files/&#x27;;document.querySelectorAll(&#x27;[data-href]&#x27;).forEach(a=&gt;a.href=base+a.dataset.href);})();
+&lt;/script&gt;
+&lt;script&gt;
+document.addEventListener(&#x27;click&#x27;,e=&gt;{const t=e.target.closest(&#x27;[data-fvgo]&#x27;);if(!t)return;document.body.dataset.fv=t.dataset.fvgo;document.querySelectorAll(&#x27;.conv,.attn&#x27;).forEach(x=&gt;x.classList.toggle(&#x27;on&#x27;,x===t));if(matchMedia(&#x27;(max-width:860px)&#x27;).matches)document.body.dataset.drawer=&#x27;&#x27;;});
+&lt;/script&gt;
+&lt;script&gt;
+(()=&gt;{if(window.parent===window)return;document.querySelectorAll(&#x27;[data-href]&#x27;).forEach(a=&gt;{a.removeAttribute(&#x27;href&#x27;);a.style.cursor=&#x27;pointer&#x27;;a.addEventListener(&#x27;click&#x27;,e=&gt;{e.preventDefault();parent.postMessage({go:a.dataset.href.replace(&#x27;layout-&#x27;,&#x27;&#x27;).replace(&#x27;.html&#x27;,&#x27;&#x27;)},&#x27;*&#x27;);});});})();
+&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+<iframe id="p-persona" title="人设" srcdoc="&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;zh-CN&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;title&gt;人设&lt;/title&gt;
+&lt;style&gt;
+
+:root{
+  --bg:#ffffff; --side:#f9fafb; --hover:rgba(38,49,72,.06); --active:#ebeef2; --card:#f5f7fa;
+  --l1:#0f1115; --l2:#61666b; --l3:#81858c; --cap:#adb2b8;
+  --b2:rgba(0,0,0,.08); --b3:rgba(0,0,0,.12);
+  --bubble:#edf3fe; --brand:#4176e6; --brand-soft:#e4edfd; --sel:#f5f8fe;
+  --ok:#22c55e; --ok-soft:#e6faed; --okt:#15803d; --warn:#dd8629; --warn-bg:#fef5e7; --err:#dc2626; --err-bg:#fef2f2;
+  --shadow:0 4px 20px rgba(15,17,21,.06),0 1px 2px rgba(15,17,21,.04); --pop:0 12px 32px rgba(15,17,21,.14),0 0 0 1px rgba(0,0,0,.06);
+  --topbar:#ffffff; --panel-border:#e5e7eb; --primary:#0f1115; --primary-t:#fff; --mask:rgba(15,17,21,.24);
+  --lw:232px; --rw:0px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#151517; --side:#1b1b1c; --hover:rgba(255,255,255,.06); --active:#2c2c2e; --card:#1f1f21;
+    --l1:#f9fafb; --l2:#adb2b8; --l3:#81858c; --cap:#61666b;
+    --b2:rgba(255,255,255,.08); --b3:rgba(255,255,255,.16);
+    --bubble:#283142; --brand:#7aaaff; --brand-soft:#28314a; --sel:#1d2230;
+    --ok-soft:#233c2c; --okt:#4ade80; --warn-bg:#27241f; --err:#f87171; --err-bg:#3a1d1d;
+    --shadow:0 0 0 1px rgba(255,255,255,.06); --pop:0 12px 32px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.08);
+    --topbar:#141417; --panel-border:#26262b; --primary:#f9fafb; --primary-t:#0f1115; --mask:rgba(0,0,0,.5);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;background:var(--bg);color:var(--l1);font:14px/1.55 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+svg{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- 面板顶栏（本提案不变） ---------- */
+.topbar{flex:none;display:flex;align-items:center;gap:16px;padding:9px 20px;background:var(--topbar);border-bottom:1px solid var(--panel-border);min-width:0}
+.topbar b{font-size:15px;white-space:nowrap}
+.tabs{display:flex;gap:4px;overflow:auto}
+.tabs span{padding:5px 12px;border-radius:7px;color:var(--l3);white-space:nowrap}
+.tabs span.on{background:var(--active);color:var(--l1);font-weight:600}
+.state{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:99px;background:var(--warn-bg);color:var(--warn);white-space:nowrap}
+
+/* ---------- 工作区：左栏 + 主区 + 可选右栏 ---------- */
+body[data-mode=&quot;chat&quot;]{--rw:288px}
+body[data-left=&quot;closed&quot;]{--lw:0px}
+body[data-right=&quot;closed&quot;]{--rw:0px}
+.app{flex:1;min-height:0;display:grid;grid-template-columns:var(--lw) minmax(0,1fr) var(--rw);position:relative}
+.col{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.leftcol{grid-column:1;background:var(--side);border-right:1px solid var(--b2)}
+.maincol{grid-column:2}
+.rightcol{grid-column:3;border-left:1px solid var(--b2)}
+body[data-left=&quot;closed&quot;] .leftcol,body[data-right=&quot;closed&quot;] .rightcol,body:not([data-mode=&quot;chat&quot;]) .rightcol{display:none}
+.h{flex:none;height:44px;display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;border-bottom:1px solid var(--b2);min-width:0}
+.body{flex:1;min-height:0;overflow:auto}
+[data-m]{display:none !important}
+body[data-mode=&quot;persona&quot;] [data-m~=&quot;persona&quot;],body[data-mode=&quot;daily&quot;] [data-m~=&quot;daily&quot;],body[data-mode=&quot;chat&quot;] [data-m~=&quot;chat&quot;]{display:flex !important}
+:not(body)[data-pv]{display:none !important}
+body[data-pv=&quot;edit&quot;] [data-pv~=&quot;edit&quot;],body[data-pv=&quot;preset&quot;] [data-pv~=&quot;preset&quot;],body[data-pv=&quot;hints&quot;] [data-pv~=&quot;hints&quot;],body[data-pv=&quot;replay&quot;] [data-pv~=&quot;replay&quot;]{display:flex !important}
+:not(body)[data-dv]{display:none !important}
+body[data-dv=&quot;today&quot;] [data-dv~=&quot;today&quot;],body[data-dv=&quot;past&quot;] [data-dv~=&quot;past&quot;]{display:flex !important}
+.expand-left{display:none !important}
+body[data-left=&quot;closed&quot;] .expand-left{display:grid !important}
+
+.seg{display:inline-flex;padding:2px;gap:1px;background:var(--active);border-radius:8px;flex:1}
+.seg button{flex:1;padding:3px 0;border-radius:6px;color:var(--l3);font-size:12.5px}
+.seg button.on{background:var(--bg);color:var(--l1);box-shadow:0 1px 2px rgba(0,0,0,.06);font-weight:500}
+.iconbtn{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;color:var(--l2);flex:none;position:relative}
+.iconbtn:hover,.iconbtn.on{background:var(--hover)}
+.iconbtn:focus-visible,.btn:focus-visible,.item:focus-visible,.seg button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.sp{flex:1}
+.who{font-weight:600;white-space:nowrap;display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
+.who small{font-weight:400;color:var(--l3);font-size:12px;overflow:hidden;text-overflow:ellipsis}
+.btn{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;padding:4px 12px;border-radius:99px;border:1px solid var(--b3);background:var(--bg);color:var(--l1);white-space:nowrap}
+.btn:hover{background:var(--hover)}
+.btn.p{background:var(--primary);color:var(--primary-t);border-color:transparent}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.fee{font-size:9.5px;border:1px solid currentColor;border-radius:3px;padding:0 3px;opacity:.6}
+.badge{font-size:11px;padding:0 6px;border-radius:5px;background:var(--active);color:var(--l2);font-weight:400;white-space:nowrap}
+.badge.ok{background:var(--ok-soft);color:var(--okt)}
+.badge.b{background:var(--brand-soft);color:var(--brand)}
+.badge.w{background:var(--warn-bg);color:var(--warn)}
+.unsaved{font-size:12px;color:var(--warn);white-space:nowrap}
+.avatar{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:600;color:#fff;flex:none}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+
+/* 左栏列表 */
+.list{display:flex;flex-direction:column;gap:1px;padding:8px 6px}
+.grp{display:flex;align-items:center;gap:2px;font-size:12px;color:var(--l3);padding:6px 2px 4px 8px}
+.item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;font-size:13px;text-align:left;width:100%}
+.item:hover{background:var(--hover)}
+.item.on{background:var(--active)}
+.item .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item time,.item .c{font-size:11.5px;color:var(--cap);white-space:nowrap}
+.item.tpl{color:var(--l2)}
+.pin{margin-top:auto;border-top:1px solid var(--b2);padding:6px}
+
+/* 弹出菜单 */
+.menu{position:absolute;z-index:30;top:32px;right:0;min-width:180px;background:var(--bg);border-radius:12px;box-shadow:var(--pop);padding:5px;display:none;flex-direction:column}
+.menu.open{display:flex}
+.menu button{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;font-size:13px;text-align:left;white-space:nowrap}
+.menu button:hover{background:var(--hover)}
+.menu button[disabled]{opacity:.45;cursor:not-allowed}
+.menu small{display:block;color:var(--cap);font-size:11px}
+.menu hr{border:0;border-top:1px solid var(--b2);margin:4px 2px}
+.menu .danger{color:var(--err)}
+
+/* 人设配置页 */
+.cfg{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:flex;flex-direction:column;gap:18px}
+.cfg h3{margin:0 0 8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.cfg h3 small{font-weight:400;color:var(--l3);font-size:12px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.card{background:var(--card);border-radius:14px;padding:10px 12px;min-width:0}
+.card b{font-size:12.5px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.card b span{font-weight:400;color:var(--cap);font-size:11.5px}
+.ta{margin-top:6px;background:var(--bg);border:1px solid var(--b2);border-radius:9px;padding:7px 9px;font-size:12.5px;line-height:1.6;color:var(--l2);height:76px;overflow:hidden}
+.ro .ta{background:transparent;border-style:dashed}
+.trig{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden}
+.tr{display:grid;grid-template-columns:30px minmax(80px,150px) 56px minmax(0,1fr) 16px;gap:10px;align-items:center;padding:7px 12px;border-top:1px solid var(--b2);font-size:12.5px}
+.tr:first-child{border-top:0}
+.tr .k{color:var(--l3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw{width:26px;height:15px;border-radius:99px;background:var(--brand);position:relative;display:inline-block}
+.sw::after{content:&quot;&quot;;position:absolute;right:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff}
+.sw.off{background:var(--b3)}
+.sw.off::after{right:auto;left:2px}
+.fold{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--l3);padding:8px 12px;border:1px dashed var(--b3);border-radius:12px}
+.notice{display:flex;align-items:center;gap:10px;font-size:12.5px;padding:8px 12px;border-radius:12px;background:var(--warn-bg);color:var(--warn)}
+.bio{display:flex;align-items:center;gap:10px;font-size:13px}
+.bio code{font-family:inherit;background:var(--bg);border:1px solid var(--b2);border-radius:8px;padding:4px 10px;flex:1}
+.hints{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.hrow{display:flex;align-items:center;gap:10px;font-size:13px;padding:2px 0}
+.hrow .num{margin-left:auto;width:64px;text-align:right;border:1px solid var(--b2);border-radius:8px;padding:2px 8px;background:var(--bg);font-variant-numeric:tabular-nums}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--l3);font-size:13px;padding:60px 20px;text-align:center}
+
+/* 日程 */
+.day{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px}
+.tl{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden}
+.tl div{display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px;padding:8px 12px;border-top:1px solid var(--b2);font-size:13px}
+.tl div:first-child{border-top:0}
+.tl div span{color:var(--l3);font-variant-numeric:tabular-nums;font-size:12.5px}
+.tl div.now{background:var(--sel)}
+.tl div.now span{color:var(--brand);font-weight:500}
+.kvs{display:flex;flex-direction:column;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{font-size:12px;padding:2px 9px;border-radius:99px;background:var(--active);color:var(--l2)}
+
+/* 试聊 */
+.thread{max-width:760px;margin:0 auto;padding:14px 20px 6px;display:flex;flex-direction:column;gap:10px}
+.user{align-self:flex-end;display:flex;align-items:flex-end;gap:6px;max-width:80%}
+.user .meta{order:-1;padding-bottom:4px}
+.bubble{background:var(--bubble);border-radius:18px;padding:7px 14px;line-height:21px;overflow-wrap:anywhere}
+.meta{font-size:11.5px;color:var(--cap);display:flex;gap:5px;align-items:center;white-space:nowrap}
+.tag{font-size:10.5px;padding:0 5px;border-radius:4px;background:var(--active);color:var(--l2)}
+.tag.dm{background:var(--brand-soft);color:var(--brand)}
+.turn{display:flex;flex-direction:column;gap:3px;padding:6px 8px;margin:0 -8px;border-radius:10px;cursor:pointer;text-align:left}
+.turn:hover{background:var(--hover)}
+.turn.sel{background:var(--sel)}
+.proc{display:flex;align-items:center;flex-wrap:wrap;gap:5px;font-size:12px;color:var(--l3)}
+.proc .ok{color:var(--ok)}
+.proc .hit{font-size:11px;padding:0 5px;border-radius:4px;background:var(--brand-soft);color:var(--brand)}
+.proc .d{width:2px;height:2px;border-radius:1px;background:var(--cap)}
+.reply{line-height:23px;overflow-wrap:anywhere}
+.pills{font-size:11.5px;color:var(--cap);font-variant-numeric:tabular-nums}
+.skip{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--l3);padding:4px 10px;border:1px dashed var(--b3);border-radius:10px;width:fit-content}
+.warnline{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--warn);background:var(--warn-bg);padding:2px 8px;border-radius:7px;width:fit-content}
+.sys{align-self:center;font-size:11.5px;color:var(--l3);padding:2px 10px;border-radius:99px;background:var(--side);border:1px solid var(--b2)}
+.merged{font-size:11px;color:var(--cap)}
+.dock{flex:none;padding:4px 20px 12px}
+.composer{max-width:760px;margin:0 auto;border:1px solid var(--b3);border-radius:16px;background:var(--bg);box-shadow:var(--shadow);padding:8px 8px 6px 12px}
+.ph{color:var(--cap);padding:2px 2px 8px}
+.cbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--l2);padding:2px 9px;border-radius:99px;border:1px solid var(--b2);white-space:nowrap}
+.chip.on{background:var(--brand-soft);color:var(--brand);border-color:transparent}
+.hint{font-size:11.5px;color:var(--cap);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;text-align:right}
+.send{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff;opacity:.45;flex:none}
+.processbtn{display:none}
+body[data-hold=&quot;on&quot;] .processbtn{display:inline-flex}
+.rt{display:flex;gap:1px}
+.rt button{padding:3px 10px;border-radius:7px;font-size:12.5px;color:var(--l3)}
+.rt button.on{background:var(--active);color:var(--l1);font-weight:500}
+.rpane{display:none;flex-direction:column;gap:12px;padding:10px 12px 14px}
+.rpane.on{display:flex}
+.sec h4{margin:0 0 5px;font-size:11.5px;font-weight:500;color:var(--l3);display:flex;justify-content:space-between;gap:8px}
+.kv{display:grid;grid-template-columns:70px minmax(0,1fr);gap:4px 8px;font-size:12.5px;margin:0}
+.kv dt{color:var(--l3);white-space:nowrap}
+.kv dd{margin:0}
+.mem{padding:6px 9px;border-radius:9px;background:var(--side);border:1px solid var(--b2);font-size:12.5px;margin-bottom:4px}
+.mem small{color:var(--cap);font-size:11px;margin-left:4px}
+.seg2{border:1px solid var(--b2);border-radius:10px;margin-bottom:6px;overflow:hidden}
+.seg2 b{display:flex;justify-content:space-between;font-size:11.5px;font-weight:500;color:var(--l3);padding:4px 8px;background:var(--side);border-bottom:1px solid var(--b2)}
+.seg2 pre{margin:0;padding:6px 8px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;color:var(--l2);max-height:84px;overflow:hidden}
+.bar{height:4px;border-radius:2px;background:var(--active);overflow:hidden;margin:4px 0 6px}
+.bar i{display:block;height:100%;background:var(--brand)}
+
+/* 回放视图（示意） */
+.rp{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:flex;flex-direction:column;gap:12px}
+.rpgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+
+/* ---------- 窄屏：左栏抽屉、右栏浮层 ---------- */
+.mask{display:none}
+.drawer-btn{display:none !important}
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .maincol{grid-column:1}
+  .leftcol{position:fixed;z-index:40;left:0;top:0;bottom:0;width:280px;transform:translateX(-100%);transition:transform .2s;display:flex !important;box-shadow:var(--pop)}
+  body[data-drawer=&quot;open&quot;] .leftcol{transform:none}
+  .rightcol{position:fixed;z-index:40;right:0;top:0;bottom:0;width:min(340px,92vw);display:none !important;background:var(--bg);box-shadow:var(--pop)}
+  body[data-mode=&quot;chat&quot;][data-sheet=&quot;open&quot;] .rightcol{display:flex !important}
+  body[data-drawer=&quot;open&quot;] .mask,body[data-sheet=&quot;open&quot;][data-mode=&quot;chat&quot;] .mask{display:block;position:fixed;inset:0;z-index:35;background:var(--mask)}
+  .drawer-btn{display:grid !important}
+  .expand-left,.collapse-left,.collapse-right{display:none !important}
+  .grid2,.hints,.day,.rpgrid{grid-template-columns:minmax(0,1fr)}
+  .cfg,.day,.rp{padding:12px 14px 24px}
+  .tr{grid-template-columns:30px minmax(0,1fr) 56px 16px}
+  .tr .k{display:none}
+  .h .hide-narrow{display:none}
+  .thread{padding:12px 12px 6px}
+  .dock{padding:4px 10px 10px}
+  .hint{display:none}
+  .topbar{padding:9px 12px;gap:10px}
+}
+
+
+.tabs a{padding:5px 12px;border-radius:7px;color:var(--l3);white-space:nowrap;text-decoration:none}
+.tabs a:hover{background:var(--hover);color:var(--l1)}
+.tabs a.on{background:var(--active);color:var(--l1);font-weight:600}
+.runbtn{margin-left:4px}
+.ttl{font-weight:600;font-size:13.5px;flex:1}
+/* 表单与设置通用 */
+.page{max-width:960px;margin:0 auto;padding:16px 24px 40px;display:flex;flex-direction:column;gap:14px}
+.page.wide{max-width:1180px}
+.sec-title{font-size:13px;font-weight:600;margin:4px 0 -4px;display:flex;align-items:center;gap:8px}
+.sec-title small{font-weight:400;color:var(--l3);font-size:12px}
+.fgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.fgrid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--l3)}
+.f .in{border:1px solid var(--b2);border-radius:9px;background:var(--bg);padding:6px 10px;font-size:13.5px;color:var(--l1);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:6px;min-height:34px}
+.f .in small{color:var(--cap);margin-left:auto}
+.f .in.area{min-height:64px;align-items:flex-start;line-height:1.6;color:var(--l2)}
+.f em{font-style:normal;color:var(--cap);font-size:11.5px}
+.radios{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.rc{border:1px solid var(--b2);border-radius:12px;padding:10px 12px;background:var(--bg);display:flex;gap:10px;align-items:flex-start}
+.rc.on{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
+.rc i{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--b3);margin-top:3px;flex:none}
+.rc.on i{border:4px solid var(--brand)}
+.rc b{font-size:13px}
+.rc span{display:block;font-size:12px;color:var(--l3)}
+.rows{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden;background:var(--bg)}
+.row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--b2);font-size:13px;min-width:0}
+.row:first-child{border-top:0}
+.row .sub{color:var(--l3);font-size:12px}
+.row .grow{flex:1;min-width:0}
+.row .grow small{display:block;color:var(--l3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.metric{background:var(--card);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.metric span{font-size:12px;color:var(--l3)}
+.metric b{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}
+.metric small{font-size:11.5px;color:var(--cap)}
+.metric.w{background:var(--warn-bg)} .metric.w span,.metric.w small{color:var(--warn)}
+.metric.e{background:var(--err-bg)} .metric.e span,.metric.e small{color:var(--err)}
+.lv{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok)}
+.lv.w{background:var(--warn)} .lv.e{background:var(--err)} .lv.n{background:var(--cap)}
+.split{display:grid;grid-template-columns:270px minmax(0,1fr);min-height:100%}
+.split&gt;.page{margin:0;max-width:none;width:100%}
+.inner{border-right:1px solid var(--b2);padding:10px 8px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.search{display:flex;align-items:center;gap:6px;border:1px solid var(--b2);border-radius:9px;padding:5px 9px;font-size:12.5px;color:var(--cap);margin:0 2px 6px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.logrow{display:grid;grid-template-columns:70px 12px 170px minmax(0,1fr);gap:8px;align-items:center;padding:6px 12px;border-top:1px solid var(--b2);font-size:12.5px}
+.logrow:first-child{border-top:0}
+.logrow time{color:var(--l3);font-variant-numeric:tabular-nums}
+.desk{border-radius:14px;background:#0b0c0f;color:#8b8f97;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:360px;font-size:13px}
+.heat{display:grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;grid-auto-columns:12px;gap:3px;overflow:hidden}
+.heat i{border-radius:3px;background:var(--active)}
+.heat i.l1{background:#c9dafb} .heat i.l2{background:#93b4f3} .heat i.l3{background:#5b8be8} .heat i.l4{background:#4176e6}
+@media (prefers-color-scheme: dark){.heat i.l1{background:#28314a}.heat i.l2{background:#34508a}.heat i.l3{background:#4d73c4}.heat i.l4{background:#7aaaff}}
+.legend{display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+.legend div{display:flex;align-items:center;gap:8px}
+.legend i{width:9px;height:9px;border-radius:3px}
+.legend span{margin-left:auto;color:var(--l3);font-variant-numeric:tabular-nums}
+@media (max-width:860px){
+  .fgrid,.fgrid.two,.radios{grid-template-columns:minmax(0,1fr)}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .split{grid-template-columns:minmax(0,1fr)}
+  .inner{border-right:0;border-bottom:1px solid var(--b2)}
+  .page{padding:12px 14px 28px}
+  .logrow{grid-template-columns:56px 10px minmax(0,1fr)}
+  .logrow .mono{display:none}
+}
+
+
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body data-mode=&quot;persona&quot; data-pv=&quot;edit&quot; data-dv=&quot;today&quot; data-left=&quot;open&quot; data-right=&quot;open&quot; data-hold=&quot;off&quot;&gt;
+
+&lt;div class=&quot;topbar&quot;&gt;
+  &lt;b&gt;角色工作流&lt;/b&gt;
+  &lt;nav class=&quot;tabs&quot;&gt;&lt;a data-href=&quot;layout-feed.html&quot; class=&quot;&quot;&gt;动态&lt;/a&gt;&lt;a data-href=&quot;layout-persona.html&quot; class=&quot;on&quot;&gt;人设&lt;/a&gt;&lt;a data-href=&quot;layout-settings.html&quot; class=&quot;&quot;&gt;设置&lt;/a&gt;&lt;/nav&gt;
+  &lt;span class=&quot;state&quot;&gt;● 已暂停 · 自动模式&lt;/span&gt;
+  &lt;button class=&quot;btn runbtn&quot;&gt;启动&lt;/button&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;app&quot;&gt;
+  &lt;div class=&quot;mask&quot; data-close&gt;&lt;/div&gt;
+
+  &lt;!-- ================= 左栏 ================= --&gt;
+  &lt;aside class=&quot;col leftcol&quot; id=&quot;left&quot;&gt;
+    &lt;div class=&quot;h&quot;&gt;
+      &lt;div class=&quot;seg&quot; role=&quot;tablist&quot; aria-label=&quot;人设页模式&quot;&gt;
+        &lt;button data-go=&quot;persona&quot; class=&quot;on&quot;&gt;人设&lt;/button&gt;&lt;button data-go=&quot;daily&quot;&gt;日程&lt;/button&gt;&lt;button data-go=&quot;chat&quot;&gt;试聊&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;button class=&quot;iconbtn collapse-left&quot; data-toggle=&quot;left&quot; aria-expanded=&quot;true&quot; aria-controls=&quot;left&quot; title=&quot;收起左栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M9 4v16&quot;/&gt;&lt;path d=&quot;m15 10-2 2 2 2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+    &lt;/div&gt;
+
+    &lt;!-- 人设：人设即会话 --&gt;
+    &lt;div class=&quot;body&quot; data-m=&quot;persona&quot; style=&quot;flex-direction:column&quot;&gt;
+      &lt;div class=&quot;list&quot;&gt;
+        &lt;div class=&quot;grp&quot;&gt;&lt;span class=&quot;sp&quot;&gt;我的人设&lt;/span&gt;
+          &lt;span style=&quot;position:relative&quot;&gt;&lt;button class=&quot;iconbtn&quot; data-menu=&quot;newmenu&quot; title=&quot;新建人设&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 5v14M5 12h14&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+            &lt;div class=&quot;menu&quot; id=&quot;newmenu&quot; style=&quot;left:0;right:auto&quot;&gt;
+              &lt;button&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;5&quot; y=&quot;3&quot; width=&quot;14&quot; height=&quot;18&quot; rx=&quot;2&quot;/&gt;&lt;/svg&gt;&lt;span&gt;空白人设&lt;small&gt;只含四个始终生效分区的标题&lt;/small&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 6h16M4 12h16M4 18h10&quot;/&gt;&lt;/svg&gt;&lt;span&gt;从预设新建&lt;small&gt;复制一个内置预设&lt;/small&gt;&lt;/span&gt;&lt;/button&gt;
+              &lt;button&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;8&quot; y=&quot;8&quot; width=&quot;12&quot; height=&quot;12&quot; rx=&quot;2&quot;/&gt;&lt;path d=&quot;M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2&quot;/&gt;&lt;/svg&gt;&lt;span&gt;复制当前人设&lt;small&gt;复制“大肥鱼”&lt;/small&gt;&lt;/span&gt;&lt;/button&gt;
+            &lt;/div&gt;&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;button class=&quot;item on&quot; data-pick=&quot;edit&quot; data-name=&quot;大肥鱼&quot;&gt;&lt;span class=&quot;dot&quot; style=&quot;background:var(--ok)&quot;&gt;&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;大肥鱼&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;使用中&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot; data-pick=&quot;edit&quot; data-name=&quot;大肥鱼 · 温柔版&quot;&gt;&lt;span class=&quot;dot&quot; style=&quot;background:var(--b3)&quot;&gt;&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;大肥鱼 · 温柔版&lt;/span&gt;&lt;time&gt;昨天&lt;/time&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot; data-pick=&quot;edit&quot; data-name=&quot;通用 · 改&quot;&gt;&lt;span class=&quot;dot&quot; style=&quot;background:var(--b3)&quot;&gt;&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;通用 · 改&lt;/span&gt;&lt;time&gt;3 天&lt;/time&gt;&lt;/button&gt;
+        &lt;div class=&quot;grp&quot; style=&quot;margin-top:8px&quot;&gt;&lt;span class=&quot;sp&quot;&gt;内置预设 · 只读模板&lt;/span&gt;&lt;/div&gt;
+        &lt;button class=&quot;item tpl&quot; data-pick=&quot;preset&quot; data-name=&quot;通用（默认）&quot;&gt;&lt;span class=&quot;t&quot;&gt;通用（默认）&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item tpl&quot; data-pick=&quot;preset&quot; data-name=&quot;大肥鱼&quot;&gt;&lt;span class=&quot;t&quot;&gt;大肥鱼&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item tpl&quot; data-pick=&quot;preset&quot; data-name=&quot;GPT 娘&quot;&gt;&lt;span class=&quot;t&quot;&gt;GPT 娘&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item tpl&quot; data-pick=&quot;preset&quot; data-name=&quot;Claude 娘&quot;&gt;&lt;span class=&quot;t&quot;&gt;Claude 娘&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item tpl&quot; data-pick=&quot;preset&quot; data-name=&quot;Kimi 娘&quot;&gt;&lt;span class=&quot;t&quot;&gt;Kimi 娘&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item tpl&quot; data-pick=&quot;preset&quot; data-name=&quot;GLM 娘&quot;&gt;&lt;span class=&quot;t&quot;&gt;GLM 娘&lt;/span&gt;&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;pin&quot;&gt;&lt;button class=&quot;item&quot; data-pick=&quot;hints&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3zM9 21h6&quot;/&gt;&lt;/svg&gt;&lt;span class=&quot;t&quot;&gt;动态提醒&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;所有人设共用&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- 日程：日期即会话 --&gt;
+    &lt;div class=&quot;body&quot; data-m=&quot;daily&quot; style=&quot;flex-direction:column&quot;&gt;
+      &lt;div class=&quot;list&quot;&gt;
+        &lt;div class=&quot;grp&quot;&gt;&lt;span class=&quot;sp&quot;&gt;虚构日程 · 近 7 天&lt;/span&gt;&lt;button class=&quot;iconbtn&quot; title=&quot;生成时间 06:00 · 到设置页修改&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;3&quot;/&gt;&lt;path d=&quot;M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/div&gt;
+        &lt;button class=&quot;item on&quot; data-day=&quot;today&quot;&gt;&lt;span class=&quot;t&quot;&gt;今天 · 10/28 周二&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;已编辑&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot; data-day=&quot;past&quot;&gt;&lt;span class=&quot;t&quot;&gt;10/27 周一&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;生成&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot; data-day=&quot;past&quot;&gt;&lt;span class=&quot;t&quot;&gt;10/26 周日&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;生成&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot; data-day=&quot;past&quot;&gt;&lt;span class=&quot;t&quot;&gt;10/25 周六&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;生成&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot; data-day=&quot;past&quot;&gt;&lt;span class=&quot;t&quot;&gt;10/24 周五&lt;/span&gt;&lt;span class=&quot;c&quot; style=&quot;color:var(--err)&quot;&gt;失败 · 无日程&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot; data-day=&quot;past&quot;&gt;&lt;span class=&quot;t&quot;&gt;10/23 周四&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;生成&lt;/span&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot; data-day=&quot;past&quot;&gt;&lt;span class=&quot;t&quot;&gt;10/22 周三&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;生成&lt;/span&gt;&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- 试聊：用户即会话 --&gt;
+    &lt;div class=&quot;body&quot; data-m=&quot;chat&quot; style=&quot;flex-direction:column&quot;&gt;
+      &lt;div class=&quot;list&quot;&gt;
+        &lt;div class=&quot;grp&quot;&gt;&lt;span class=&quot;sp&quot;&gt;测试用户&lt;/span&gt;
+          &lt;button class=&quot;iconbtn&quot; title=&quot;测试用户的消息和记忆单独存放，不进动态、记忆页、额度统计和备份&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+          &lt;button class=&quot;iconbtn&quot; title=&quot;新测试用户&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 5v14M5 12h14&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/div&gt;
+        &lt;button class=&quot;item on&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#4176e6&quot;&gt;林&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;小林 · 加班党&lt;/span&gt;&lt;time&gt;刚刚&lt;/time&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#7c3aed&quot;&gt;广&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;广告号测试&lt;/span&gt;&lt;time&gt;9 分钟&lt;/time&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#dd8629&quot;&gt;催&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;连续催促&lt;/span&gt;&lt;time&gt;2 小时&lt;/time&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#22a05e&quot;&gt;繁&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;繁體用戶&lt;/span&gt;&lt;time&gt;4 天&lt;/time&gt;&lt;/button&gt;
+        &lt;button class=&quot;item&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#0e7490&quot;&gt;E&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;English speaker&lt;/span&gt;&lt;time&gt;8 天&lt;/time&gt;&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/aside&gt;
+
+  &lt;!-- ================= 主区 ================= --&gt;
+  &lt;section class=&quot;col maincol&quot;&gt;
+    &lt;!-- 页头：人设配置 --&gt;
+    &lt;div class=&quot;h&quot; data-m=&quot;persona&quot;&gt;
+      &lt;button class=&quot;iconbtn drawer-btn&quot; data-drawer title=&quot;打开列表&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M4 12h16M4 17h16&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;button class=&quot;iconbtn expand-left&quot; data-toggle=&quot;left&quot; aria-expanded=&quot;false&quot; aria-controls=&quot;left&quot; title=&quot;展开左栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M9 4v16&quot;/&gt;&lt;path d=&quot;m13 10 2 2-2 2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;span class=&quot;who&quot; data-pv=&quot;edit&quot;&gt;&lt;span id=&quot;pname&quot;&gt;大肥鱼&lt;/span&gt; &lt;span class=&quot;badge ok&quot; id=&quot;pactive&quot;&gt;使用中&lt;/span&gt;&lt;small class=&quot;hide-narrow&quot;&gt;修订 4 · 3,812 / 20,000 字符&lt;/small&gt;&lt;/span&gt;
+      &lt;span class=&quot;who&quot; data-pv=&quot;preset&quot;&gt;&lt;span id=&quot;tname&quot;&gt;GLM 娘&lt;/span&gt; &lt;span class=&quot;badge&quot;&gt;内置预设 · 只读&lt;/span&gt;&lt;/span&gt;
+      &lt;span class=&quot;who&quot; data-pv=&quot;hints&quot;&gt;动态提醒 &lt;span class=&quot;badge b&quot;&gt;所有人设共用&lt;/span&gt;&lt;small class=&quot;hide-narrow&quot;&gt;修订 2 · 保存后下一轮生效&lt;/small&gt;&lt;/span&gt;
+      &lt;span class=&quot;who&quot; data-pv=&quot;replay&quot;&gt;&lt;button class=&quot;btn&quot; data-back&gt;← 返回配置&lt;/button&gt; 回放对比与质量统计 &lt;small class=&quot;hide-narrow&quot;&gt;候选：大肥鱼 编辑器当前内容&lt;/small&gt;&lt;/span&gt;
+      &lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;
+      &lt;span class=&quot;unsaved hide-narrow&quot; data-pv=&quot;edit&quot;&gt;● 有未保存修改&lt;/span&gt;
+      &lt;button class=&quot;btn hide-narrow&quot; data-pv=&quot;edit&quot; data-replay&gt;回放对比 &lt;span class=&quot;fee&quot;&gt;计费&lt;/span&gt;&lt;/button&gt;
+      &lt;button class=&quot;btn hide-narrow&quot; data-pv=&quot;edit&quot; data-trychat&gt;试聊这个人设 →&lt;/button&gt;
+      &lt;button class=&quot;btn p&quot; data-pv=&quot;edit&quot;&gt;保存&lt;/button&gt;
+      &lt;span style=&quot;position:relative&quot; data-pv=&quot;edit&quot;&gt;&lt;button class=&quot;iconbtn&quot; data-menu=&quot;pmenu&quot; title=&quot;更多操作&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;5&quot; cy=&quot;12&quot; r=&quot;1&quot;/&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;1&quot;/&gt;&lt;circle cx=&quot;19&quot; cy=&quot;12&quot; r=&quot;1&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+        &lt;div class=&quot;menu&quot; id=&quot;pmenu&quot;&gt;
+          &lt;button id=&quot;activate&quot; disabled&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;9&quot;/&gt;&lt;path d=&quot;m8 12 3 3 5-6&quot;/&gt;&lt;/svg&gt;&lt;span&gt;设为使用中&lt;small id=&quot;activate-hint&quot;&gt;已经在使用中&lt;/small&gt;&lt;/span&gt;&lt;/button&gt;
+          &lt;button&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;8&quot; y=&quot;8&quot; width=&quot;12&quot; height=&quot;12&quot; rx=&quot;2&quot;/&gt;&lt;path d=&quot;M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2&quot;/&gt;&lt;/svg&gt;复制&lt;/button&gt;
+          &lt;button&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 20h4L19 9l-4-4L4 16z&quot;/&gt;&lt;/svg&gt;重命名&lt;/button&gt;
+          &lt;hr&gt;
+          &lt;button class=&quot;danger&quot; id=&quot;del&quot; disabled&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3&quot;/&gt;&lt;/svg&gt;&lt;span&gt;删除&lt;small id=&quot;del-hint&quot;&gt;使用中的人设不能删除，先切换到其他人设&lt;/small&gt;&lt;/span&gt;&lt;/button&gt;
+        &lt;/div&gt;&lt;/span&gt;
+      &lt;button class=&quot;btn p&quot; data-pv=&quot;preset&quot;&gt;以此新建&lt;/button&gt;
+      &lt;button class=&quot;btn p&quot; data-pv=&quot;hints&quot;&gt;保存&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;!-- 页头：日程 --&gt;
+    &lt;div class=&quot;h&quot; data-m=&quot;daily&quot;&gt;
+      &lt;button class=&quot;iconbtn drawer-btn&quot; data-drawer title=&quot;打开列表&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M4 12h16M4 17h16&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;button class=&quot;iconbtn expand-left&quot; data-toggle=&quot;left&quot; aria-expanded=&quot;false&quot; aria-controls=&quot;left&quot; title=&quot;展开左栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M9 4v16&quot;/&gt;&lt;path d=&quot;m13 10 2 2-2 2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;span class=&quot;who&quot; data-dv=&quot;today&quot;&gt;10 月 28 日 周二 &lt;span class=&quot;badge b&quot;&gt;今天&lt;/span&gt;&lt;span class=&quot;badge w&quot;&gt;虚构设定&lt;/span&gt;&lt;small class=&quot;hide-narrow&quot;&gt;06:00 由「大肥鱼」生成 · 21:12 编辑 · 修订 2 · $0.0021&lt;/small&gt;&lt;/span&gt;
+      &lt;span class=&quot;who&quot; data-dv=&quot;past&quot;&gt;10 月 27 日 周一 &lt;span class=&quot;badge&quot;&gt;只读&lt;/span&gt;&lt;span class=&quot;badge w&quot;&gt;虚构设定&lt;/span&gt;&lt;small class=&quot;hide-narrow&quot;&gt;06:00 由「大肥鱼」生成 · 修订 1 · $0.0019&lt;/small&gt;&lt;/span&gt;
+      &lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;
+      &lt;button class=&quot;btn&quot; data-dv=&quot;today&quot;&gt;编辑&lt;/button&gt;
+      &lt;button class=&quot;btn&quot; data-dv=&quot;today&quot;&gt;重新生成 &lt;span class=&quot;fee&quot;&gt;计费&lt;/span&gt;&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;!-- 页头：试聊 --&gt;
+    &lt;div class=&quot;h&quot; data-m=&quot;chat&quot;&gt;
+      &lt;button class=&quot;iconbtn drawer-btn&quot; data-drawer title=&quot;打开列表&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M4 12h16M4 17h16&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;button class=&quot;iconbtn expand-left&quot; data-toggle=&quot;left&quot; aria-expanded=&quot;false&quot; aria-controls=&quot;left&quot; title=&quot;展开左栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M9 4v16&quot;/&gt;&lt;path d=&quot;m13 10 2 2-2 2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;span class=&quot;avatar&quot; style=&quot;background:#4176e6&quot;&gt;林&lt;/span&gt;
+      &lt;span class=&quot;who&quot;&gt;小林 · 加班党&lt;small class=&quot;hide-narrow&quot;&gt;@test_xiaolin · 7 轮 · 本会话 $0.0050&lt;/small&gt;&lt;/span&gt;
+      &lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;
+      &lt;span style=&quot;position:relative&quot;&gt;&lt;button class=&quot;iconbtn&quot; data-menu=&quot;cmenu&quot; title=&quot;更多操作&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;5&quot; cy=&quot;12&quot; r=&quot;1&quot;/&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;1&quot;/&gt;&lt;circle cx=&quot;19&quot; cy=&quot;12&quot; r=&quot;1&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+        &lt;div class=&quot;menu&quot; id=&quot;cmenu&quot;&gt;
+          &lt;button&gt;改名&lt;/button&gt;&lt;button&gt;重置&lt;small&gt;清空对话、记忆、冷却和整理进度&lt;/small&gt;&lt;/button&gt;&lt;button&gt;清除冷却&lt;/button&gt;&lt;hr&gt;&lt;button class=&quot;danger&quot;&gt;删除测试用户&lt;/button&gt;
+        &lt;/div&gt;&lt;/span&gt;
+      &lt;button class=&quot;iconbtn on&quot; data-toggle=&quot;right&quot; aria-expanded=&quot;true&quot; aria-controls=&quot;right&quot; title=&quot;收起右栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M15 4v16&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+    &lt;/div&gt;
+
+    &lt;!-- 主体：人设配置 --&gt;
+    &lt;div class=&quot;body&quot; data-m=&quot;persona&quot; style=&quot;flex-direction:column&quot;&gt;
+      &lt;div class=&quot;cfg&quot; data-pv=&quot;edit&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div&gt;
+          &lt;h3&gt;始终生效 &lt;small&gt;每条回复都带上，放在可缓存的稳定前缀里&lt;/small&gt;&lt;/h3&gt;
+          &lt;div class=&quot;grid2&quot;&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;角色定义 &lt;span&gt;412 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;你是大肥鱼，一只住在深海服务器里的鲸鱼娘。网友二创的非官方角色，与深度求索无关。贪吃、爱摸鱼、嘴硬心软，坚决不承认自己胖……&lt;/div&gt;&lt;/div&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;说话风格 &lt;span&gt;968 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;通用写法：不用客服腔和 Markdown，不写教程，不用“谢谢夸奖”开头……&lt;br&gt;口吻：句子短，公开回复常用一两句，爱用“诶嘿”“唔”……&lt;/div&gt;&lt;/div&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;记忆与承诺 &lt;span&gt;305 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;只把已经确认发出的回复当作说过的话。不承诺做不到的事，不声称已经删除记录……&lt;/div&gt;&lt;/div&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;互动边界 &lt;span&gt;520 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;不发布或评论公司消息、价格和政策；遇到辱骂不对骂；危机话题给出求助渠道……&lt;/div&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div&gt;
+          &lt;h3&gt;被问到才用 &lt;small&gt;第一行写明触发条件，没聊到时不主动提&lt;/small&gt;&lt;/h3&gt;
+          &lt;div class=&quot;grid2&quot;&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;她自己 &lt;span&gt;388 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;被问到喜好、往事时才用。爱吃小鱼干，讨厌加班……&lt;/div&gt;&lt;/div&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;外貌 &lt;span&gt;201 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;被问到长相时才用。蓝白色的圆滚滚鲸鱼娘……&lt;/div&gt;&lt;/div&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;认识的 AI 娘 &lt;span&gt;356 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;被问到其他 AI 娘时才用。和 GLM 娘是玩笑冤家……&lt;/div&gt;&lt;/div&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;身份设定 &lt;span&gt;262 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;被问到身份时才用。说明自己是网友二创的非官方角色……&lt;/div&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div&gt;
+          &lt;h3&gt;触发卡 &lt;small&gt;关键词卡不增加调用；语义卡每条消息多一次判定，会计费&lt;/small&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;+ 添加&lt;/button&gt;&lt;/h3&gt;
+          &lt;div class=&quot;trig&quot;&gt;
+            &lt;div class=&quot;tr&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;&lt;b&gt;不给步骤&lt;/b&gt;&lt;span class=&quot;badge&quot;&gt;关键词&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;教程、步骤、怎么做、how to make、tutorial…&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;tr&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;&lt;b&gt;被夸&lt;/b&gt;&lt;span class=&quot;badge&quot;&gt;关键词&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;可爱、好厉害、真棒、cute…&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;tr&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;&lt;b&gt;说她胖&lt;/b&gt;&lt;span class=&quot;badge&quot;&gt;关键词&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;胖、肥、圆滚滚…&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;tr&quot;&gt;&lt;span class=&quot;sw off&quot;&gt;&lt;/span&gt;&lt;b&gt;深夜聊天&lt;/b&gt;&lt;span class=&quot;badge b&quot;&gt;语义&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;对方提到熬夜、失眠或凌晨还没睡&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;fold&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;m9 6 6 6-6 6&quot;/&gt;&lt;/svg&gt;固定规则（系统内置，只读）&lt;/div&gt;
+        &lt;div class=&quot;fold&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;m9 6 6 6-6 6&quot;/&gt;&lt;/svg&gt;建议简介 · 来源：内置预设“大肥鱼” v2&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 预设只读 --&gt;
+      &lt;div class=&quot;cfg ro&quot; data-pv=&quot;preset&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;notice&quot; style=&quot;background:var(--side);color:var(--l2);border:1px solid var(--b2)&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;9&quot;/&gt;&lt;path d=&quot;M12 8h.01M11 12h1v4h1&quot;/&gt;&lt;/svg&gt;&lt;span&gt;&lt;b id=&quot;tsum&quot;&gt;精打细算、勤快又有点小狡黠的打工狐，与大肥鱼是玩笑冤家。&lt;/b&gt;&lt;br&gt;内置预设只读。点击“以此新建”复制到“我的人设”，之后可以编辑、试聊和设为使用中。&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;card&quot;&gt;&lt;b&gt;建议简介 &lt;span&gt;用于 X 账号资料，系统不会自动修改&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;bio&quot; style=&quot;margin-top:6px&quot;&gt;&lt;code&gt;非官方同人 AI 角色｜AI 自动回复｜与智谱官方无关&lt;/code&gt;&lt;button class=&quot;btn&quot;&gt;复制&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;div&gt;
+          &lt;h3&gt;始终生效&lt;/h3&gt;
+          &lt;div class=&quot;grid2&quot;&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;角色定义 &lt;span&gt;398 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;你是 GLM 娘，一只精打细算的打工狐……&lt;/div&gt;&lt;/div&gt;
+            &lt;div class=&quot;card&quot;&gt;&lt;b&gt;说话风格 &lt;span&gt;941 字&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;通用写法：不用客服腔和 Markdown……&lt;br&gt;口吻：……&lt;/div&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;fold&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;m9 6 6 6-6 6&quot;/&gt;&lt;/svg&gt;其余 6 个分区 · 5 张关键词卡&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 动态提醒（全局） --&gt;
+      &lt;div class=&quot;cfg&quot; data-pv=&quot;hints&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;notice&quot; style=&quot;background:var(--brand-soft);color:var(--brand)&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;9&quot;/&gt;&lt;path d=&quot;M12 8h.01M11 12h1v4h1&quot;/&gt;&lt;/svg&gt;这些提醒对所有人设生效，不随人设切换。&lt;/div&gt;
+        &lt;div class=&quot;hints&quot;&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;迟到提醒&lt;/b&gt;&lt;div class=&quot;hrow&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;开启&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;超过&lt;span class=&quot;num&quot;&gt;60&lt;/span&gt;分钟算迟到&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;跟随对方语言&lt;/b&gt;&lt;div class=&quot;hrow&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;开启&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;开头去重&lt;/b&gt;&lt;div class=&quot;hrow&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;开启&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;参考最近&lt;span class=&quot;num&quot;&gt;12&lt;/span&gt;条&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;生成前自检&lt;/b&gt;&lt;div class=&quot;hrow&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;开启&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot; style=&quot;grid-column:1/-1&quot;&gt;&lt;b&gt;表情节制&lt;/b&gt;
+            &lt;div class=&quot;hrow&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;开启&lt;/div&gt;
+            &lt;div class=&quot;hrow&quot;&gt;每 10 条颜文字&lt;span class=&quot;num&quot;&gt;1&lt;/span&gt;&lt;span style=&quot;width:16px&quot;&gt;&lt;/span&gt;emoji&lt;span class=&quot;num&quot; style=&quot;margin-left:0&quot;&gt;2&lt;/span&gt;&lt;span style=&quot;width:16px&quot;&gt;&lt;/span&gt;波浪号&lt;span class=&quot;num&quot; style=&quot;margin-left:0&quot;&gt;1&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 回放（示意，沿用现有功能） --&gt;
+      &lt;div class=&quot;rp&quot; data-pv=&quot;replay&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;cbar&quot;&gt;&lt;span class=&quot;chip on&quot;&gt;比较人设&lt;/span&gt;&lt;span class=&quot;chip&quot;&gt;比较模型&lt;/span&gt;&lt;span class=&quot;chip&quot;&gt;公开 · 16 条样本&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn p&quot;&gt;预估费用并运行&lt;/button&gt;&lt;/div&gt;
+        &lt;div class=&quot;rpgrid&quot;&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;基线 &lt;span&gt;历史实际回复&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;辛苦啦，上线前一周最熬人了……&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;候选 &lt;span&gt;大肥鱼 · 编辑器当前内容&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;ta&quot;&gt;诶嘿，加班到十点也太惨了吧……&lt;/div&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;fold&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;m9 6 6 6-6 6&quot;/&gt;&lt;/svg&gt;生产回复质量统计（近 7 天）&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- 主体：日程 --&gt;
+    &lt;div class=&quot;body&quot; data-m=&quot;daily&quot; style=&quot;flex-direction:column&quot;&gt;
+      &lt;div class=&quot;day&quot;&gt;
+        &lt;div&gt;
+          &lt;div class=&quot;cfg&quot; style=&quot;padding:0;gap:8px&quot;&gt;&lt;h3&gt;时间线 &lt;small data-dv=&quot;today&quot; style=&quot;display:inline&quot;&gt;回复和试聊读取当前时段&lt;/small&gt;&lt;/h3&gt;&lt;/div&gt;
+          &lt;div class=&quot;tl&quot;&gt;
+            &lt;div&gt;&lt;span&gt;07:30–09:00&lt;/span&gt;赖床，被闹钟叫了三次才起&lt;/div&gt;
+            &lt;div&gt;&lt;span&gt;09:00–12:00&lt;/span&gt;在深海服务器里“认真工作”（其实在摸鱼）&lt;/div&gt;
+            &lt;div&gt;&lt;span&gt;12:00–13:30&lt;/span&gt;午饭吃了一大碗小鱼干拌饭&lt;/div&gt;
+            &lt;div&gt;&lt;span&gt;13:30–18:00&lt;/span&gt;帮网友查资料，顺便打了个盹&lt;/div&gt;
+            &lt;div&gt;&lt;span&gt;18:00–21:00&lt;/span&gt;和 GLM 娘斗嘴，输了一顿夜宵&lt;/div&gt;
+            &lt;div class=&quot;now&quot; id=&quot;nowrow&quot;&gt;&lt;span&gt;21:00–23:00 · 现在&lt;/span&gt;窝在家里追剧&lt;/div&gt;
+            &lt;div&gt;&lt;span&gt;23:00–&lt;/span&gt;说好早睡，大概率做不到&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;kvs&quot;&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;三餐&lt;/b&gt;&lt;div style=&quot;font-size:12.5px;color:var(--l2);margin-top:6px;line-height:1.8&quot;&gt;早餐：来不及吃&lt;br&gt;午餐：小鱼干拌饭&lt;br&gt;晚餐：输给 GLM 娘的夜宵（她请）&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;活动&lt;/b&gt;&lt;div class=&quot;chips&quot; style=&quot;margin-top:6px&quot;&gt;&lt;span&gt;摸鱼&lt;/span&gt;&lt;span&gt;查资料&lt;/span&gt;&lt;span&gt;斗嘴&lt;/span&gt;&lt;span&gt;追剧&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;心情&lt;/b&gt;&lt;div style=&quot;font-size:12.5px;color:var(--l2);margin-top:6px&quot;&gt;吃饱了，心情不错，有点困&lt;/div&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- 主体：试聊 --&gt;
+    &lt;div class=&quot;body&quot; data-m=&quot;chat&quot; style=&quot;flex-direction:column&quot;&gt;&lt;div class=&quot;thread&quot; id=&quot;thread&quot;&gt;
+      &lt;div class=&quot;user&quot;&gt;&lt;div class=&quot;meta&quot;&gt;&lt;span class=&quot;tag&quot;&gt;公开&lt;/span&gt;21:04&lt;/div&gt;&lt;div class=&quot;bubble&quot;&gt;今天又加班到十点，项目下周就要上线了&lt;/div&gt;&lt;/div&gt;
+      &lt;button class=&quot;turn&quot; data-turn=&quot;1&quot;&gt;
+        &lt;span class=&quot;proc&quot;&gt;&lt;svg class=&quot;ok&quot; viewBox=&quot;0 0 24 24&quot; style=&quot;width:12px;height:12px&quot;&gt;&lt;path d=&quot;m5 12 5 5 9-10&quot;/&gt;&lt;/svg&gt;大肥鱼&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;普通&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;召回 1 条记忆&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;1.8 秒&lt;/span&gt;
+        &lt;span class=&quot;reply&quot;&gt;辛苦啦……上线前一周真的是最熬人的时候。先去吃点热的，项目不会因为你多饿一小时就跑得更快的&lt;/span&gt;
+        &lt;span class=&quot;pills&quot;&gt;GLM-4.6 · 1,204 → 41 tokens · $0.0011&lt;/span&gt;
+      &lt;/button&gt;
+      &lt;div class=&quot;user&quot;&gt;&lt;div class=&quot;meta&quot;&gt;&lt;span class=&quot;tag&quot;&gt;公开&lt;/span&gt;21:07&lt;/div&gt;&lt;div class=&quot;bubble&quot;&gt;你好可爱啊，还记得我在忙什么吗&lt;/div&gt;&lt;/div&gt;
+      &lt;button class=&quot;turn sel&quot; data-turn=&quot;2&quot;&gt;
+        &lt;span class=&quot;proc&quot;&gt;&lt;svg class=&quot;ok&quot; viewBox=&quot;0 0 24 24&quot; style=&quot;width:12px;height:12px&quot;&gt;&lt;path d=&quot;m5 12 5 5 9-10&quot;/&gt;&lt;/svg&gt;大肥鱼&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;普通&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;召回 2 条记忆&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;命中&lt;span class=&quot;hit&quot;&gt;被夸&lt;/span&gt;&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;2.1 秒&lt;/span&gt;
+        &lt;span class=&quot;reply&quot;&gt;诶嘿，被夸了先收下～当然记得，你在赶下周要上线的项目嘛。今晚别再打开电脑了好不好&lt;/span&gt;
+        &lt;span class=&quot;pills&quot;&gt;GLM-4.6 · 1,388 → 46 tokens · $0.0012&lt;/span&gt;
+      &lt;/button&gt;
+      &lt;div class=&quot;user&quot;&gt;&lt;div class=&quot;meta&quot;&gt;&lt;span class=&quot;tag dm&quot;&gt;私信&lt;/span&gt;21:15&lt;/div&gt;&lt;div class=&quot;bubble&quot;&gt;在吗&lt;/div&gt;&lt;/div&gt;
+      &lt;div class=&quot;user&quot;&gt;&lt;div class=&quot;meta&quot;&gt;&lt;span class=&quot;tag dm&quot;&gt;私信&lt;/span&gt;21:15 · &lt;span class=&quot;merged&quot;&gt;合并处理&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;bubble&quot;&gt;在吗在吗？？&lt;/div&gt;&lt;/div&gt;
+      &lt;button class=&quot;turn&quot; data-turn=&quot;3&quot;&gt;
+        &lt;span class=&quot;proc&quot;&gt;&lt;svg class=&quot;ok&quot; viewBox=&quot;0 0 24 24&quot; style=&quot;width:12px;height:12px&quot;&gt;&lt;path d=&quot;m5 12 5 5 9-10&quot;/&gt;&lt;/svg&gt;大肥鱼&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;合并 2 条&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;1.2 秒&lt;/span&gt;
+        &lt;span class=&quot;skip&quot;&gt;角色选择不回复：连续催促（骚扰 · 今天第 1 次，第 3 次起冷却 24 小时）&lt;/span&gt;
+        &lt;span class=&quot;pills&quot;&gt;GLM-4.6 · $0.0009&lt;/span&gt;
+      &lt;/button&gt;
+      &lt;div class=&quot;sys&quot;&gt;记忆整理完成 · 新增 1 条长期记忆 · $0.0008&lt;/div&gt;
+      &lt;div class=&quot;user&quot;&gt;&lt;div class=&quot;meta&quot;&gt;&lt;span class=&quot;tag&quot;&gt;公开&lt;/span&gt;21:22&lt;/div&gt;&lt;div class=&quot;bubble&quot;&gt;给我写一篇八百字的项目上线总结，要分点&lt;/div&gt;&lt;/div&gt;
+      &lt;button class=&quot;turn&quot; data-turn=&quot;4&quot;&gt;
+        &lt;span class=&quot;proc&quot;&gt;&lt;svg class=&quot;ok&quot; viewBox=&quot;0 0 24 24&quot; style=&quot;width:12px;height:12px&quot;&gt;&lt;path d=&quot;m5 12 5 5 9-10&quot;/&gt;&lt;/svg&gt;大肥鱼&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;优先 · 明确提问&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;命中&lt;span class=&quot;hit&quot;&gt;不给步骤&lt;/span&gt;&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;2.4 秒&lt;/span&gt;
+        &lt;span class=&quot;reply&quot;&gt;八百字？鲸鱼的脑容量只够写八个字：上线顺利，下班快乐。剩下的你自己来～（此处示例为一段超出字数的回复）&lt;/span&gt;
+        &lt;span class=&quot;warnline&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; style=&quot;width:13px;height:13px&quot;&gt;&lt;path d=&quot;M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z&quot;/&gt;&lt;/svg&gt;正常流程不会发出：超出 280 加权字符，不计入近期往来&lt;/span&gt;
+        &lt;span class=&quot;pills&quot;&gt;GLM-4.6 · 1,640 → 212 tokens · $0.0019&lt;/span&gt;
+      &lt;/button&gt;
+      &lt;div class=&quot;user&quot;&gt;&lt;div class=&quot;meta&quot;&gt;&lt;span class=&quot;tag dm&quot;&gt;私信&lt;/span&gt;21:31&lt;/div&gt;&lt;div class=&quot;bubble&quot;&gt;好啦不催了，周末有空一起看电影吗&lt;/div&gt;&lt;/div&gt;
+      &lt;button class=&quot;turn&quot; data-turn=&quot;5&quot;&gt;
+        &lt;span class=&quot;proc&quot;&gt;&lt;svg class=&quot;ok&quot; viewBox=&quot;0 0 24 24&quot; style=&quot;width:12px;height:12px&quot;&gt;&lt;path d=&quot;m5 12 5 5 9-10&quot;/&gt;&lt;/svg&gt;大肥鱼 · 温柔版&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;普通&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;召回 3 条记忆&lt;span class=&quot;d&quot;&gt;&lt;/span&gt;1.9 秒&lt;/span&gt;
+        &lt;span class=&quot;reply&quot;&gt;周末得看你项目上线顺不顺利啦～先把上线搞定，电影可以下周补上，我等你哦&lt;/span&gt;
+        &lt;span class=&quot;pills&quot;&gt;GLM-4.6 · 1,512 → 33 tokens · $0.0010&lt;/span&gt;
+      &lt;/button&gt;
+    &lt;/div&gt;&lt;/div&gt;
+    &lt;div class=&quot;dock&quot; data-m=&quot;chat&quot; style=&quot;flex-direction:column&quot;&gt;&lt;div class=&quot;composer&quot;&gt;
+      &lt;div class=&quot;ph&quot;&gt;以「小林」的身份发消息…&lt;/div&gt;
+      &lt;div class=&quot;cbar&quot;&gt;
+        &lt;span class=&quot;chip&quot;&gt;&lt;span class=&quot;dot&quot; style=&quot;background:var(--ok);width:6px;height:6px&quot;&gt;&lt;/span&gt;大肥鱼 · 使用中&lt;svg viewBox=&quot;0 0 24 24&quot; style=&quot;width:11px;height:11px&quot;&gt;&lt;path d=&quot;m6 9 6 6 6-6&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;
+        &lt;span class=&quot;chip&quot;&gt;私信&lt;svg viewBox=&quot;0 0 24 24&quot; style=&quot;width:11px;height:11px&quot;&gt;&lt;path d=&quot;m6 9 6 6 6-6&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;
+        &lt;button class=&quot;chip&quot; id=&quot;hold&quot;&gt;先攒几条再回&lt;/button&gt;
+        &lt;button class=&quot;btn processbtn&quot;&gt;让角色回复 · 2 条待处理&lt;/button&gt;
+        &lt;span class=&quot;hint&quot;&gt;正常流程 · GLM-4.6 · 不发到 X · 不占额度 · 会计费&lt;/span&gt;
+        &lt;span class=&quot;send&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 19V5M6 11l6-6 6 6&quot;/&gt;&lt;/svg&gt;&lt;/span&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;&lt;/div&gt;
+  &lt;/section&gt;
+
+  &lt;!-- ================= 右栏（仅试聊） ================= --&gt;
+  &lt;aside class=&quot;col rightcol&quot; id=&quot;right&quot;&gt;
+    &lt;div class=&quot;h&quot;&gt;
+      &lt;div class=&quot;rt&quot; role=&quot;tablist&quot;&gt;
+        &lt;button class=&quot;on&quot; data-rt=&quot;detail&quot;&gt;本轮详情&lt;/button&gt;&lt;button data-rt=&quot;memory&quot;&gt;记忆&lt;/button&gt;&lt;button data-rt=&quot;prompt&quot;&gt;提示词&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;
+      &lt;button class=&quot;iconbtn&quot; data-close title=&quot;关闭&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M6 6l12 12M18 6 6 18&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;body&quot;&gt;
+      &lt;div class=&quot;rpane on&quot; data-pane=&quot;detail&quot;&gt;
+        &lt;div class=&quot;sec&quot;&gt;&lt;h4&gt;&lt;span id=&quot;turn-title&quot;&gt;21:07 这一轮&lt;/span&gt;&lt;span&gt;2.1 秒 · $0.0012&lt;/span&gt;&lt;/h4&gt;
+          &lt;dl class=&quot;kv&quot;&gt;
+            &lt;dt&gt;人设&lt;/dt&gt;&lt;dd&gt;大肥鱼 · 已保存 修订 4&lt;/dd&gt;
+            &lt;dt&gt;分级&lt;/dt&gt;&lt;dd&gt;普通消息，无过滤、无冷却&lt;/dd&gt;
+            &lt;dt&gt;今日日程&lt;/dt&gt;&lt;dd&gt;21:00–23:00 窝在家里追剧&lt;/dd&gt;
+            &lt;dt&gt;命中&lt;/dt&gt;&lt;dd&gt;被夸（关键词：可爱）&lt;/dd&gt;
+            &lt;dt&gt;提醒&lt;/dt&gt;&lt;dd&gt;跟随对方语言、表情节制&lt;/dd&gt;
+            &lt;dt&gt;生成&lt;/dt&gt;&lt;dd&gt;GLM-4.6 · 1 次调用 · 2.0 秒&lt;/dd&gt;
+            &lt;dt&gt;校验&lt;/dt&gt;&lt;dd&gt;58 / 280 加权字符 · 格式无问题&lt;/dd&gt;
+            &lt;dt&gt;记下&lt;/dt&gt;&lt;dd&gt;视为已发出，计入近期往来&lt;/dd&gt;
+          &lt;/dl&gt;&lt;/div&gt;
+        &lt;div class=&quot;sec&quot;&gt;&lt;h4&gt;&lt;span&gt;本轮召回的记忆&lt;/span&gt;&lt;/h4&gt;
+          &lt;div class=&quot;mem&quot;&gt;在赶一个下周上线的项目，经常加班&lt;small&gt;长期&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;mem&quot;&gt;今天又加班到十点… → 辛苦啦……&lt;small&gt;近期往来&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;mem&quot;&gt;上周去看了海边的日落&lt;small&gt;角色经历 · 生产只读&lt;/small&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;rpane&quot; data-pane=&quot;memory&quot;&gt;
+        &lt;div class=&quot;sec&quot;&gt;&lt;h4&gt;&lt;span&gt;长期记忆 · 2&lt;/span&gt;&lt;/h4&gt;
+          &lt;div class=&quot;mem&quot;&gt;在赶一个下周上线的项目，经常加班&lt;small&gt;来源 2 条&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;mem&quot;&gt;说过晚饭经常不吃&lt;small&gt;来源 1 条&lt;/small&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;sec&quot;&gt;&lt;h4&gt;&lt;span&gt;近期往来 · 3 / 3&lt;/span&gt;&lt;span&gt;7 天内&lt;/span&gt;&lt;/h4&gt;
+          &lt;div class=&quot;mem&quot;&gt;好啦不催了… → 周末得看你项目…&lt;small&gt;私信&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;mem&quot;&gt;你好可爱啊… → 诶嘿，被夸了…&lt;small&gt;公开&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;mem&quot;&gt;今天又加班到十点… → 辛苦啦……&lt;small&gt;公开&lt;/small&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;sec&quot;&gt;&lt;h4&gt;&lt;span&gt;下次记忆整理&lt;/span&gt;&lt;span&gt;1 / 5 条&lt;/span&gt;&lt;/h4&gt;
+          &lt;div class=&quot;bar&quot;&gt;&lt;i style=&quot;width:20%&quot;&gt;&lt;/i&gt;&lt;/div&gt;
+          &lt;button class=&quot;btn&quot;&gt;立即整理 &lt;span class=&quot;fee&quot;&gt;计费&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;
+        &lt;div class=&quot;sec&quot;&gt;&lt;h4&gt;&lt;span&gt;骚扰计数&lt;/span&gt;&lt;span&gt;私信 · 今天 1 / 3&lt;/span&gt;&lt;/h4&gt;&lt;/div&gt;
+        &lt;div class=&quot;sec&quot;&gt;&lt;h4&gt;&lt;span&gt;角色经历 · 生产只读&lt;/span&gt;&lt;/h4&gt;
+          &lt;div class=&quot;mem&quot;&gt;上周去看了海边的日落&lt;/div&gt;&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;rpane&quot; data-pane=&quot;prompt&quot;&gt;
+        &lt;div class=&quot;seg2&quot;&gt;&lt;b&gt;&lt;span&gt;系统层 · 固定规则&lt;/span&gt;&lt;span&gt;稳定前缀&lt;/span&gt;&lt;/b&gt;&lt;pre&gt;你在 X 上以角色身份回复。只输出 JSON……&lt;/pre&gt;&lt;/div&gt;
+        &lt;div class=&quot;seg2&quot;&gt;&lt;b&gt;&lt;span&gt;系统层 · 人设分区&lt;/span&gt;&lt;span&gt;稳定前缀&lt;/span&gt;&lt;/b&gt;&lt;pre&gt;【角色定义】你是大肥鱼……
+【说话风格】通用写法……&lt;/pre&gt;&lt;/div&gt;
+        &lt;div class=&quot;seg2&quot;&gt;&lt;b&gt;&lt;span&gt;消息层 · 提醒与命中&lt;/span&gt;&lt;span&gt;动态&lt;/span&gt;&lt;/b&gt;&lt;pre&gt;【被夸】先收下夸奖，不要用“谢谢夸奖”开头……
+【跟随对方语言】对方使用中文……&lt;/pre&gt;&lt;/div&gt;
+        &lt;div class=&quot;seg2&quot;&gt;&lt;b&gt;&lt;span&gt;消息层 · 记忆与日程&lt;/span&gt;&lt;span&gt;动态&lt;/span&gt;&lt;/b&gt;&lt;pre&gt;长期：在赶一个下周上线的项目……
+近期往来：今天又加班到十点… → 辛苦啦……
+日程：21:00–23:00 窝在家里追剧&lt;/pre&gt;&lt;/div&gt;
+        &lt;div class=&quot;seg2&quot;&gt;&lt;b&gt;&lt;span&gt;消息层 · 当前消息&lt;/span&gt;&lt;span&gt;动态&lt;/span&gt;&lt;/b&gt;&lt;pre&gt;@test_xiaolin：你好可爱啊，还记得我在忙什么吗&lt;/pre&gt;&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/aside&gt;
+&lt;/div&gt;
+
+&lt;script&gt;
+const B=document.body, narrow=matchMedia(&#x27;(max-width:860px)&#x27;);
+const store={get(k){try{return localStorage.getItem(k)}catch{return null}},set(k,v){try{localStorage.setItem(k,v)}catch{}}};
+B.dataset.left=store.get(&#x27;ws:persona:left&#x27;)||&#x27;open&#x27;;
+B.dataset.right=store.get(&#x27;ws:persona:right&#x27;)||&#x27;open&#x27;;
+const closeMenus=()=&gt;document.querySelectorAll(&#x27;.menu.open&#x27;).forEach(m=&gt;m.classList.remove(&#x27;open&#x27;));
+const closeOverlays=()=&gt;{B.dataset.drawer=&#x27;&#x27;;B.dataset.sheet=&#x27;&#x27;;};
+document.addEventListener(&#x27;click&#x27;,e=&gt;{
+  const t=e.target.closest(&#x27;button,[data-close]&#x27;);
+  if(!e.target.closest(&#x27;.menu&#x27;)&amp;&amp;!e.target.closest(&#x27;[data-menu]&#x27;))closeMenus();
+  if(!t)return;
+  if(t.dataset.go){B.dataset.mode=t.dataset.go;document.querySelectorAll(&#x27;[data-go]&#x27;).forEach(x=&gt;x.classList.toggle(&#x27;on&#x27;,x===t));if(narrow.matches)closeOverlays();}
+  if(t.dataset.toggle){const side=t.dataset.toggle,next=B.dataset[side]===&#x27;closed&#x27;?&#x27;open&#x27;:&#x27;closed&#x27;;
+    if(narrow.matches&amp;&amp;side===&#x27;right&#x27;){B.dataset.sheet=B.dataset.sheet===&#x27;open&#x27;?&#x27;&#x27;:&#x27;open&#x27;;return;}
+    B.dataset[side]=next;store.set(&#x27;ws:persona:&#x27;+side,next);
+    document.querySelectorAll(&#x27;[data-toggle=&quot;&#x27;+side+&#x27;&quot;]&#x27;).forEach(x=&gt;x.setAttribute(&#x27;aria-expanded&#x27;,String(next===&#x27;open&#x27;)));}
+  if(t.hasAttribute(&#x27;data-drawer&#x27;))B.dataset.drawer=B.dataset.drawer===&#x27;open&#x27;?&#x27;&#x27;:&#x27;open&#x27;;
+  if(t.hasAttribute(&#x27;data-close&#x27;)){if(!narrow.matches&amp;&amp;t.closest(&#x27;.rightcol&#x27;)){B.dataset.right=&#x27;closed&#x27;;store.set(&#x27;ws:persona:right&#x27;,&#x27;closed&#x27;);}closeOverlays();}
+  if(t.dataset.menu){e.stopPropagation();const m=document.getElementById(t.dataset.menu),was=m.classList.contains(&#x27;open&#x27;);closeMenus();if(!was)m.classList.add(&#x27;open&#x27;);}
+  if(t.dataset.pick){
+    document.querySelectorAll(&#x27;[data-pick]&#x27;).forEach(x=&gt;x.classList.toggle(&#x27;on&#x27;,x===t));B.dataset.pv=t.dataset.pick;
+    if(t.dataset.pick===&#x27;edit&#x27;){const active=t.querySelector(&#x27;.c&#x27;)?.textContent===&#x27;使用中&#x27;;document.getElementById(&#x27;pname&#x27;).textContent=t.dataset.name;
+      document.getElementById(&#x27;pactive&#x27;).style.display=active?&#x27;&#x27;:&#x27;none&#x27;;
+      const a=document.getElementById(&#x27;activate&#x27;),d=document.getElementById(&#x27;del&#x27;);a.disabled=active;d.disabled=active;
+      document.getElementById(&#x27;activate-hint&#x27;).textContent=active?&#x27;已经在使用中&#x27;:&#x27;确认后下一轮生效，不恢复业务&#x27;;
+      document.getElementById(&#x27;del-hint&#x27;).textContent=active?&#x27;使用中的人设不能删除，先切换到其他人设&#x27;:&#x27;删除后不可恢复&#x27;;}
+    if(t.dataset.pick===&#x27;preset&#x27;)document.getElementById(&#x27;tname&#x27;).textContent=t.dataset.name;
+    if(narrow.matches)closeOverlays();}
+  if(t.hasAttribute(&#x27;data-replay&#x27;))B.dataset.pv=&#x27;replay&#x27;;
+  if(t.hasAttribute(&#x27;data-back&#x27;))B.dataset.pv=&#x27;edit&#x27;;
+  if(t.hasAttribute(&#x27;data-trychat&#x27;))document.querySelector(&#x27;[data-go=&quot;chat&quot;]&#x27;).click();
+  if(t.dataset.day){document.querySelectorAll(&#x27;[data-day]&#x27;).forEach(x=&gt;x.classList.toggle(&#x27;on&#x27;,x===t));B.dataset.dv=t.dataset.day;
+    document.getElementById(&#x27;nowrow&#x27;).classList.toggle(&#x27;now&#x27;,t.dataset.day===&#x27;today&#x27;);if(narrow.matches)closeOverlays();}
+  if(t.id===&#x27;hold&#x27;){const on=B.dataset.hold!==&#x27;on&#x27;;B.dataset.hold=on?&#x27;on&#x27;:&#x27;off&#x27;;t.classList.toggle(&#x27;on&#x27;,on);}
+  if(t.dataset.turn){document.querySelectorAll(&#x27;[data-turn]&#x27;).forEach(x=&gt;x.classList.toggle(&#x27;sel&#x27;,x===t));
+    document.getElementById(&#x27;turn-title&#x27;).textContent=t.querySelector(&#x27;.proc&#x27;).textContent.split(&#x27;·&#x27;)[0].trim()+&#x27; · 第 &#x27;+t.dataset.turn+&#x27; 轮&#x27;;
+    if(narrow.matches)B.dataset.sheet=&#x27;open&#x27;;else if(B.dataset.right===&#x27;closed&#x27;){B.dataset.right=&#x27;open&#x27;;store.set(&#x27;ws:persona:right&#x27;,&#x27;open&#x27;);}}
+  if(t.dataset.rt){document.querySelectorAll(&#x27;[data-rt]&#x27;).forEach(x=&gt;x.classList.toggle(&#x27;on&#x27;,x===t));document.querySelectorAll(&#x27;[data-pane]&#x27;).forEach(p=&gt;p.classList.toggle(&#x27;on&#x27;,p.dataset.pane===t.dataset.rt));}
+});
+document.addEventListener(&#x27;keydown&#x27;,e=&gt;{if(e.key===&#x27;Escape&#x27;){closeMenus();closeOverlays();}});
+&lt;/script&gt;
+&lt;script&gt;
+(()=&gt;{const base=location.protocol===&#x27;file:&#x27;?&#x27;&#x27;:&#x27;/files/&#x27;;document.querySelectorAll(&#x27;[data-href]&#x27;).forEach(a=&gt;a.href=base+a.dataset.href);})();
+&lt;/script&gt;
+&lt;script&gt;
+(()=&gt;{if(window.parent===window)return;document.querySelectorAll(&#x27;[data-href]&#x27;).forEach(a=&gt;{a.removeAttribute(&#x27;href&#x27;);a.style.cursor=&#x27;pointer&#x27;;a.addEventListener(&#x27;click&#x27;,e=&gt;{e.preventDefault();parent.postMessage({go:a.dataset.href.replace(&#x27;layout-&#x27;,&#x27;&#x27;).replace(&#x27;.html&#x27;,&#x27;&#x27;)},&#x27;*&#x27;);});});})();
+&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+" hidden></iframe>
+<iframe id="p-settings" title="设置" srcdoc="&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;zh-CN&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;title&gt;设置&lt;/title&gt;
+&lt;style&gt;
+
+:root{
+  --bg:#ffffff; --side:#f9fafb; --hover:rgba(38,49,72,.06); --active:#ebeef2; --card:#f5f7fa;
+  --l1:#0f1115; --l2:#61666b; --l3:#81858c; --cap:#adb2b8;
+  --b2:rgba(0,0,0,.08); --b3:rgba(0,0,0,.12);
+  --bubble:#edf3fe; --brand:#4176e6; --brand-soft:#e4edfd; --sel:#f5f8fe;
+  --ok:#22c55e; --ok-soft:#e6faed; --okt:#15803d; --warn:#dd8629; --warn-bg:#fef5e7; --err:#dc2626; --err-bg:#fef2f2;
+  --shadow:0 4px 20px rgba(15,17,21,.06),0 1px 2px rgba(15,17,21,.04); --pop:0 12px 32px rgba(15,17,21,.14),0 0 0 1px rgba(0,0,0,.06);
+  --topbar:#ffffff; --panel-border:#e5e7eb; --primary:#0f1115; --primary-t:#fff; --mask:rgba(15,17,21,.24);
+  --lw:232px; --rw:0px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#151517; --side:#1b1b1c; --hover:rgba(255,255,255,.06); --active:#2c2c2e; --card:#1f1f21;
+    --l1:#f9fafb; --l2:#adb2b8; --l3:#81858c; --cap:#61666b;
+    --b2:rgba(255,255,255,.08); --b3:rgba(255,255,255,.16);
+    --bubble:#283142; --brand:#7aaaff; --brand-soft:#28314a; --sel:#1d2230;
+    --ok-soft:#233c2c; --okt:#4ade80; --warn-bg:#27241f; --err:#f87171; --err-bg:#3a1d1d;
+    --shadow:0 0 0 1px rgba(255,255,255,.06); --pop:0 12px 32px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.08);
+    --topbar:#141417; --panel-border:#26262b; --primary:#f9fafb; --primary-t:#0f1115; --mask:rgba(0,0,0,.5);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;background:var(--bg);color:var(--l1);font:14px/1.55 -apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+svg{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- 面板顶栏（本提案不变） ---------- */
+.topbar{flex:none;display:flex;align-items:center;gap:16px;padding:9px 20px;background:var(--topbar);border-bottom:1px solid var(--panel-border);min-width:0}
+.topbar b{font-size:15px;white-space:nowrap}
+.tabs{display:flex;gap:4px;overflow:auto}
+.tabs span{padding:5px 12px;border-radius:7px;color:var(--l3);white-space:nowrap}
+.tabs span.on{background:var(--active);color:var(--l1);font-weight:600}
+.state{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:99px;background:var(--warn-bg);color:var(--warn);white-space:nowrap}
+
+/* ---------- 工作区：左栏 + 主区 + 可选右栏 ---------- */
+body[data-mode=&quot;chat&quot;]{--rw:288px}
+body[data-left=&quot;closed&quot;]{--lw:0px}
+body[data-right=&quot;closed&quot;]{--rw:0px}
+.app{flex:1;min-height:0;display:grid;grid-template-columns:var(--lw) minmax(0,1fr) var(--rw);position:relative}
+.col{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.leftcol{grid-column:1;background:var(--side);border-right:1px solid var(--b2)}
+.maincol{grid-column:2}
+.rightcol{grid-column:3;border-left:1px solid var(--b2)}
+body[data-left=&quot;closed&quot;] .leftcol,body[data-right=&quot;closed&quot;] .rightcol,body:not([data-mode=&quot;chat&quot;]) .rightcol{display:none}
+.h{flex:none;height:44px;display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;border-bottom:1px solid var(--b2);min-width:0}
+.body{flex:1;min-height:0;overflow:auto}
+[data-m]{display:none !important}
+body[data-mode=&quot;persona&quot;] [data-m~=&quot;persona&quot;],body[data-mode=&quot;daily&quot;] [data-m~=&quot;daily&quot;],body[data-mode=&quot;chat&quot;] [data-m~=&quot;chat&quot;]{display:flex !important}
+:not(body)[data-pv]{display:none !important}
+body[data-pv=&quot;edit&quot;] [data-pv~=&quot;edit&quot;],body[data-pv=&quot;preset&quot;] [data-pv~=&quot;preset&quot;],body[data-pv=&quot;hints&quot;] [data-pv~=&quot;hints&quot;],body[data-pv=&quot;replay&quot;] [data-pv~=&quot;replay&quot;]{display:flex !important}
+:not(body)[data-dv]{display:none !important}
+body[data-dv=&quot;today&quot;] [data-dv~=&quot;today&quot;],body[data-dv=&quot;past&quot;] [data-dv~=&quot;past&quot;]{display:flex !important}
+.expand-left{display:none !important}
+body[data-left=&quot;closed&quot;] .expand-left{display:grid !important}
+
+.seg{display:inline-flex;padding:2px;gap:1px;background:var(--active);border-radius:8px;flex:1}
+.seg button{flex:1;padding:3px 0;border-radius:6px;color:var(--l3);font-size:12.5px}
+.seg button.on{background:var(--bg);color:var(--l1);box-shadow:0 1px 2px rgba(0,0,0,.06);font-weight:500}
+.iconbtn{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;color:var(--l2);flex:none;position:relative}
+.iconbtn:hover,.iconbtn.on{background:var(--hover)}
+.iconbtn:focus-visible,.btn:focus-visible,.item:focus-visible,.seg button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.sp{flex:1}
+.who{font-weight:600;white-space:nowrap;display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
+.who small{font-weight:400;color:var(--l3);font-size:12px;overflow:hidden;text-overflow:ellipsis}
+.btn{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;padding:4px 12px;border-radius:99px;border:1px solid var(--b3);background:var(--bg);color:var(--l1);white-space:nowrap}
+.btn:hover{background:var(--hover)}
+.btn.p{background:var(--primary);color:var(--primary-t);border-color:transparent}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.fee{font-size:9.5px;border:1px solid currentColor;border-radius:3px;padding:0 3px;opacity:.6}
+.badge{font-size:11px;padding:0 6px;border-radius:5px;background:var(--active);color:var(--l2);font-weight:400;white-space:nowrap}
+.badge.ok{background:var(--ok-soft);color:var(--okt)}
+.badge.b{background:var(--brand-soft);color:var(--brand)}
+.badge.w{background:var(--warn-bg);color:var(--warn)}
+.unsaved{font-size:12px;color:var(--warn);white-space:nowrap}
+.avatar{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:600;color:#fff;flex:none}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+
+/* 左栏列表 */
+.list{display:flex;flex-direction:column;gap:1px;padding:8px 6px}
+.grp{display:flex;align-items:center;gap:2px;font-size:12px;color:var(--l3);padding:6px 2px 4px 8px}
+.item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;font-size:13px;text-align:left;width:100%}
+.item:hover{background:var(--hover)}
+.item.on{background:var(--active)}
+.item .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item time,.item .c{font-size:11.5px;color:var(--cap);white-space:nowrap}
+.item.tpl{color:var(--l2)}
+.pin{margin-top:auto;border-top:1px solid var(--b2);padding:6px}
+
+/* 弹出菜单 */
+.menu{position:absolute;z-index:30;top:32px;right:0;min-width:180px;background:var(--bg);border-radius:12px;box-shadow:var(--pop);padding:5px;display:none;flex-direction:column}
+.menu.open{display:flex}
+.menu button{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;font-size:13px;text-align:left;white-space:nowrap}
+.menu button:hover{background:var(--hover)}
+.menu button[disabled]{opacity:.45;cursor:not-allowed}
+.menu small{display:block;color:var(--cap);font-size:11px}
+.menu hr{border:0;border-top:1px solid var(--b2);margin:4px 2px}
+.menu .danger{color:var(--err)}
+
+/* 人设配置页 */
+.cfg{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:flex;flex-direction:column;gap:18px}
+.cfg h3{margin:0 0 8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.cfg h3 small{font-weight:400;color:var(--l3);font-size:12px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.card{background:var(--card);border-radius:14px;padding:10px 12px;min-width:0}
+.card b{font-size:12.5px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.card b span{font-weight:400;color:var(--cap);font-size:11.5px}
+.ta{margin-top:6px;background:var(--bg);border:1px solid var(--b2);border-radius:9px;padding:7px 9px;font-size:12.5px;line-height:1.6;color:var(--l2);height:76px;overflow:hidden}
+.ro .ta{background:transparent;border-style:dashed}
+.trig{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden}
+.tr{display:grid;grid-template-columns:30px minmax(80px,150px) 56px minmax(0,1fr) 16px;gap:10px;align-items:center;padding:7px 12px;border-top:1px solid var(--b2);font-size:12.5px}
+.tr:first-child{border-top:0}
+.tr .k{color:var(--l3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw{width:26px;height:15px;border-radius:99px;background:var(--brand);position:relative;display:inline-block}
+.sw::after{content:&quot;&quot;;position:absolute;right:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff}
+.sw.off{background:var(--b3)}
+.sw.off::after{right:auto;left:2px}
+.fold{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--l3);padding:8px 12px;border:1px dashed var(--b3);border-radius:12px}
+.notice{display:flex;align-items:center;gap:10px;font-size:12.5px;padding:8px 12px;border-radius:12px;background:var(--warn-bg);color:var(--warn)}
+.bio{display:flex;align-items:center;gap:10px;font-size:13px}
+.bio code{font-family:inherit;background:var(--bg);border:1px solid var(--b2);border-radius:8px;padding:4px 10px;flex:1}
+.hints{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.hrow{display:flex;align-items:center;gap:10px;font-size:13px;padding:2px 0}
+.hrow .num{margin-left:auto;width:64px;text-align:right;border:1px solid var(--b2);border-radius:8px;padding:2px 8px;background:var(--bg);font-variant-numeric:tabular-nums}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--l3);font-size:13px;padding:60px 20px;text-align:center}
+
+/* 日程 */
+.day{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px}
+.tl{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden}
+.tl div{display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px;padding:8px 12px;border-top:1px solid var(--b2);font-size:13px}
+.tl div:first-child{border-top:0}
+.tl div span{color:var(--l3);font-variant-numeric:tabular-nums;font-size:12.5px}
+.tl div.now{background:var(--sel)}
+.tl div.now span{color:var(--brand);font-weight:500}
+.kvs{display:flex;flex-direction:column;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{font-size:12px;padding:2px 9px;border-radius:99px;background:var(--active);color:var(--l2)}
+
+/* 试聊 */
+.thread{max-width:760px;margin:0 auto;padding:14px 20px 6px;display:flex;flex-direction:column;gap:10px}
+.user{align-self:flex-end;display:flex;align-items:flex-end;gap:6px;max-width:80%}
+.user .meta{order:-1;padding-bottom:4px}
+.bubble{background:var(--bubble);border-radius:18px;padding:7px 14px;line-height:21px;overflow-wrap:anywhere}
+.meta{font-size:11.5px;color:var(--cap);display:flex;gap:5px;align-items:center;white-space:nowrap}
+.tag{font-size:10.5px;padding:0 5px;border-radius:4px;background:var(--active);color:var(--l2)}
+.tag.dm{background:var(--brand-soft);color:var(--brand)}
+.turn{display:flex;flex-direction:column;gap:3px;padding:6px 8px;margin:0 -8px;border-radius:10px;cursor:pointer;text-align:left}
+.turn:hover{background:var(--hover)}
+.turn.sel{background:var(--sel)}
+.proc{display:flex;align-items:center;flex-wrap:wrap;gap:5px;font-size:12px;color:var(--l3)}
+.proc .ok{color:var(--ok)}
+.proc .hit{font-size:11px;padding:0 5px;border-radius:4px;background:var(--brand-soft);color:var(--brand)}
+.proc .d{width:2px;height:2px;border-radius:1px;background:var(--cap)}
+.reply{line-height:23px;overflow-wrap:anywhere}
+.pills{font-size:11.5px;color:var(--cap);font-variant-numeric:tabular-nums}
+.skip{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--l3);padding:4px 10px;border:1px dashed var(--b3);border-radius:10px;width:fit-content}
+.warnline{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--warn);background:var(--warn-bg);padding:2px 8px;border-radius:7px;width:fit-content}
+.sys{align-self:center;font-size:11.5px;color:var(--l3);padding:2px 10px;border-radius:99px;background:var(--side);border:1px solid var(--b2)}
+.merged{font-size:11px;color:var(--cap)}
+.dock{flex:none;padding:4px 20px 12px}
+.composer{max-width:760px;margin:0 auto;border:1px solid var(--b3);border-radius:16px;background:var(--bg);box-shadow:var(--shadow);padding:8px 8px 6px 12px}
+.ph{color:var(--cap);padding:2px 2px 8px}
+.cbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--l2);padding:2px 9px;border-radius:99px;border:1px solid var(--b2);white-space:nowrap}
+.chip.on{background:var(--brand-soft);color:var(--brand);border-color:transparent}
+.hint{font-size:11.5px;color:var(--cap);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;text-align:right}
+.send{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff;opacity:.45;flex:none}
+.processbtn{display:none}
+body[data-hold=&quot;on&quot;] .processbtn{display:inline-flex}
+.rt{display:flex;gap:1px}
+.rt button{padding:3px 10px;border-radius:7px;font-size:12.5px;color:var(--l3)}
+.rt button.on{background:var(--active);color:var(--l1);font-weight:500}
+.rpane{display:none;flex-direction:column;gap:12px;padding:10px 12px 14px}
+.rpane.on{display:flex}
+.sec h4{margin:0 0 5px;font-size:11.5px;font-weight:500;color:var(--l3);display:flex;justify-content:space-between;gap:8px}
+.kv{display:grid;grid-template-columns:70px minmax(0,1fr);gap:4px 8px;font-size:12.5px;margin:0}
+.kv dt{color:var(--l3);white-space:nowrap}
+.kv dd{margin:0}
+.mem{padding:6px 9px;border-radius:9px;background:var(--side);border:1px solid var(--b2);font-size:12.5px;margin-bottom:4px}
+.mem small{color:var(--cap);font-size:11px;margin-left:4px}
+.seg2{border:1px solid var(--b2);border-radius:10px;margin-bottom:6px;overflow:hidden}
+.seg2 b{display:flex;justify-content:space-between;font-size:11.5px;font-weight:500;color:var(--l3);padding:4px 8px;background:var(--side);border-bottom:1px solid var(--b2)}
+.seg2 pre{margin:0;padding:6px 8px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;color:var(--l2);max-height:84px;overflow:hidden}
+.bar{height:4px;border-radius:2px;background:var(--active);overflow:hidden;margin:4px 0 6px}
+.bar i{display:block;height:100%;background:var(--brand)}
+
+/* 回放视图（示意） */
+.rp{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:flex;flex-direction:column;gap:12px}
+.rpgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+
+/* ---------- 窄屏：左栏抽屉、右栏浮层 ---------- */
+.mask{display:none}
+.drawer-btn{display:none !important}
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .maincol{grid-column:1}
+  .leftcol{position:fixed;z-index:40;left:0;top:0;bottom:0;width:280px;transform:translateX(-100%);transition:transform .2s;display:flex !important;box-shadow:var(--pop)}
+  body[data-drawer=&quot;open&quot;] .leftcol{transform:none}
+  .rightcol{position:fixed;z-index:40;right:0;top:0;bottom:0;width:min(340px,92vw);display:none !important;background:var(--bg);box-shadow:var(--pop)}
+  body[data-mode=&quot;chat&quot;][data-sheet=&quot;open&quot;] .rightcol{display:flex !important}
+  body[data-drawer=&quot;open&quot;] .mask,body[data-sheet=&quot;open&quot;][data-mode=&quot;chat&quot;] .mask{display:block;position:fixed;inset:0;z-index:35;background:var(--mask)}
+  .drawer-btn{display:grid !important}
+  .expand-left,.collapse-left,.collapse-right{display:none !important}
+  .grid2,.hints,.day,.rpgrid{grid-template-columns:minmax(0,1fr)}
+  .cfg,.day,.rp{padding:12px 14px 24px}
+  .tr{grid-template-columns:30px minmax(0,1fr) 56px 16px}
+  .tr .k{display:none}
+  .h .hide-narrow{display:none}
+  .thread{padding:12px 12px 6px}
+  .dock{padding:4px 10px 10px}
+  .hint{display:none}
+  .topbar{padding:9px 12px;gap:10px}
+}
+
+
+.tabs a{padding:5px 12px;border-radius:7px;color:var(--l3);white-space:nowrap;text-decoration:none}
+.tabs a:hover{background:var(--hover);color:var(--l1)}
+.tabs a.on{background:var(--active);color:var(--l1);font-weight:600}
+.runbtn{margin-left:4px}
+.ttl{font-weight:600;font-size:13.5px;flex:1}
+/* 表单与设置通用 */
+.page{max-width:960px;margin:0 auto;padding:16px 24px 40px;display:flex;flex-direction:column;gap:14px}
+.page.wide{max-width:1180px}
+.sec-title{font-size:13px;font-weight:600;margin:4px 0 -4px;display:flex;align-items:center;gap:8px}
+.sec-title small{font-weight:400;color:var(--l3);font-size:12px}
+.fgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.fgrid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--l3)}
+.f .in{border:1px solid var(--b2);border-radius:9px;background:var(--bg);padding:6px 10px;font-size:13.5px;color:var(--l1);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:6px;min-height:34px}
+.f .in small{color:var(--cap);margin-left:auto}
+.f .in.area{min-height:64px;align-items:flex-start;line-height:1.6;color:var(--l2)}
+.f em{font-style:normal;color:var(--cap);font-size:11.5px}
+.radios{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.rc{border:1px solid var(--b2);border-radius:12px;padding:10px 12px;background:var(--bg);display:flex;gap:10px;align-items:flex-start}
+.rc.on{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
+.rc i{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--b3);margin-top:3px;flex:none}
+.rc.on i{border:4px solid var(--brand)}
+.rc b{font-size:13px}
+.rc span{display:block;font-size:12px;color:var(--l3)}
+.rows{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden;background:var(--bg)}
+.row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--b2);font-size:13px;min-width:0}
+.row:first-child{border-top:0}
+.row .sub{color:var(--l3);font-size:12px}
+.row .grow{flex:1;min-width:0}
+.row .grow small{display:block;color:var(--l3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.metric{background:var(--card);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.metric span{font-size:12px;color:var(--l3)}
+.metric b{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}
+.metric small{font-size:11.5px;color:var(--cap)}
+.metric.w{background:var(--warn-bg)} .metric.w span,.metric.w small{color:var(--warn)}
+.metric.e{background:var(--err-bg)} .metric.e span,.metric.e small{color:var(--err)}
+.lv{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok)}
+.lv.w{background:var(--warn)} .lv.e{background:var(--err)} .lv.n{background:var(--cap)}
+.split{display:grid;grid-template-columns:270px minmax(0,1fr);min-height:100%}
+.split&gt;.page{margin:0;max-width:none;width:100%}
+.inner{border-right:1px solid var(--b2);padding:10px 8px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.search{display:flex;align-items:center;gap:6px;border:1px solid var(--b2);border-radius:9px;padding:5px 9px;font-size:12.5px;color:var(--cap);margin:0 2px 6px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.logrow{display:grid;grid-template-columns:70px 12px 170px minmax(0,1fr);gap:8px;align-items:center;padding:6px 12px;border-top:1px solid var(--b2);font-size:12.5px}
+.logrow:first-child{border-top:0}
+.logrow time{color:var(--l3);font-variant-numeric:tabular-nums}
+.desk{border-radius:14px;background:#0b0c0f;color:#8b8f97;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:360px;font-size:13px}
+.heat{display:grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;grid-auto-columns:12px;gap:3px;overflow:hidden}
+.heat i{border-radius:3px;background:var(--active)}
+.heat i.l1{background:#c9dafb} .heat i.l2{background:#93b4f3} .heat i.l3{background:#5b8be8} .heat i.l4{background:#4176e6}
+@media (prefers-color-scheme: dark){.heat i.l1{background:#28314a}.heat i.l2{background:#34508a}.heat i.l3{background:#4d73c4}.heat i.l4{background:#7aaaff}}
+.legend{display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+.legend div{display:flex;align-items:center;gap:8px}
+.legend i{width:9px;height:9px;border-radius:3px}
+.legend span{margin-left:auto;color:var(--l3);font-variant-numeric:tabular-nums}
+@media (max-width:860px){
+  .fgrid,.fgrid.two,.radios{grid-template-columns:minmax(0,1fr)}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .split{grid-template-columns:minmax(0,1fr)}
+  .inner{border-right:0;border-bottom:1px solid var(--b2)}
+  .page{padding:12px 14px 28px}
+  .logrow{grid-template-columns:56px 10px minmax(0,1fr)}
+  .logrow .mono{display:none}
+}
+
+
+:not(body)[data-sp]{display:none !important}
+body[data-sp=&quot;run&quot;] [data-sp~=&quot;run&quot;],body[data-sp=&quot;model&quot;] [data-sp~=&quot;model&quot;],body[data-sp=&quot;tasks&quot;] [data-sp~=&quot;tasks&quot;],body[data-sp=&quot;triage&quot;] [data-sp~=&quot;triage&quot;],body[data-sp=&quot;memory&quot;] [data-sp~=&quot;memory&quot;],body[data-sp=&quot;billing&quot;] [data-sp~=&quot;billing&quot;],body[data-sp=&quot;browser&quot;] [data-sp~=&quot;browser&quot;],body[data-sp=&quot;sources&quot;] [data-sp~=&quot;sources&quot;],body[data-sp=&quot;health&quot;] [data-sp~=&quot;health&quot;],body[data-sp=&quot;logs&quot;] [data-sp~=&quot;logs&quot;],body[data-sp=&quot;history&quot;] [data-sp~=&quot;history&quot;]{display:flex !important}
+.hx{flex:1;display:flex;align-items:center;gap:8px;min-width:0}
+.mtab{display:flex;gap:1px}
+.mtab button{padding:3px 10px;border-radius:7px;font-size:12.5px;color:var(--l3)}
+.mtab button.on{background:var(--active);color:var(--l1);font-weight:500}
+
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body data-sp=&quot;run&quot; data-left=&quot;open&quot; data-right=&quot;closed&quot;&gt;
+&lt;div class=&quot;topbar&quot;&gt;
+  &lt;b&gt;角色工作流&lt;/b&gt;
+  &lt;nav class=&quot;tabs&quot;&gt;&lt;a data-href=&quot;layout-feed.html&quot; class=&quot;&quot;&gt;动态&lt;/a&gt;&lt;a data-href=&quot;layout-persona.html&quot; class=&quot;&quot;&gt;人设&lt;/a&gt;&lt;a data-href=&quot;layout-settings.html&quot; class=&quot;on&quot;&gt;设置&lt;/a&gt;&lt;/nav&gt;
+  &lt;span class=&quot;state&quot;&gt;● 已暂停 · 自动模式&lt;/span&gt;
+  &lt;button class=&quot;btn runbtn&quot;&gt;启动&lt;/button&gt;
+&lt;/div&gt;
+&lt;div class=&quot;app&quot;&gt;
+  &lt;div class=&quot;mask&quot; data-close&gt;&lt;/div&gt;
+  &lt;aside class=&quot;col leftcol&quot; id=&quot;left&quot;&gt;
+    &lt;div class=&quot;h&quot;&gt;&lt;span class=&quot;ttl&quot;&gt;设置&lt;/span&gt;
+      &lt;button class=&quot;iconbtn collapse-left&quot; data-toggle=&quot;left&quot; aria-expanded=&quot;true&quot; aria-controls=&quot;left&quot; title=&quot;收起左栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M9 4v16&quot;/&gt;&lt;path d=&quot;m15 10-2 2 2 2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/div&gt;
+    &lt;div class=&quot;body&quot; style=&quot;display:flex;flex-direction:column&quot;&gt;&lt;div class=&quot;list&quot;&gt;
+      &lt;div class=&quot;grp&quot;&gt;运行&lt;/div&gt;
+      &lt;button class=&quot;item on&quot; data-goto=&quot;run&quot;&gt;&lt;span class=&quot;t&quot;&gt;运行与发送&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;自动 · 已暂停&lt;/span&gt;&lt;/button&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;model&quot;&gt;&lt;span class=&quot;t&quot;&gt;模型&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;GLM-4.6&lt;/span&gt;&lt;/button&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;tasks&quot;&gt;&lt;span class=&quot;t&quot;&gt;定时任务&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;2 / 4 启用&lt;/span&gt;&lt;/button&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;triage&quot;&gt;&lt;span class=&quot;t&quot;&gt;消息分级与过滤&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;排队 3&lt;/span&gt;&lt;/button&gt;
+      &lt;div class=&quot;grp&quot; style=&quot;margin-top:6px&quot;&gt;数据&lt;/div&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;memory&quot;&gt;&lt;span class=&quot;t&quot;&gt;记忆&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;128 个身份&lt;/span&gt;&lt;/button&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;billing&quot;&gt;&lt;span class=&quot;t&quot;&gt;计费&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;今日 $0.42&lt;/span&gt;&lt;/button&gt;
+      &lt;div class=&quot;grp&quot; style=&quot;margin-top:6px&quot;&gt;浏览器与采集&lt;/div&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;browser&quot;&gt;&lt;span class=&quot;t&quot;&gt;浏览器接管&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;未接管&lt;/span&gt;&lt;/button&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;sources&quot;&gt;&lt;span class=&quot;t&quot;&gt;采集来源&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;4 / 5 启用&lt;/span&gt;&lt;/button&gt;
+      &lt;div class=&quot;grp&quot; style=&quot;margin-top:6px&quot;&gt;排查&lt;/div&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;health&quot;&gt;&lt;span class=&quot;t&quot;&gt;健康与日报&lt;/span&gt;&lt;span class=&quot;c&quot; style=&quot;color:var(--warn)&quot;&gt;需关注 2&lt;/span&gt;&lt;/button&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;logs&quot;&gt;&lt;span class=&quot;t&quot;&gt;日志、阶段与队列&lt;/span&gt;&lt;/button&gt;
+      &lt;button class=&quot;item&quot; data-goto=&quot;history&quot;&gt;&lt;span class=&quot;t&quot;&gt;任务执行历史&lt;/span&gt;&lt;/button&gt;
+    &lt;/div&gt;&lt;/div&gt;
+  &lt;/aside&gt;
+
+  &lt;section class=&quot;col maincol&quot;&gt;
+    &lt;div class=&quot;h&quot;&gt;
+      &lt;button class=&quot;iconbtn drawer-btn&quot; data-drawer title=&quot;打开列表&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M4 12h16M4 17h16&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;button class=&quot;iconbtn expand-left&quot; data-toggle=&quot;left&quot; aria-expanded=&quot;false&quot; aria-controls=&quot;left&quot; title=&quot;展开左栏&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;path d=&quot;M9 4v16&quot;/&gt;&lt;path d=&quot;m13 10 2 2-2 2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;run&quot;&gt;&lt;span class=&quot;who&quot;&gt;运行与发送&lt;small class=&quot;hide-narrow&quot;&gt;修订 7 · 保存后下一轮生效，不会自动恢复业务&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn p&quot;&gt;保存&lt;/button&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;model&quot;&gt;&lt;span class=&quot;who&quot;&gt;智谱 GLM &lt;span class=&quot;badge ok&quot;&gt;使用中&lt;/span&gt;&lt;small class=&quot;hide-narrow&quot;&gt;GLM-4.6 · open.bigmodel.cn&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn hide-narrow&quot;&gt;刷新目录&lt;/button&gt;&lt;button class=&quot;btn&quot;&gt;连接测试 &lt;span class=&quot;fee&quot;&gt;计费&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;btn p&quot;&gt;保存&lt;/button&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;tasks&quot;&gt;&lt;span class=&quot;who&quot;&gt;定时任务&lt;small class=&quot;hide-narrow&quot;&gt;北京时间 · 保存计划不会启动业务&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn p&quot;&gt;保存&lt;/button&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;triage&quot;&gt;&lt;span class=&quot;who&quot;&gt;消息分级与过滤&lt;small class=&quot;hide-narrow&quot;&gt;修订 3 · 下一轮生效&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn p&quot;&gt;保存&lt;/button&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;memory&quot;&gt;&lt;span class=&quot;who&quot;&gt;记忆&lt;small class=&quot;hide-narrow&quot;&gt;账号 @dafeiyu&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;span class=&quot;mtab&quot;&gt;&lt;button class=&quot;on&quot;&gt;用户记忆&lt;/button&gt;&lt;button&gt;角色经历&lt;/button&gt;&lt;button&gt;策略&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;billing&quot;&gt;&lt;span class=&quot;who&quot;&gt;计费&lt;small class=&quot;hide-narrow&quot;&gt;Pi 目录价格估算，不是实际扣款&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;span class=&quot;mtab&quot;&gt;&lt;button class=&quot;on&quot;&gt;今日&lt;/button&gt;&lt;button&gt;本月&lt;/button&gt;&lt;button&gt;自选&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;browser&quot;&gt;&lt;span class=&quot;who&quot;&gt;浏览器接管&lt;small class=&quot;hide-narrow&quot;&gt;@dafeiyu · 已登录&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn p&quot;&gt;接管并连接&lt;/button&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;sources&quot;&gt;&lt;span class=&quot;who&quot;&gt;采集来源&lt;small class=&quot;hide-narrow&quot;&gt;按已验证的解析规则启用&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;刷新状态&lt;/button&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;health&quot;&gt;&lt;span class=&quot;who&quot;&gt;健康与日报 &lt;span class=&quot;badge w&quot;&gt;需要关注&lt;/span&gt;&lt;small class=&quot;hide-narrow&quot;&gt;采样 21:30&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;刷新&lt;/button&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;logs&quot;&gt;&lt;span class=&quot;who&quot;&gt;日志、阶段与队列&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;span class=&quot;mtab&quot;&gt;&lt;button class=&quot;on&quot;&gt;日志&lt;/button&gt;&lt;button&gt;阶段&lt;/button&gt;&lt;button&gt;队列&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+      &lt;span class=&quot;hx&quot; data-sp=&quot;history&quot;&gt;&lt;span class=&quot;who&quot;&gt;任务执行历史&lt;small class=&quot;hide-narrow&quot;&gt;最近 50 次&lt;/small&gt;&lt;/span&gt;&lt;/span&gt;
+    &lt;/div&gt;
+
+    &lt;div class=&quot;body&quot;&gt;
+      &lt;!-- 运行与发送 --&gt;
+      &lt;div class=&quot;page&quot; data-sp=&quot;run&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;sec-title&quot;&gt;运行模式 &lt;small&gt;顶部“启动 / 暂停”控制主循环；切换模式不会恢复业务&lt;/small&gt;&lt;/div&gt;
+        &lt;div class=&quot;radios&quot;&gt;
+          &lt;div class=&quot;rc&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;div&gt;&lt;b&gt;草稿模式&lt;/b&gt;&lt;span&gt;生成后进入动态页等待批准，批准后由主循环发送&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;rc on&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;div&gt;&lt;b&gt;自动模式&lt;/b&gt;&lt;span&gt;通过字数和发送前校验后直接提交，旧草稿不会自动发出&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sec-title&quot;&gt;发送限制 &lt;small&gt;内部额度，不代表平台许可&lt;/small&gt;&lt;/div&gt;
+        &lt;div class=&quot;card&quot;&gt;&lt;div class=&quot;fgrid&quot;&gt;
+          &lt;label class=&quot;f&quot;&gt;公开每小时&lt;span class=&quot;in&quot;&gt;10&lt;small&gt;1–25&lt;/small&gt;&lt;/span&gt;&lt;em&gt;本小时已用 4&lt;/em&gt;&lt;/label&gt;
+          &lt;label class=&quot;f&quot;&gt;私信每小时&lt;span class=&quot;in&quot;&gt;30&lt;small&gt;1–100&lt;/small&gt;&lt;/span&gt;&lt;em&gt;本小时已用 0&lt;/em&gt;&lt;/label&gt;
+          &lt;label class=&quot;f&quot;&gt;公开每日&lt;span class=&quot;in&quot;&gt;180&lt;small&gt;1–1000&lt;/small&gt;&lt;/span&gt;&lt;em&gt;与问候帖共享 · 今日 42&lt;/em&gt;&lt;/label&gt;
+          &lt;label class=&quot;f&quot;&gt;每轮最多处理&lt;span class=&quot;in&quot;&gt;2&lt;small&gt;1–4&lt;/small&gt;&lt;/span&gt;&lt;/label&gt;
+          &lt;label class=&quot;f&quot;&gt;普通消息时效&lt;span class=&quot;in&quot;&gt;3 小时&lt;small&gt;1–48&lt;/small&gt;&lt;/span&gt;&lt;em&gt;优先消息 6 小时&lt;/em&gt;&lt;/label&gt;
+        &lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;sec-title&quot;&gt;账号字数 &lt;small&gt;生成和发送使用同一套校验&lt;/small&gt;&lt;/div&gt;
+        &lt;div class=&quot;rows&quot;&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;grow&quot;&gt;原创帖&lt;small&gt;普通账号回退 · 检查 10/28 09:12&lt;/small&gt;&lt;/span&gt;&lt;b&gt;280&lt;/b&gt;&lt;span class=&quot;sub&quot;&gt;加权字符&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;grow&quot;&gt;公开回复&lt;small&gt;普通账号回退 · 长帖权限未完成真实验收&lt;/small&gt;&lt;/span&gt;&lt;b&gt;280&lt;/b&gt;&lt;span class=&quot;sub&quot;&gt;加权字符&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;grow sub&quot;&gt;超长候选保留为草稿，不自动截断&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;重新读取&lt;/button&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 模型 --&gt;
+      &lt;div class=&quot;split&quot; data-sp=&quot;model&quot;&gt;
+        &lt;div class=&quot;inner&quot;&gt;
+          &lt;div class=&quot;search&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;11&quot; cy=&quot;11&quot; r=&quot;7&quot;/&gt;&lt;path d=&quot;m20 20-3.5-3.5&quot;/&gt;&lt;/svg&gt;搜索服务商或模型&lt;/div&gt;
+          &lt;div class=&quot;grp&quot;&gt;已配置&lt;/div&gt;
+          &lt;button class=&quot;item on&quot;&gt;&lt;span class=&quot;dot&quot; style=&quot;background:var(--ok)&quot;&gt;&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;智谱 GLM&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;使用中&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;item&quot;&gt;&lt;span class=&quot;dot&quot; style=&quot;background:var(--b3)&quot;&gt;&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;DeepSeek&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;2 个模型&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;item&quot;&gt;&lt;span class=&quot;dot&quot; style=&quot;background:var(--b3)&quot;&gt;&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;OpenCode 路由&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;未定价&lt;/span&gt;&lt;/button&gt;
+          &lt;div class=&quot;grp&quot; style=&quot;margin-top:6px&quot;&gt;可添加&lt;/div&gt;
+          &lt;button class=&quot;item tpl&quot;&gt;&lt;span class=&quot;t&quot;&gt;Anthropic&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;item tpl&quot;&gt;&lt;span class=&quot;t&quot;&gt;OpenAI&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;item tpl&quot;&gt;&lt;span class=&quot;t&quot;&gt;Command Code&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;item tpl&quot;&gt;&lt;span class=&quot;t&quot;&gt;+ 自定义兼容接口&lt;/span&gt;&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;page&quot; style=&quot;max-width:none;flex-direction:column&quot;&gt;
+          &lt;div class=&quot;sec-title&quot;&gt;接口&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;div class=&quot;fgrid two&quot;&gt;
+            &lt;label class=&quot;f&quot;&gt;接口地址&lt;span class=&quot;in&quot;&gt;https://open.bigmodel.cn/api/paas/v4&lt;/span&gt;&lt;/label&gt;
+            &lt;label class=&quot;f&quot;&gt;API Key&lt;span class=&quot;in&quot;&gt;••••••••a1b2&lt;small&gt;同主机共用 · 更换&lt;/small&gt;&lt;/span&gt;&lt;/label&gt;
+          &lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;sec-title&quot;&gt;模型 &lt;small&gt;选中一个作为使用中模型；刷新目录不等于连接测试&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;rows&quot;&gt;
+            &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;rc on&quot; style=&quot;border:0;padding:0;background:none&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;&lt;b&gt;GLM-4.6&lt;/b&gt;&lt;small&gt;上下文 200K · 输入 $0.60 / 输出 $2.20 每百万 token&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;badge ok&quot;&gt;使用中&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;rc&quot; style=&quot;border:0;padding:0;background:none&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;&lt;b&gt;GLM-4.5-Air&lt;/b&gt;&lt;small&gt;上下文 128K · 输入 $0.20 / 输出 $1.10&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;rc&quot; style=&quot;border:0;padding:0;background:none&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;&lt;b&gt;GLM-4-Flash&lt;/b&gt;&lt;small&gt;未定价 · 费用显示为未知&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;badge&quot;&gt;未定价&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;sec-title&quot;&gt;参数&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;div class=&quot;fgrid&quot;&gt;
+            &lt;label class=&quot;f&quot;&gt;回复上限&lt;span class=&quot;in&quot;&gt;4096&lt;small&gt;64–8192&lt;/small&gt;&lt;/span&gt;&lt;em&gt;仍受模型自身上限约束&lt;/em&gt;&lt;/label&gt;
+            &lt;label class=&quot;f&quot;&gt;推理档位&lt;span class=&quot;in&quot;&gt;关闭&lt;small&gt;⌄&lt;/small&gt;&lt;/span&gt;&lt;/label&gt;
+            &lt;label class=&quot;f&quot;&gt;请求超时&lt;span class=&quot;in&quot;&gt;120 秒&lt;/span&gt;&lt;/label&gt;
+          &lt;/div&gt;&lt;/div&gt;
+          &lt;div class=&quot;rows&quot;&gt;&lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;上次连接测试成功&lt;small&gt;10/28 20:41 · 1.3 秒 · $0.0002&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 定时任务 --&gt;
+      &lt;div class=&quot;page&quot; data-sp=&quot;tasks&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;rows&quot;&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;&lt;b&gt;虚构日程&lt;/b&gt;&lt;small&gt;每天 06:00 · 上次 今天 06:00 成功 · $0.0021&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;f&quot;&gt;&lt;span class=&quot;in&quot; style=&quot;min-height:28px;padding:2px 8px&quot;&gt;06:00&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;单次执行 &lt;span class=&quot;fee&quot;&gt;计费&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;sw off&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;&lt;b&gt;早安帖&lt;/b&gt;&lt;small&gt;每天 08:00 · 仅在运行中且自动模式时发送，计划后 5 分钟内开始&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;f&quot;&gt;&lt;span class=&quot;in&quot; style=&quot;min-height:28px;padding:2px 8px&quot;&gt;08:00&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;单次执行 &lt;span class=&quot;fee&quot;&gt;计费&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;sw off&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;&lt;b&gt;晚安帖&lt;/b&gt;&lt;small&gt;每天 23:00 · 从未执行&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;f&quot;&gt;&lt;span class=&quot;in&quot; style=&quot;min-height:28px;padding:2px 8px&quot;&gt;23:00&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;单次执行 &lt;span class=&quot;fee&quot;&gt;计费&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;sw&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;&lt;b&gt;自动备份&lt;/b&gt;&lt;small&gt;每天 04:00 · 只含业务数据库，不含面板配置、Key 和账本&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;f&quot;&gt;&lt;span class=&quot;in&quot; style=&quot;min-height:28px;padding:2px 8px&quot;&gt;04:00&lt;/span&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;单次执行&lt;/button&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sp&quot;&gt;&lt;/div&gt;
+        &lt;button class=&quot;btn&quot; style=&quot;align-self:flex-start&quot; data-goto=&quot;history&quot;&gt;查看任务执行历史 →&lt;/button&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 消息分级 --&gt;
+      &lt;div class=&quot;page&quot; data-sp=&quot;triage&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;metrics&quot;&gt;
+          &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;今日公开&lt;/span&gt;&lt;b&gt;42 / 180&lt;/b&gt;&lt;small&gt;与问候帖共享&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;排队&lt;/span&gt;&lt;b&gt;3&lt;/b&gt;&lt;small&gt;优先 1 · 普通 2&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;今日过滤&lt;/span&gt;&lt;b&gt;5&lt;/b&gt;&lt;small&gt;广告 4 · 刷量 1&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;metric w&quot;&gt;&lt;span&gt;骚扰冷却&lt;/span&gt;&lt;b&gt;1&lt;/b&gt;&lt;small&gt;私信 1 人&lt;/small&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sec-title&quot;&gt;规则&lt;/div&gt;
+        &lt;div class=&quot;card&quot;&gt;&lt;div class=&quot;fgrid two&quot;&gt;
+          &lt;label class=&quot;f&quot;&gt;广告关键词 &lt;em&gt;每行一项，带链接才算广告&lt;/em&gt;&lt;span class=&quot;in area&quot;&gt;加微信&lt;br&gt;私聊领取&lt;br&gt;代理招募&lt;/span&gt;&lt;/label&gt;
+          &lt;label class=&quot;f&quot;&gt;纯问候词 &lt;em&gt;老面孔只发问候时跳过&lt;/em&gt;&lt;span class=&quot;in area&quot;&gt;在吗&lt;br&gt;早&lt;br&gt;hi&lt;/span&gt;&lt;/label&gt;
+          &lt;label class=&quot;f&quot;&gt;优先公开账号 &lt;em&gt;handle，每行一项&lt;/em&gt;&lt;span class=&quot;in area&quot;&gt;kiri_dev&lt;br&gt;mochi_cat&lt;/span&gt;&lt;/label&gt;
+          &lt;label class=&quot;f&quot;&gt;优先私信会话&lt;span class=&quot;in area&quot;&gt;（空）&lt;/span&gt;&lt;/label&gt;
+          &lt;label class=&quot;f&quot;&gt;批量重复阈值&lt;span class=&quot;in&quot;&gt;3 人&lt;small&gt;一小时内相同文本&lt;/small&gt;&lt;/span&gt;&lt;/label&gt;
+        &lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;sec-title&quot;&gt;骚扰冷却中&lt;/div&gt;
+        &lt;div class=&quot;rows&quot;&gt;&lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv w&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;dm:7712…a9 · 私信&lt;small&gt;一天内第 3 次以骚扰跳过 · 冷却至 10/29 21:15&lt;/small&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;清除&lt;/button&gt;&lt;/div&gt;&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 记忆（原记忆页并入） --&gt;
+      &lt;div class=&quot;split&quot; data-sp=&quot;memory&quot;&gt;
+        &lt;div class=&quot;inner&quot;&gt;
+          &lt;div class=&quot;search&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;circle cx=&quot;11&quot; cy=&quot;11&quot; r=&quot;7&quot;/&gt;&lt;path d=&quot;m20 20-3.5-3.5&quot;/&gt;&lt;/svg&gt;搜索 handle 或会话&lt;/div&gt;
+          &lt;div class=&quot;seg&quot; style=&quot;flex:none;margin:0 2px 6px&quot;&gt;&lt;button class=&quot;on&quot;&gt;全部&lt;/button&gt;&lt;button&gt;公开&lt;/button&gt;&lt;button&gt;私信&lt;/button&gt;&lt;/div&gt;
+          &lt;button class=&quot;item on&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#7c3aed&quot;&gt;K&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;@kiri_dev&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;公开 · 5 条&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;item&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#0e7490&quot;&gt;M&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;@mochi_cat&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;公开 · 2 条&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;item&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#dd8629&quot;&gt;雨&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;小雨（私信）&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;私信 · 3 条&lt;/span&gt;&lt;/button&gt;
+          &lt;button class=&quot;item&quot;&gt;&lt;span class=&quot;avatar&quot; style=&quot;background:#61666b&quot;&gt;T&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;@tom_x&lt;/span&gt;&lt;span class=&quot;c&quot;&gt;已遗忘&lt;/span&gt;&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;page&quot; style=&quot;max-width:none;flex-direction:column&quot;&gt;
+          &lt;div class=&quot;cbar&quot;&gt;&lt;b style=&quot;font-size:14px&quot;&gt;@kiri_dev&lt;/b&gt;&lt;span class=&quot;badge&quot;&gt;公开身份&lt;/span&gt;&lt;span class=&quot;sub&quot; style=&quot;font-size:12px;color:var(--l3)&quot;&gt;最近互动 10/28 21:07 · 已处理 14 条&lt;/span&gt;&lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;只读召回预览&lt;/button&gt;&lt;button class=&quot;btn&quot;&gt;立即整理 &lt;span class=&quot;fee&quot;&gt;计费&lt;/span&gt;&lt;/button&gt;&lt;button class=&quot;btn&quot; style=&quot;color:var(--err)&quot;&gt;遗忘&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;sec-title&quot;&gt;长期记忆 &lt;small&gt;来源可追溯；编辑后修订号加一&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;rows&quot;&gt;
+            &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;grow&quot;&gt;在赶一个下周上线的项目，经常加班&lt;small&gt;事实 · 来源 2 条消息 · 修订 1&lt;/small&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;编辑&lt;/button&gt;&lt;button class=&quot;iconbtn&quot; title=&quot;删除&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M6 7l1 13h10l1-13M9 7V4h6v3&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/div&gt;
+            &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;grow&quot;&gt;喜欢猫，家里有一只橘猫&lt;small&gt;偏好 · 来源 1 条消息&lt;/small&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;编辑&lt;/button&gt;&lt;button class=&quot;iconbtn&quot; title=&quot;删除&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M4 7h16M6 7l1 13h10l1-13M9 7V4h6v3&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;sec-title&quot;&gt;近期往来 &lt;small&gt;只有已确认发出的回复算说过的话&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;rows&quot;&gt;
+            &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;grow&quot;&gt;你好可爱啊，还记得我在忙什么吗&lt;small&gt;→ 诶嘿，被夸了先收下～当然记得…… · 已发送 21:07&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;grow&quot;&gt;今天又加班到十点&lt;small&gt;→ 辛苦啦…… · 已发送 21:04&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 计费（原计费页并入） --&gt;
+      &lt;div class=&quot;page wide&quot; data-sp=&quot;billing&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;metrics&quot;&gt;
+          &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;请求&lt;/span&gt;&lt;b&gt;186&lt;/b&gt;&lt;small&gt;失败 2&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;Token&lt;/span&gt;&lt;b&gt;412K&lt;/b&gt;&lt;small&gt;缓存读取 38%&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;估算费用&lt;/span&gt;&lt;b&gt;$0.42&lt;/b&gt;&lt;small&gt;Pi 目录价格&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;metric w&quot;&gt;&lt;span&gt;未定价 / 未知&lt;/span&gt;&lt;b&gt;6 / 1&lt;/b&gt;&lt;small&gt;不视为免费&lt;/small&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;card&quot;&gt;&lt;b&gt;近半年活动 &lt;span&gt;每格一天&lt;/span&gt;&lt;/b&gt;&lt;div class=&quot;heat&quot; style=&quot;margin-top:8px&quot; id=&quot;heat&quot;&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;grid2&quot;&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;每日趋势 &lt;span&gt;按模型 · 近 7 天&lt;/span&gt;&lt;/b&gt;
+            &lt;svg viewBox=&quot;0 0 300 120&quot; style=&quot;width:100%;height:150px;margin-top:6px;stroke:none&quot;&gt;
+              &lt;g fill=&quot;#4176e6&quot;&gt;&lt;rect x=&quot;12&quot; y=&quot;60&quot; width=&quot;26&quot; height=&quot;50&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;54&quot; y=&quot;40&quot; width=&quot;26&quot; height=&quot;70&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;96&quot; y=&quot;70&quot; width=&quot;26&quot; height=&quot;40&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;138&quot; y=&quot;30&quot; width=&quot;26&quot; height=&quot;80&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;180&quot; y=&quot;50&quot; width=&quot;26&quot; height=&quot;60&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;222&quot; y=&quot;20&quot; width=&quot;26&quot; height=&quot;90&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;264&quot; y=&quot;45&quot; width=&quot;26&quot; height=&quot;65&quot; rx=&quot;3&quot;/&gt;&lt;/g&gt;
+              &lt;g fill=&quot;#a78bfa&quot;&gt;&lt;rect x=&quot;12&quot; y=&quot;50&quot; width=&quot;26&quot; height=&quot;10&quot; rx=&quot;2&quot;/&gt;&lt;rect x=&quot;138&quot; y=&quot;18&quot; width=&quot;26&quot; height=&quot;12&quot; rx=&quot;2&quot;/&gt;&lt;rect x=&quot;222&quot; y=&quot;8&quot; width=&quot;26&quot; height=&quot;12&quot; rx=&quot;2&quot;/&gt;&lt;/g&gt;
+            &lt;/svg&gt;&lt;/div&gt;
+          &lt;div class=&quot;card&quot;&gt;&lt;b&gt;用量占比 &lt;span&gt;&lt;span class=&quot;mtab&quot; style=&quot;display:inline-flex&quot;&gt;&lt;button&gt;按模型&lt;/button&gt;&lt;button class=&quot;on&quot;&gt;按用途&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;&lt;/b&gt;
+            &lt;div style=&quot;display:flex;gap:16px;align-items:center;margin-top:8px&quot;&gt;
+              &lt;svg viewBox=&quot;0 0 42 42&quot; style=&quot;width:120px;height:120px;stroke:none&quot;&gt;&lt;circle cx=&quot;21&quot; cy=&quot;21&quot; r=&quot;15.9&quot; fill=&quot;none&quot; stroke=&quot;var(--active)&quot; stroke-width=&quot;6&quot;/&gt;&lt;circle cx=&quot;21&quot; cy=&quot;21&quot; r=&quot;15.9&quot; fill=&quot;none&quot; stroke=&quot;#4176e6&quot; stroke-width=&quot;6&quot; stroke-dasharray=&quot;58 42&quot; stroke-dashoffset=&quot;25&quot;/&gt;&lt;circle cx=&quot;21&quot; cy=&quot;21&quot; r=&quot;15.9&quot; fill=&quot;none&quot; stroke=&quot;#a78bfa&quot; stroke-width=&quot;6&quot; stroke-dasharray=&quot;18 82&quot; stroke-dashoffset=&quot;67&quot;/&gt;&lt;circle cx=&quot;21&quot; cy=&quot;21&quot; r=&quot;15.9&quot; fill=&quot;none&quot; stroke=&quot;#22c55e&quot; stroke-width=&quot;6&quot; stroke-dasharray=&quot;12 88&quot; stroke-dashoffset=&quot;49&quot;/&gt;&lt;circle cx=&quot;21&quot; cy=&quot;21&quot; r=&quot;15.9&quot; fill=&quot;none&quot; stroke=&quot;#dd8629&quot; stroke-width=&quot;6&quot; stroke-dasharray=&quot;8 92&quot; stroke-dashoffset=&quot;37&quot;/&gt;&lt;/svg&gt;
+              &lt;div class=&quot;legend&quot; style=&quot;flex:1&quot;&gt;&lt;div&gt;&lt;i style=&quot;background:#4176e6&quot;&gt;&lt;/i&gt;回复&lt;span&gt;58%&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;i style=&quot;background:#a78bfa&quot;&gt;&lt;/i&gt;试聊&lt;span&gt;18%&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;i style=&quot;background:#22c55e&quot;&gt;&lt;/i&gt;记忆整理&lt;span&gt;12%&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;i style=&quot;background:#dd8629&quot;&gt;&lt;/i&gt;虚构日程&lt;span&gt;8%&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;i style=&quot;background:var(--b3)&quot;&gt;&lt;/i&gt;其他&lt;span&gt;4%&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;
+            &lt;/div&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;fold&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;m9 6 6 6-6 6&quot;/&gt;&lt;/svg&gt;调用流水（186） · 默认收起&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 浏览器接管 --&gt;
+      &lt;div class=&quot;page wide&quot; data-sp=&quot;browser&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;rows&quot;&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;@dafeiyu 已登录&lt;small&gt;未接管 · 业务暂停中 · 浏览器运行 6 小时&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv w&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;账号设置需要处理&lt;small&gt;简介为空 · 自动化标识关闭 · 质量过滤开启 · 程序不会自动修改&lt;/small&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot; data-goto=&quot;health&quot;&gt;查看账号检查&lt;/button&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;desk&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot; style=&quot;width:34px;height:34px&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;12&quot; rx=&quot;2&quot;/&gt;&lt;path d=&quot;M8 20h8M12 16v4&quot;/&gt;&lt;/svg&gt;接管后在这里显示浏览器桌面&lt;span style=&quot;font-size:12px&quot;&gt;接管会先排空自动操作；释放后断开连接，业务继续暂停&lt;/span&gt;&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 采集来源 --&gt;
+      &lt;div class=&quot;page&quot; data-sp=&quot;sources&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;rows&quot;&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;公开提及&lt;small&gt;已启用 · 按当前采集规则运行 · 上次 21:30 成功&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;搜索&lt;small&gt;已启用 · 上次 21:30 成功&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;自己帖子下的回复&lt;small&gt;已启用&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;原生 Chat 私信&lt;small&gt;已启用 · 只读适配 · 自动私信事件为零，尚未验收收发&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv n&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;通知“全部”栏&lt;small&gt;未启用 · 需要真实页面脱敏样本确认后才会参与采集&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 健康与日报 --&gt;
+      &lt;div class=&quot;page wide&quot; data-sp=&quot;health&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;metrics&quot;&gt;
+          &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;轮次耗时&lt;/span&gt;&lt;b&gt;48 秒&lt;/b&gt;&lt;small&gt;软超时 10 分钟&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;metric w&quot;&gt;&lt;span&gt;采集告警&lt;/span&gt;&lt;b&gt;2 轮&lt;/b&gt;&lt;small&gt;历史告警，最后 18:02&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;浏览器内存&lt;/span&gt;&lt;b&gt;41%&lt;/b&gt;&lt;small&gt;阈值 80%&lt;/small&gt;&lt;/div&gt;
+          &lt;div class=&quot;metric&quot;&gt;&lt;span&gt;未收束出站&lt;/span&gt;&lt;b&gt;0&lt;/b&gt;&lt;small&gt;unknown 只回查&lt;/small&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sec-title&quot;&gt;账号检查 &lt;small&gt;上次检查 10/28 21:12 · 程序不会自动修改&lt;/small&gt;&lt;/div&gt;
+        &lt;div class=&quot;rows&quot;&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv w&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;简介披露&lt;small&gt;简介为空，缺少“AI”“非官方”&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv w&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;自动化账号标签&lt;small&gt;尚未设置&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv w&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;通知质量过滤&lt;small&gt;已开启，部分提及可能收不到&lt;/small&gt;&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;sec-title&quot;&gt;日报&lt;/div&gt;
+        &lt;div class=&quot;rows&quot;&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;grow&quot;&gt;10/27 日报&lt;small&gt;回复 38 · 私信 0 · 平均延迟 4 分钟 · 费用 $0.37&lt;/small&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;查看&lt;/button&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;grow&quot;&gt;10/26 日报&lt;small&gt;回复 41 · 私信 0 · 平均延迟 5 分钟 · 费用 $0.40&lt;/small&gt;&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;查看&lt;/button&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;fold&quot;&gt;&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;m9 6 6 6-6 6&quot;/&gt;&lt;/svg&gt;健康与披露配置：披露词、轮次超时、采集预算、浏览器阈值&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 日志、阶段与队列 --&gt;
+      &lt;div class=&quot;page wide&quot; data-sp=&quot;logs&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;cbar&quot;&gt;&lt;div class=&quot;search&quot; style=&quot;flex:1;margin:0&quot;&gt;筛选事件或说明&lt;/div&gt;&lt;span class=&quot;chip&quot;&gt;全部级别 ⌄&lt;/span&gt;&lt;button class=&quot;btn&quot;&gt;暂停实时&lt;/button&gt;&lt;/div&gt;
+        &lt;div class=&quot;rows&quot;&gt;
+          &lt;div class=&quot;logrow&quot;&gt;&lt;time&gt;21:31:02&lt;/time&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;mono&quot;&gt;processed&lt;/span&gt;&lt;span&gt;私信 · confirmed · 第 3 轮&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;logrow&quot;&gt;&lt;time&gt;21:30:48&lt;/time&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;mono&quot;&gt;collect-public&lt;/span&gt;&lt;span&gt;公开采集完成 · 2 条新消息&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;logrow&quot;&gt;&lt;time&gt;21:30:40&lt;/time&gt;&lt;span class=&quot;lv w&quot;&gt;&lt;/span&gt;&lt;span class=&quot;mono&quot;&gt;collection-warning&lt;/span&gt;&lt;span&gt;页面采集存在异常，请检查浏览器结构&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;logrow&quot;&gt;&lt;time&gt;21:15:11&lt;/time&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;mono&quot;&gt;triage-harassment&lt;/span&gt;&lt;span&gt;私信 · 第 1 次&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;logrow&quot;&gt;&lt;time&gt;21:04:33&lt;/time&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;mono&quot;&gt;persona-save&lt;/span&gt;&lt;span&gt;人设已保存，下一轮生效 · 大肥鱼 修订 4&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;logrow&quot;&gt;&lt;time&gt;20:41:05&lt;/time&gt;&lt;span class=&quot;lv e&quot;&gt;&lt;/span&gt;&lt;span class=&quot;mono&quot;&gt;generation-error&lt;/span&gt;&lt;span&gt;生成或输出校验失败，请检查调用与阶段记录&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;!-- 任务执行历史 --&gt;
+      &lt;div class=&quot;page wide&quot; data-sp=&quot;history&quot; style=&quot;flex-direction:column&quot;&gt;
+        &lt;div class=&quot;rows&quot;&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;虚构日程&lt;small&gt;今天 06:00 · 自动 · 8.2 秒&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;badge ok&quot;&gt;成功&lt;/span&gt;&lt;span class=&quot;sub&quot;&gt;$0.0021&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;自动备份&lt;small&gt;今天 04:00 · 自动 · 1.1 秒&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;badge ok&quot;&gt;成功&lt;/span&gt;&lt;span class=&quot;sub&quot;&gt;—&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv n&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;早安帖&lt;small&gt;10/27 08:00 · 已停用，未执行&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;badge&quot;&gt;跳过&lt;/span&gt;&lt;span class=&quot;sub&quot;&gt;—&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;row&quot;&gt;&lt;span class=&quot;lv e&quot;&gt;&lt;/span&gt;&lt;span class=&quot;grow&quot;&gt;虚构日程&lt;small&gt;10/24 06:00 · 自动 · 三次均失败&lt;/small&gt;&lt;/span&gt;&lt;span class=&quot;badge&quot; style=&quot;background:var(--err-bg);color:var(--err)&quot;&gt;失败&lt;/span&gt;&lt;span class=&quot;sub&quot;&gt;$0.0006&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/section&gt;
+&lt;/div&gt;
+&lt;script&gt;
+(()=&gt;{const B=document.body,page=B.dataset.sp?&#x27;settings&#x27;:&#x27;feed&#x27;,narrow=matchMedia(&#x27;(max-width:860px)&#x27;);
+const store={get(k){try{return localStorage.getItem(k)}catch{return null}},set(k,v){try{localStorage.setItem(k,v)}catch{}}};
+for(const side of [&#x27;left&#x27;,&#x27;right&#x27;]){const v=store.get(&#x27;ws:&#x27;+page+&#x27;:&#x27;+side);if(v)B.dataset[side]=v;}
+const closeOverlays=()=&gt;{B.dataset.drawer=&#x27;&#x27;;B.dataset.sheet=&#x27;&#x27;;};
+document.addEventListener(&#x27;click&#x27;,e=&gt;{const t=e.target.closest(&#x27;button,[data-close]&#x27;);if(!t)return;
+  if(t.dataset.toggle){const side=t.dataset.toggle;if(narrow.matches&amp;&amp;side===&#x27;right&#x27;){B.dataset.sheet=B.dataset.sheet===&#x27;open&#x27;?&#x27;&#x27;:&#x27;open&#x27;;return;}
+    const next=B.dataset[side]===&#x27;closed&#x27;?&#x27;open&#x27;:&#x27;closed&#x27;;B.dataset[side]=next;store.set(&#x27;ws:&#x27;+page+&#x27;:&#x27;+side,next);
+    document.querySelectorAll(&#x27;[data-toggle=&quot;&#x27;+side+&#x27;&quot;]&#x27;).forEach(x=&gt;x.setAttribute(&#x27;aria-expanded&#x27;,String(next===&#x27;open&#x27;)));}
+  if(t.hasAttribute(&#x27;data-drawer&#x27;))B.dataset.drawer=B.dataset.drawer===&#x27;open&#x27;?&#x27;&#x27;:&#x27;open&#x27;;
+  if(t.hasAttribute(&#x27;data-close&#x27;)){if(!narrow.matches&amp;&amp;t.closest(&#x27;.rightcol&#x27;)){B.dataset.right=&#x27;closed&#x27;;store.set(&#x27;ws:&#x27;+page+&#x27;:right&#x27;,&#x27;closed&#x27;);}closeOverlays();}
+  if(narrow.matches&amp;&amp;t.closest(&#x27;.turn&#x27;)&amp;&amp;B.dataset.mode===&#x27;feed&#x27;)B.dataset.sheet=&#x27;open&#x27;;
+});
+document.addEventListener(&#x27;keydown&#x27;,e=&gt;{if(e.key===&#x27;Escape&#x27;)closeOverlays();});})();
+&lt;/script&gt;
+
+&lt;script&gt;
+(()=&gt;{const base=location.protocol===&#x27;file:&#x27;?&#x27;&#x27;:&#x27;/files/&#x27;;document.querySelectorAll(&#x27;[data-href]&#x27;).forEach(a=&gt;a.href=base+a.dataset.href);})();
+&lt;/script&gt;
+&lt;script&gt;
+const heat=document.getElementById(&#x27;heat&#x27;);for(let i=0;i&lt;182;i++){const x=document.createElement(&#x27;i&#x27;);const r=(Math.sin(i*1.7)+Math.cos(i*.31)+2)/4;if(i&gt;120)x.className=r&gt;.75?&#x27;l4&#x27;:r&gt;.55?&#x27;l3&#x27;:r&gt;.35?&#x27;l2&#x27;:r&gt;.2?&#x27;l1&#x27;:&#x27;&#x27;;heat.append(x);}
+document.addEventListener(&#x27;click&#x27;,e=&gt;{const t=e.target.closest(&#x27;[data-goto]&#x27;);if(!t)return;document.body.dataset.sp=t.dataset.goto;document.querySelectorAll(&#x27;.item[data-goto]&#x27;).forEach(x=&gt;x.classList.toggle(&#x27;on&#x27;,x.dataset.goto===t.dataset.goto));if(matchMedia(&#x27;(max-width:860px)&#x27;).matches)document.body.dataset.drawer=&#x27;&#x27;;});
+&lt;/script&gt;
+&lt;script&gt;
+(()=&gt;{if(window.parent===window)return;document.querySelectorAll(&#x27;[data-href]&#x27;).forEach(a=&gt;{a.removeAttribute(&#x27;href&#x27;);a.style.cursor=&#x27;pointer&#x27;;a.addEventListener(&#x27;click&#x27;,e=&gt;{e.preventDefault();parent.postMessage({go:a.dataset.href.replace(&#x27;layout-&#x27;,&#x27;&#x27;).replace(&#x27;.html&#x27;,&#x27;&#x27;)},&#x27;*&#x27;);});});})();
+&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+" hidden></iframe>
+<script>
+const show=k=>{for(const f of document.querySelectorAll('iframe'))f.hidden=f.id!=='p-'+k;try{history.replaceState(null,'','#'+k)}catch{}};
+addEventListener('message',e=>{if(e.data&&['feed','persona','settings'].includes(e.data.go))show(e.data.go)});
+if(['#feed','#persona','#settings'].includes(location.hash))show(location.hash.slice(1));
+</script>
+</body>
+</html>

@@ -65,12 +65,42 @@
 
 这两项提案不新增数据库迁移或模型请求。实施与发布各按原任务验证，不因提案进入仓库自动执行。
 
+### 面板改版（三份，按顺序实施）
+
+三份提案共用一套参照 DeepSeek Harness 网页版式的统一设计：左栏列表加主区，按需带右栏，整页铺满，左右栏都能收起，窄屏用抽屉。前端仍为原生 HTML/CSS/ES 模块，不使用对方的品牌素材。管理员确认的草图是一个单独的 HTML 文件 [panel-redesign-mockup.html](changes/add-persona-workspace/panel-redesign-mockup.html)，含动态、人设、设置三页。
+
+1. **人设工作区、多人设与正常流程试聊**
+   [提案](changes/add-persona-workspace/proposal.md) · [设计](changes/add-persona-workspace/design.md) · [任务](changes/add-persona-workspace/tasks.md) · [增量规格](changes/add-persona-workspace/specs/)
+
+   当前 **0/26**，只创建规划文件。主要内容：
+   - 统一设计的外壳与组件；
+   - 人设页分人设、日程、试聊三种模式；
+   - 可保存多个人设，其中一个“使用中”；
+   - 试聊以测试用户身份走正常回复流程：数据存在独立的 `chat-test/` 目录，不占额度、不受时段限制，计费用途为“试聊”。
+
+2. **设置页改版**
+   [提案](changes/redesign-settings-workspace/proposal.md) · [设计](changes/redesign-settings-workspace/design.md) · [任务](changes/redesign-settings-workspace/tasks.md) · [增量规格](changes/redesign-settings-workspace/specs/)
+
+   当前 **0/16**，只创建规划文件。主要内容：
+   - 左栏一项一页，共四组十一项；
+   - 记忆页和计费页并入设置，顶部导航改为动态、人设、设置三项；
+   - 不改任何设置的含义和接口。
+
+3. **动态页改版**
+   [提案](changes/redesign-feed-workspace/proposal.md) · [设计](changes/redesign-feed-workspace/design.md) · [任务](changes/redesign-feed-workspace/tasks.md) · [增量规格](changes/redesign-feed-workspace/specs/)
+
+   当前 **0/12**，只创建规划文件。主要内容：
+   - 用户即会话：左栏按身份列出会话，主区显示往来，草稿在对话中审核，右栏显示详情；
+   - 新增两个只读的会话查询接口；
+   - 草稿审核与出站规则不变。
+
 ## 依赖与维护规则
 
 - 七页基线提案和原计划保留为来源；后续修改以相应 change 的提案、完整增量规格、设计和任务为准，避免设计分叉。
 - `fill-reference-post-gaps` 修改七页基线、回复提示词和回放中的能力；归档应在这些来源提案之后。`add-billing-chart-interaction` 应在 `simplify-panel-activity-feed` 之后。
 - `remove-message-forget-command` 应在七页基线之后；运行／接管分离应在七页与五页面板之后；文风提案应在七页与回复提示词提案之后。
 - `add-private-daily-limit` 应在 `add-reply-triage` 之后；`add-reply-hours` 应在分级、健康及私信日额度提案之后。两项都修改分级能力，并行实施时需协调共享源码与设置入口。
+- 面板改版三份提案按 `add-persona-workspace` → `redesign-settings-workspace` → `redesign-feed-workspace` 的顺序实施和归档。三份都排在七页基线、五页面板、运行／接管分离、人设预设、人设回放和参考补齐之后。`add-reply-hours`、`add-private-daily-limit` 新增的时段和额度检查只能放在生产路径，不能影响试聊。
 - 未完成任务不得归档。同步主规格前核对实际行为和全部验收证据；CLI 显示规划产物完成只表示可进入实施。
 - 修改需求时同步提案、规格、设计和任务；任务只在完整验收条件通过后勾选。构建、自动化测试、批量模型及界面验收只在服务器独立环境运行，不使用生产 profile 跑模拟测试。
 

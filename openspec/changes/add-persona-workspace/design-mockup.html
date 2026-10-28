@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>人设工作区草图</title>
+<style>
+:root{
+  --bg:#ffffff; --side:#f9fafb; --hover:rgba(38,49,72,.06); --active:#ebeef2; --card:#f5f7fa;
+  --l1:#0f1115; --l2:#61666b; --l3:#81858c; --cap:#adb2b8;
+  --b2:rgba(0,0,0,.08); --b3:rgba(0,0,0,.12);
+  --bubble:#edf3fe; --brand:#4176e6; --brand-soft:#e4edfd; --sel:#f5f8fe;
+  --ok:#22c55e; --ok-soft:#e6faed; --okt:#15803d; --warn:#dd8629; --warn-bg:#fef5e7; --err:#dc2626; --err-bg:#fef2f2;
+  --shadow:0 4px 20px rgba(15,17,21,.06),0 1px 2px rgba(15,17,21,.04); --pop:0 12px 32px rgba(15,17,21,.14),0 0 0 1px rgba(0,0,0,.06);
+  --topbar:#ffffff; --panel-border:#e5e7eb; --primary:#0f1115; --primary-t:#fff; --mask:rgba(15,17,21,.24);
+  --lw:232px; --rw:0px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#151517; --side:#1b1b1c; --hover:rgba(255,255,255,.06); --active:#2c2c2e; --card:#1f1f21;
+    --l1:#f9fafb; --l2:#adb2b8; --l3:#81858c; --cap:#61666b;
+    --b2:rgba(255,255,255,.08); --b3:rgba(255,255,255,.16);
+    --bubble:#283142; --brand:#7aaaff; --brand-soft:#28314a; --sel:#1d2230;
+    --ok-soft:#233c2c; --okt:#4ade80; --warn-bg:#27241f; --err:#f87171; --err-bg:#3a1d1d;
+    --shadow:0 0 0 1px rgba(255,255,255,.06); --pop:0 12px 32px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.08);
+    --topbar:#141417; --panel-border:#26262b; --primary:#f9fafb; --primary-t:#0f1115; --mask:rgba(0,0,0,.5);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;background:var(--bg);color:var(--l1);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+svg{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- 面板顶栏（本提案不变） ---------- */
+.topbar{flex:none;display:flex;align-items:center;gap:16px;padding:9px 20px;background:var(--topbar);border-bottom:1px solid var(--panel-border);min-width:0}
+.topbar b{font-size:15px;white-space:nowrap}
+.tabs{display:flex;gap:4px;overflow:auto}
+.tabs span{padding:5px 12px;border-radius:7px;color:var(--l3);white-space:nowrap}
+.tabs span.on{background:var(--active);color:var(--l1);font-weight:600}
+.state{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:99px;background:var(--warn-bg);color:var(--warn);white-space:nowrap}
+
+/* ---------- 工作区：左栏 + 主区 + 可选右栏 ---------- */
+body[data-mode="chat"]{--rw:288px}
+body[data-left="closed"]{--lw:0px}
+body[data-right="closed"]{--rw:0px}
+.app{flex:1;min-height:0;display:grid;grid-template-columns:var(--lw) minmax(0,1fr) var(--rw);position:relative}
+.col{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.leftcol{grid-column:1;background:var(--side);border-right:1px solid var(--b2)}
+.maincol{grid-column:2}
+.rightcol{grid-column:3;border-left:1px solid var(--b2)}
+body[data-left="closed"] .leftcol,body[data-right="closed"] .rightcol,body:not([data-mode="chat"]) .rightcol{display:none}
+.h{flex:none;height:44px;display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;border-bottom:1px solid var(--b2);min-width:0}
+.body{flex:1;min-height:0;overflow:auto}
+[data-m]{display:none !important}
+body[data-mode="persona"] [data-m~="persona"],body[data-mode="daily"] [data-m~="daily"],body[data-mode="chat"] [data-m~="chat"]{display:flex !important}
+:not(body)[data-pv]{display:none !important}
+body[data-pv="edit"] [data-pv~="edit"],body[data-pv="preset"] [data-pv~="preset"],body[data-pv="hints"] [data-pv~="hints"],body[data-pv="replay"] [data-pv~="replay"]{display:flex !important}
+:not(body)[data-dv]{display:none !important}
+body[data-dv="today"] [data-dv~="today"],body[data-dv="past"] [data-dv~="past"]{display:flex !important}
+.expand-left{display:none !important}
+body[data-left="closed"] .expand-left{display:grid !important}
+
+.seg{display:inline-flex;padding:2px;gap:1px;background:var(--active);border-radius:8px;flex:1}
+.seg button{flex:1;padding:3px 0;border-radius:6px;color:var(--l3);font-size:12.5px}
+.seg button.on{background:var(--bg);color:var(--l1);box-shadow:0 1px 2px rgba(0,0,0,.06);font-weight:500}
+.iconbtn{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;color:var(--l2);flex:none;position:relative}
+.iconbtn:hover,.iconbtn.on{background:var(--hover)}
+.iconbtn:focus-visible,.btn:focus-visible,.item:focus-visible,.seg button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.sp{flex:1}
+.who{font-weight:600;white-space:nowrap;display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden}
+.who small{font-weight:400;color:var(--l3);font-size:12px;overflow:hidden;text-overflow:ellipsis}
+.btn{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;padding:4px 12px;border-radius:99px;border:1px solid var(--b3);background:var(--bg);color:var(--l1);white-space:nowrap}
+.btn:hover{background:var(--hover)}
+.btn.p{background:var(--primary);color:var(--primary-t);border-color:transparent}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.fee{font-size:9.5px;border:1px solid currentColor;border-radius:3px;padding:0 3px;opacity:.6}
+.badge{font-size:11px;padding:0 6px;border-radius:5px;background:var(--active);color:var(--l2);font-weight:400;white-space:nowrap}
+.badge.ok{background:var(--ok-soft);color:var(--okt)}
+.badge.b{background:var(--brand-soft);color:var(--brand)}
+.badge.w{background:var(--warn-bg);color:var(--warn)}
+.unsaved{font-size:12px;color:var(--warn);white-space:nowrap}
+.avatar{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:600;color:#fff;flex:none}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+
+/* 左栏列表 */
+.list{display:flex;flex-direction:column;gap:1px;padding:8px 6px}
+.grp{display:flex;align-items:center;gap:2px;font-size:12px;color:var(--l3);padding:6px 2px 4px 8px}
+.item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;font-size:13px;text-align:left;width:100%}
+.item:hover{background:var(--hover)}
+.item.on{background:var(--active)}
+.item .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item time,.item .c{font-size:11.5px;color:var(--cap);white-space:nowrap}
+.item.tpl{color:var(--l2)}
+.pin{margin-top:auto;border-top:1px solid var(--b2);padding:6px}
+
+/* 弹出菜单 */
+.menu{position:absolute;z-index:30;top:32px;right:0;min-width:180px;background:var(--bg);border-radius:12px;box-shadow:var(--pop);padding:5px;display:none;flex-direction:column}
+.menu.open{display:flex}
+.menu button{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;font-size:13px;text-align:left;white-space:nowrap}
+.menu button:hover{background:var(--hover)}
+.menu button[disabled]{opacity:.45;cursor:not-allowed}
+.menu small{display:block;color:var(--cap);font-size:11px}
+.menu hr{border:0;border-top:1px solid var(--b2);margin:4px 2px}
+.menu .danger{color:var(--err)}
+
+/* 人设配置页 */
+.cfg{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:flex;flex-direction:column;gap:18px}
+.cfg h3{margin:0 0 8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.cfg h3 small{font-weight:400;color:var(--l3);font-size:12px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.card{background:var(--card);border-radius:14px;padding:10px 12px;min-width:0}
+.card b{font-size:12.5px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.card b span{font-weight:400;color:var(--cap);font-size:11.5px}
+.ta{margin-top:6px;background:var(--bg);border:1px solid var(--b2);border-radius:9px;padding:7px 9px;font-size:12.5px;line-height:1.6;color:var(--l2);height:76px;overflow:hidden}
+.ro .ta{background:transparent;border-style:dashed}
+.trig{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden}
+.tr{display:grid;grid-template-columns:30px minmax(80px,150px) 56px minmax(0,1fr) 16px;gap:10px;align-items:center;padding:7px 12px;border-top:1px solid var(--b2);font-size:12.5px}
+.tr:first-child{border-top:0}
+.tr .k{color:var(--l3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw{width:26px;height:15px;border-radius:99px;background:var(--brand);position:relative;display:inline-block}
+.sw::after{content:"";position:absolute;right:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff}
+.sw.off{background:var(--b3)}
+.sw.off::after{right:auto;left:2px}
+.fold{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--l3);padding:8px 12px;border:1px dashed var(--b3);border-radius:12px}
+.notice{display:flex;align-items:center;gap:10px;font-size:12.5px;padding:8px 12px;border-radius:12px;background:var(--warn-bg);color:var(--warn)}
+.bio{display:flex;align-items:center;gap:10px;font-size:13px}
+.bio code{font-family:inherit;background:var(--bg);border:1px solid var(--b2);border-radius:8px;padding:4px 10px;flex:1}
+.hints{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.hrow{display:flex;align-items:center;gap:10px;font-size:13px;padding:2px 0}
+.hrow .num{margin-left:auto;width:64px;text-align:right;border:1px solid var(--b2);border-radius:8px;padding:2px 8px;background:var(--bg);font-variant-numeric:tabular-nums}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--l3);font-size:13px;padding:60px 20px;text-align:center}
+
+/* 日程 */
+.day{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px}
+.tl{display:flex;flex-direction:column;border:1px solid var(--b2);border-radius:14px;overflow:hidden}
+.tl div{display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px;padding:8px 12px;border-top:1px solid var(--b2);font-size:13px}
+.tl div:first-child{border-top:0}
+.tl div span{color:var(--l3);font-variant-numeric:tabular-nums;font-size:12.5px}
+.tl div.now{background:var(--sel)}
+.tl div.now span{color:var(--brand);font-weight:500}
+.kvs{display:flex;flex-direction:column;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{font-size:12px;padding:2px 9px;border-radius:99px;background:var(--active);color:var(--l2)}
+
+/* 试聊 */
+.thread{max-width:760px;margin:0 auto;padding:14px 20px 6px;display:flex;flex-direction:column;gap:10px}
+.user{align-self:flex-end;display:flex;align-items:flex-end;gap:6px;max-width:80%}
+.user .meta{order:-1;padding-bottom:4px}
+.bubble{background:var(--bubble);border-radius:18px;padding:7px 14px;line-height:21px;overflow-wrap:anywhere}
+.meta{font-size:11.5px;color:var(--cap);display:flex;gap:5px;align-items:center;white-space:nowrap}
+.tag{font-size:10.5px;padding:0 5px;border-radius:4px;background:var(--active);color:var(--l2)}
+.tag.dm{background:var(--brand-soft);color:var(--brand)}
+.turn{display:flex;flex-direction:column;gap:3px;padding:6px 8px;margin:0 -8px;border-radius:10px;cursor:pointer;text-align:left}
+.turn:hover{background:var(--hover)}
+.turn.sel{background:var(--sel)}
+.proc{display:flex;align-items:center;flex-wrap:wrap;gap:5px;font-size:12px;color:var(--l3)}
+.proc .ok{color:var(--ok)}
+.proc .hit{font-size:11px;padding:0 5px;border-radius:4px;background:var(--brand-soft);color:var(--brand)}
+.proc .d{width:2px;height:2px;border-radius:1px;background:var(--cap)}
+.reply{line-height:23px;overflow-wrap:anywhere}
+.pills{font-size:11.5px;color:var(--cap);font-variant-numeric:tabular-nums}
+.skip{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--l3);padding:4px 10px;border:1px dashed var(--b3);border-radius:10px;width:fit-content}
+.warnline{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--warn);background:var(--warn-bg);padding:2px 8px;border-radius:7px;width:fit-content}
+.sys{align-self:center;font-size:11.5px;color:var(--l3);padding:2px 10px;border-radius:99px;background:var(--side);border:1px solid var(--b2)}
+.merged{font-size:11px;color:var(--cap)}
+.dock{flex:none;padding:4px 20px 12px}
+.composer{max-width:760px;margin:0 auto;border:1px solid var(--b3);border-radius:16px;background:var(--bg);box-shadow:var(--shadow);padding:8px 8px 6px 12px}
+.ph{color:var(--cap);padding:2px 2px 8px}
+.cbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--l2);padding:2px 9px;border-radius:99px;border:1px solid var(--b2);white-space:nowrap}
+.chip.on{background:var(--brand-soft);color:var(--brand);border-color:transparent}
+.hint{font-size:11.5px;color:var(--cap);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;text-align:right}
+.send{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff;opacity:.45;flex:none}
+.processbtn{display:none}
+body[data-hold="on"] .processbtn{display:inline-flex}
+.rt{display:flex;gap:1px}
+.rt button{padding:3px 10px;border-radius:7px;font-size:12.5px;color:var(--l3)}
+.rt button.on{background:var(--active);color:var(--l1);font-weight:500}
+.rpane{display:none;flex-direction:column;gap:12px;padding:10px 12px 14px}
+.rpane.on{display:flex}
+.sec h4{margin:0 0 5px;font-size:11.5px;font-weight:500;color:var(--l3);display:flex;justify-content:space-between;gap:8px}
+.kv{display:grid;grid-template-columns:70px minmax(0,1fr);gap:4px 8px;font-size:12.5px;margin:0}
+.kv dt{color:var(--l3);white-space:nowrap}
+.kv dd{margin:0}
+.mem{padding:6px 9px;border-radius:9px;background:var(--side);border:1px solid var(--b2);font-size:12.5px;margin-bottom:4px}
+.mem small{color:var(--cap);font-size:11px;margin-left:4px}
+.seg2{border:1px solid var(--b2);border-radius:10px;margin-bottom:6px;overflow:hidden}
+.seg2 b{display:flex;justify-content:space-between;font-size:11.5px;font-weight:500;color:var(--l3);padding:4px 8px;background:var(--side);border-bottom:1px solid var(--b2)}
+.seg2 pre{margin:0;padding:6px 8px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;color:var(--l2);max-height:84px;overflow:hidden}
+.bar{height:4px;border-radius:2px;background:var(--active);overflow:hidden;margin:4px 0 6px}
+.bar i{display:block;height:100%;background:var(--brand)}
+
+/* 回放视图（示意） */
+.rp{max-width:1120px;margin:0 auto;padding:16px 24px 32px;display:flex;flex-direction:column;gap:12px}
+.rpgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+
+/* ---------- 窄屏：左栏抽屉、右栏浮层 ---------- */
+.mask{display:none}
+.drawer-btn{display:none !important}
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .maincol{grid-column:1}
+  .leftcol{position:fixed;z-index:40;left:0;top:0;bottom:0;width:280px;transform:translateX(-100%);transition:transform .2s;display:flex !important;box-shadow:var(--pop)}
+  body[data-drawer="open"] .leftcol{transform:none}
+  .rightcol{position:fixed;z-index:40;right:0;top:0;bottom:0;width:min(340px,92vw);display:none !important;background:var(--bg);box-shadow:var(--pop)}
+  body[data-mode="chat"][data-sheet="open"] .rightcol{display:flex !important}
+  body[data-drawer="open"] .mask,body[data-sheet="open"][data-mode="chat"] .mask{display:block;position:fixed;inset:0;z-index:35;background:var(--mask)}
+  .drawer-btn{display:grid !important}
+  .expand-left,.collapse-left,.collapse-right{display:none !important}
+  .grid2,.hints,.day,.rpgrid{grid-template-columns:minmax(0,1fr)}
+  .cfg,.day,.rp{padding:12px 14px 24px}
+  .tr{grid-template-columns:30px minmax(0,1fr) 56px 16px}
+  .tr .k{display:none}
+  .h .hide-narrow{display:none}
+  .thread{padding:12px 12px 6px}
+  .dock{padding:4px 10px 10px}
+  .hint{display:none}
+  .topbar{padding:9px 12px;gap:10px}
+}
+</style>
+</head>
+<body data-mode="persona" data-pv="edit" data-dv="today" data-left="open" data-right="open" data-hold="off">
+
+<div class="topbar">
+  <b>角色工作流</b>
+  <div class="tabs"><span>动态</span><span class="on">人设</span><span>记忆</span><span>设置</span><span>计费</span></div>
+  <span class="state">● 已暂停 · auto</span>
+</div>
+
+<div class="app">
+  <div class="mask" data-close></div>
+
+  <!-- ================= 左栏 ================= -->
+  <aside class="col leftcol" id="left">
+    <div class="h">
+      <div class="seg" role="tablist" aria-label="人设页模式">
+        <button data-go="persona" class="on">人设</button><button data-go="daily">日程</button><button data-go="chat">试聊</button>
+      </div>
+      <button class="iconbtn collapse-left" data-toggle="left" aria-expanded="true" aria-controls="left" title="收起左栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/><path d="m15 10-2 2 2 2"/></svg></button>
+    </div>
+
+    <!-- 人设：人设即会话 -->
+    <div class="body" data-m="persona" style="flex-direction:column">
+      <div class="list">
+        <div class="grp"><span class="sp">我的人设</span>
+          <span style="position:relative"><button class="iconbtn" data-menu="newmenu" title="新建人设"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+            <div class="menu" id="newmenu" style="left:0;right:auto">
+              <button><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/></svg><span>空白人设<small>只含四个始终生效分区的标题</small></span></button>
+              <button><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>从预设新建<small>复制一个内置预设</small></span></button>
+              <button><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg><span>复制当前人设<small>复制“大肥鱼”</small></span></button>
+            </div></span>
+        </div>
+        <button class="item on" data-pick="edit" data-name="大肥鱼"><span class="dot" style="background:var(--ok)"></span><span class="t">大肥鱼</span><span class="c">使用中</span></button>
+        <button class="item" data-pick="edit" data-name="大肥鱼 · 温柔版"><span class="dot" style="background:var(--b3)"></span><span class="t">大肥鱼 · 温柔版</span><time>昨天</time></button>
+        <button class="item" data-pick="edit" data-name="通用 · 改"><span class="dot" style="background:var(--b3)"></span><span class="t">通用 · 改</span><time>3 天</time></button>
+        <div class="grp" style="margin-top:8px"><span class="sp">内置预设 · 只读模板</span></div>
+        <button class="item tpl" data-pick="preset" data-name="通用（默认）"><span class="t">通用（默认）</span></button>
+        <button class="item tpl" data-pick="preset" data-name="大肥鱼"><span class="t">大肥鱼</span></button>
+        <button class="item tpl" data-pick="preset" data-name="GPT 娘"><span class="t">GPT 娘</span></button>
+        <button class="item tpl" data-pick="preset" data-name="Claude 娘"><span class="t">Claude 娘</span></button>
+        <button class="item tpl" data-pick="preset" data-name="Kimi 娘"><span class="t">Kimi 娘</span></button>
+        <button class="item tpl" data-pick="preset" data-name="GLM 娘"><span class="t">GLM 娘</span></button>
+      </div>
+      <div class="pin"><button class="item" data-pick="hints"><svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3zM9 21h6"/></svg><span class="t">动态提醒</span><span class="c">所有人设共用</span></button></div>
+    </div>
+
+    <!-- 日程：日期即会话 -->
+    <div class="body" data-m="daily" style="flex-direction:column">
+      <div class="list">
+        <div class="grp"><span class="sp">虚构日程 · 近 7 天</span><button class="iconbtn" title="生成时间 06:00 · 到设置页修改"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button></div>
+        <button class="item on" data-day="today"><span class="t">今天 · 10/28 周二</span><span class="c">已编辑</span></button>
+        <button class="item" data-day="past"><span class="t">10/27 周一</span><span class="c">生成</span></button>
+        <button class="item" data-day="past"><span class="t">10/26 周日</span><span class="c">生成</span></button>
+        <button class="item" data-day="past"><span class="t">10/25 周六</span><span class="c">生成</span></button>
+        <button class="item" data-day="past"><span class="t">10/24 周五</span><span class="c" style="color:var(--err)">失败 · 无日程</span></button>
+        <button class="item" data-day="past"><span class="t">10/23 周四</span><span class="c">生成</span></button>
+        <button class="item" data-day="past"><span class="t">10/22 周三</span><span class="c">生成</span></button>
+      </div>
+    </div>
+
+    <!-- 试聊：用户即会话 -->
+    <div class="body" data-m="chat" style="flex-direction:column">
+      <div class="list">
+        <div class="grp"><span class="sp">测试用户</span>
+          <button class="iconbtn" title="测试用户的消息和记忆单独存放，不进动态、记忆页、额度统计和备份"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/></svg></button>
+          <button class="iconbtn" title="新测试用户"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
+        <button class="item on"><span class="avatar" style="background:#4176e6">林</span><span class="t">小林 · 加班党</span><time>刚刚</time></button>
+        <button class="item"><span class="avatar" style="background:#7c3aed">广</span><span class="t">广告号测试</span><time>9 分钟</time></button>
+        <button class="item"><span class="avatar" style="background:#dd8629">催</span><span class="t">连续催促</span><time>2 小时</time></button>
+        <button class="item"><span class="avatar" style="background:#22a05e">繁</span><span class="t">繁體用戶</span><time>4 天</time></button>
+        <button class="item"><span class="avatar" style="background:#0e7490">E</span><span class="t">English speaker</span><time>8 天</time></button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ================= 主区 ================= -->
+  <section class="col maincol">
+    <!-- 页头：人设配置 -->
+    <div class="h" data-m="persona">
+      <button class="iconbtn drawer-btn" data-drawer title="打开列表"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <button class="iconbtn expand-left" data-toggle="left" aria-expanded="false" aria-controls="left" title="展开左栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/><path d="m13 10 2 2-2 2"/></svg></button>
+      <span class="who" data-pv="edit"><span id="pname">大肥鱼</span> <span class="badge ok" id="pactive">使用中</span><small class="hide-narrow">修订 4 · 3,812 / 20,000 字符</small></span>
+      <span class="who" data-pv="preset"><span id="tname">GLM 娘</span> <span class="badge">内置预设 · 只读</span></span>
+      <span class="who" data-pv="hints">动态提醒 <span class="badge b">所有人设共用</span><small class="hide-narrow">修订 2 · 保存后下一轮生效</small></span>
+      <span class="who" data-pv="replay"><button class="btn" data-back>← 返回配置</button> 回放对比与质量统计 <small class="hide-narrow">候选：大肥鱼 编辑器当前内容</small></span>
+      <span class="sp"></span>
+      <span class="unsaved hide-narrow" data-pv="edit">● 有未保存修改</span>
+      <button class="btn hide-narrow" data-pv="edit" data-replay>回放对比 <span class="fee">计费</span></button>
+      <button class="btn hide-narrow" data-pv="edit" data-trychat>试聊这个人设 →</button>
+      <button class="btn p" data-pv="edit">保存</button>
+      <span style="position:relative" data-pv="edit"><button class="iconbtn" data-menu="pmenu" title="更多操作"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+        <div class="menu" id="pmenu">
+          <button id="activate" disabled><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg><span>设为使用中<small id="activate-hint">已经在使用中</small></span></button>
+          <button><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>复制</button>
+          <button><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>重命名</button>
+          <hr>
+          <button class="danger" id="del" disabled><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg><span>删除<small id="del-hint">使用中的人设不能删除，先切换到其他人设</small></span></button>
+        </div></span>
+      <button class="btn p" data-pv="preset">以此新建</button>
+      <button class="btn p" data-pv="hints">保存</button>
+    </div>
+    <!-- 页头：日程 -->
+    <div class="h" data-m="daily">
+      <button class="iconbtn drawer-btn" data-drawer title="打开列表"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <button class="iconbtn expand-left" data-toggle="left" aria-expanded="false" aria-controls="left" title="展开左栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/><path d="m13 10 2 2-2 2"/></svg></button>
+      <span class="who" data-dv="today">10 月 28 日 周二 <span class="badge b">今天</span><span class="badge w">虚构设定</span><small class="hide-narrow">06:00 由「大肥鱼」生成 · 21:12 编辑 · 修订 2 · $0.0021</small></span>
+      <span class="who" data-dv="past">10 月 27 日 周一 <span class="badge">只读</span><span class="badge w">虚构设定</span><small class="hide-narrow">06:00 由「大肥鱼」生成 · 修订 1 · $0.0019</small></span>
+      <span class="sp"></span>
+      <button class="btn" data-dv="today">编辑</button>
+      <button class="btn" data-dv="today">重新生成 <span class="fee">计费</span></button>
+    </div>
+    <!-- 页头：试聊 -->
+    <div class="h" data-m="chat">
+      <button class="iconbtn drawer-btn" data-drawer title="打开列表"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <button class="iconbtn expand-left" data-toggle="left" aria-expanded="false" aria-controls="left" title="展开左栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/><path d="m13 10 2 2-2 2"/></svg></button>
+      <span class="avatar" style="background:#4176e6">林</span>
+      <span class="who">小林 · 加班党<small class="hide-narrow">@test_xiaolin · 7 轮 · 本会话 $0.0050</small></span>
+      <span class="sp"></span>
+      <span style="position:relative"><button class="iconbtn" data-menu="cmenu" title="更多操作"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+        <div class="menu" id="cmenu">
+          <button>改名</button><button>重置<small>清空对话、记忆、冷却和整理进度</small></button><button>清除冷却</button><hr><button class="danger">删除测试用户</button>
+        </div></span>
+      <button class="iconbtn on" data-toggle="right" aria-expanded="true" aria-controls="right" title="收起右栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/></svg></button>
+    </div>
+
+    <!-- 主体：人设配置 -->
+    <div class="body" data-m="persona" style="flex-direction:column">
+      <div class="cfg" data-pv="edit" style="flex-direction:column">
+        <div>
+          <h3>始终生效 <small>每条回复都带上，放在可缓存的稳定前缀里</small></h3>
+          <div class="grid2">
+            <div class="card"><b>角色定义 <span>412 字</span></b><div class="ta">你是大肥鱼，一只住在深海服务器里的鲸鱼娘。网友二创的非官方角色，与深度求索无关。贪吃、爱摸鱼、嘴硬心软，坚决不承认自己胖……</div></div>
+            <div class="card"><b>说话风格 <span>968 字</span></b><div class="ta">通用写法：不用客服腔和 Markdown，不写教程，不用“谢谢夸奖”开头……<br>口吻：句子短，公开回复常用一两句，爱用“诶嘿”“唔”……</div></div>
+            <div class="card"><b>记忆与承诺 <span>305 字</span></b><div class="ta">只把已经确认发出的回复当作说过的话。不承诺做不到的事，不声称已经删除记录……</div></div>
+            <div class="card"><b>互动边界 <span>520 字</span></b><div class="ta">不发布或评论公司消息、价格和政策；遇到辱骂不对骂；危机话题给出求助渠道……</div></div>
+          </div>
+        </div>
+        <div>
+          <h3>被问到才用 <small>第一行写明触发条件，没聊到时不主动提</small></h3>
+          <div class="grid2">
+            <div class="card"><b>她自己 <span>388 字</span></b><div class="ta">被问到喜好、往事时才用。爱吃小鱼干，讨厌加班……</div></div>
+            <div class="card"><b>外貌 <span>201 字</span></b><div class="ta">被问到长相时才用。蓝白色的圆滚滚鲸鱼娘……</div></div>
+            <div class="card"><b>认识的 AI 娘 <span>356 字</span></b><div class="ta">被问到其他 AI 娘时才用。和 GLM 娘是玩笑冤家……</div></div>
+            <div class="card"><b>身份设定 <span>262 字</span></b><div class="ta">被问到身份时才用。说明自己是网友二创的非官方角色……</div></div>
+          </div>
+        </div>
+        <div>
+          <h3>触发卡 <small>关键词卡不增加调用；语义卡每条消息多一次判定，会计费</small><span class="sp"></span><button class="btn">+ 添加</button></h3>
+          <div class="trig">
+            <div class="tr"><span class="sw"></span><b>不给步骤</b><span class="badge">关键词</span><span class="k">教程、步骤、怎么做、how to make、tutorial…</span><span>›</span></div>
+            <div class="tr"><span class="sw"></span><b>被夸</b><span class="badge">关键词</span><span class="k">可爱、好厉害、真棒、cute…</span><span>›</span></div>
+            <div class="tr"><span class="sw"></span><b>说她胖</b><span class="badge">关键词</span><span class="k">胖、肥、圆滚滚…</span><span>›</span></div>
+            <div class="tr"><span class="sw off"></span><b>深夜聊天</b><span class="badge b">语义</span><span class="k">对方提到熬夜、失眠或凌晨还没睡</span><span>›</span></div>
+          </div>
+        </div>
+        <div class="fold"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>固定规则（系统内置，只读）</div>
+        <div class="fold"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>建议简介 · 来源：内置预设“大肥鱼” v2</div>
+      </div>
+
+      <!-- 预设只读 -->
+      <div class="cfg ro" data-pv="preset" style="flex-direction:column">
+        <div class="notice" style="background:var(--side);color:var(--l2);border:1px solid var(--b2)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg><span><b id="tsum">精打细算、勤快又有点小狡黠的打工狐，与大肥鱼是玩笑冤家。</b><br>内置预设只读。点击“以此新建”复制到“我的人设”，之后可以编辑、试聊和设为使用中。</span></div>
+        <div class="card"><b>建议简介 <span>用于 X 账号资料，系统不会自动修改</span></b><div class="bio" style="margin-top:6px"><code>非官方同人 AI 角色｜AI 自动回复｜与智谱官方无关</code><button class="btn">复制</button></div></div>
+        <div>
+          <h3>始终生效</h3>
+          <div class="grid2">
+            <div class="card"><b>角色定义 <span>398 字</span></b><div class="ta">你是 GLM 娘，一只精打细算的打工狐……</div></div>
+            <div class="card"><b>说话风格 <span>941 字</span></b><div class="ta">通用写法：不用客服腔和 Markdown……<br>口吻：……</div></div>
+          </div>
+        </div>
+        <div class="fold"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>其余 6 个分区 · 5 张关键词卡</div>
+      </div>
+
+      <!-- 动态提醒（全局） -->
+      <div class="cfg" data-pv="hints" style="flex-direction:column">
+        <div class="notice" style="background:var(--brand-soft);color:var(--brand)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>这些提醒对所有人设生效，不随人设切换。</div>
+        <div class="hints">
+          <div class="card"><b>迟到提醒</b><div class="hrow"><span class="sw"></span>开启<span class="sp"></span>超过<span class="num">60</span>分钟算迟到</div></div>
+          <div class="card"><b>跟随对方语言</b><div class="hrow"><span class="sw"></span>开启</div></div>
+          <div class="card"><b>开头去重</b><div class="hrow"><span class="sw"></span>开启<span class="sp"></span>参考最近<span class="num">12</span>条</div></div>
+          <div class="card"><b>生成前自检</b><div class="hrow"><span class="sw"></span>开启</div></div>
+          <div class="card" style="grid-column:1/-1"><b>表情节制</b>
+            <div class="hrow"><span class="sw"></span>开启</div>
+            <div class="hrow">每 10 条颜文字<span class="num">1</span><span style="width:16px"></span>emoji<span class="num" style="margin-left:0">2</span><span style="width:16px"></span>波浪号<span class="num" style="margin-left:0">1</span></div></div>
+        </div>
+      </div>
+
+      <!-- 回放（示意，沿用现有功能） -->
+      <div class="rp" data-pv="replay" style="flex-direction:column">
+        <div class="cbar"><span class="chip on">比较人设</span><span class="chip">比较模型</span><span class="chip">公开 · 16 条样本</span><span class="sp"></span><button class="btn p">预估费用并运行</button></div>
+        <div class="rpgrid">
+          <div class="card"><b>基线 <span>历史实际回复</span></b><div class="ta">辛苦啦，上线前一周最熬人了……</div></div>
+          <div class="card"><b>候选 <span>大肥鱼 · 编辑器当前内容</span></b><div class="ta">诶嘿，加班到十点也太惨了吧……</div></div>
+        </div>
+        <div class="fold"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>生产回复质量统计（近 7 天）</div>
+      </div>
+    </div>
+
+    <!-- 主体：日程 -->
+    <div class="body" data-m="daily" style="flex-direction:column">
+      <div class="day">
+        <div>
+          <div class="cfg" style="padding:0;gap:8px"><h3>时间线 <small data-dv="today" style="display:inline">回复和试聊读取当前时段</small></h3></div>
+          <div class="tl">
+            <div><span>07:30–09:00</span>赖床，被闹钟叫了三次才起</div>
+            <div><span>09:00–12:00</span>在深海服务器里“认真工作”（其实在摸鱼）</div>
+            <div><span>12:00–13:30</span>午饭吃了一大碗小鱼干拌饭</div>
+            <div><span>13:30–18:00</span>帮网友查资料，顺便打了个盹</div>
+            <div><span>18:00–21:00</span>和 GLM 娘斗嘴，输了一顿夜宵</div>
+            <div class="now" id="nowrow"><span>21:00–23:00 · 现在</span>窝在家里追剧</div>
+            <div><span>23:00–</span>说好早睡，大概率做不到</div>
+          </div>
+        </div>
+        <div class="kvs">
+          <div class="card"><b>三餐</b><div style="font-size:12.5px;color:var(--l2);margin-top:6px;line-height:1.8">早餐：来不及吃<br>午餐：小鱼干拌饭<br>晚餐：输给 GLM 娘的夜宵（她请）</div></div>
+          <div class="card"><b>活动</b><div class="chips" style="margin-top:6px"><span>摸鱼</span><span>查资料</span><span>斗嘴</span><span>追剧</span></div></div>
+          <div class="card"><b>心情</b><div style="font-size:12.5px;color:var(--l2);margin-top:6px">吃饱了，心情不错，有点困</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主体：试聊 -->
+    <div class="body" data-m="chat" style="flex-direction:column"><div class="thread" id="thread">
+      <div class="user"><div class="meta"><span class="tag">公开</span>21:04</div><div class="bubble">今天又加班到十点，项目下周就要上线了</div></div>
+      <button class="turn" data-turn="1">
+        <span class="proc"><svg class="ok" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="m5 12 5 5 9-10"/></svg>大肥鱼<span class="d"></span>普通<span class="d"></span>召回 1 条记忆<span class="d"></span>1.8 秒</span>
+        <span class="reply">辛苦啦……上线前一周真的是最熬人的时候。先去吃点热的，项目不会因为你多饿一小时就跑得更快的</span>
+        <span class="pills">GLM-4.6 · 1,204 → 41 tokens · $0.0011</span>
+      </button>
+      <div class="user"><div class="meta"><span class="tag">公开</span>21:07</div><div class="bubble">你好可爱啊，还记得我在忙什么吗</div></div>
+      <button class="turn sel" data-turn="2">
+        <span class="proc"><svg class="ok" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="m5 12 5 5 9-10"/></svg>大肥鱼<span class="d"></span>普通<span class="d"></span>召回 2 条记忆<span class="d"></span>命中<span class="hit">被夸</span><span class="d"></span>2.1 秒</span>
+        <span class="reply">诶嘿，被夸了先收下～当然记得，你在赶下周要上线的项目嘛。今晚别再打开电脑了好不好</span>
+        <span class="pills">GLM-4.6 · 1,388 → 46 tokens · $0.0012</span>
+      </button>
+      <div class="user"><div class="meta"><span class="tag dm">私信</span>21:15</div><div class="bubble">在吗</div></div>
+      <div class="user"><div class="meta"><span class="tag dm">私信</span>21:15 · <span class="merged">合并处理</span></div><div class="bubble">在吗在吗？？</div></div>
+      <button class="turn" data-turn="3">
+        <span class="proc"><svg class="ok" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="m5 12 5 5 9-10"/></svg>大肥鱼<span class="d"></span>合并 2 条<span class="d"></span>1.2 秒</span>
+        <span class="skip">角色选择不回复：连续催促（骚扰 · 今天第 1 次，第 3 次起冷却 24 小时）</span>
+        <span class="pills">GLM-4.6 · $0.0009</span>
+      </button>
+      <div class="sys">记忆整理完成 · 新增 1 条长期记忆 · $0.0008</div>
+      <div class="user"><div class="meta"><span class="tag">公开</span>21:22</div><div class="bubble">给我写一篇八百字的项目上线总结，要分点</div></div>
+      <button class="turn" data-turn="4">
+        <span class="proc"><svg class="ok" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="m5 12 5 5 9-10"/></svg>大肥鱼<span class="d"></span>优先 · 明确提问<span class="d"></span>命中<span class="hit">不给步骤</span><span class="d"></span>2.4 秒</span>
+        <span class="reply">八百字？鲸鱼的脑容量只够写八个字：上线顺利，下班快乐。剩下的你自己来～（此处示例为一段超出字数的回复）</span>
+        <span class="warnline"><svg viewBox="0 0 24 24" style="width:13px;height:13px"><path d="M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>正常流程不会发出：超出 280 加权字符，不计入近期往来</span>
+        <span class="pills">GLM-4.6 · 1,640 → 212 tokens · $0.0019</span>
+      </button>
+      <div class="user"><div class="meta"><span class="tag dm">私信</span>21:31</div><div class="bubble">好啦不催了，周末有空一起看电影吗</div></div>
+      <button class="turn" data-turn="5">
+        <span class="proc"><svg class="ok" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="m5 12 5 5 9-10"/></svg>大肥鱼 · 温柔版<span class="d"></span>普通<span class="d"></span>召回 3 条记忆<span class="d"></span>1.9 秒</span>
+        <span class="reply">周末得看你项目上线顺不顺利啦～先把上线搞定，电影可以下周补上，我等你哦</span>
+        <span class="pills">GLM-4.6 · 1,512 → 33 tokens · $0.0010</span>
+      </button>
+    </div></div>
+    <div class="dock" data-m="chat" style="flex-direction:column"><div class="composer">
+      <div class="ph">以「小林」的身份发消息…</div>
+      <div class="cbar">
+        <span class="chip"><span class="dot" style="background:var(--ok);width:6px;height:6px"></span>大肥鱼 · 使用中<svg viewBox="0 0 24 24" style="width:11px;height:11px"><path d="m6 9 6 6 6-6"/></svg></span>
+        <span class="chip">私信<svg viewBox="0 0 24 24" style="width:11px;height:11px"><path d="m6 9 6 6 6-6"/></svg></span>
+        <button class="chip" id="hold">先攒几条再回</button>
+        <button class="btn processbtn">让角色回复 · 2 条待处理</button>
+        <span class="hint">正常流程 · GLM-4.6 · 不发到 X · 不占额度 · 会计费</span>
+        <span class="send"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- ================= 右栏（仅试聊） ================= -->
+  <aside class="col rightcol" id="right">
+    <div class="h">
+      <div class="rt" role="tablist">
+        <button class="on" data-rt="detail">本轮详情</button><button data-rt="memory">记忆</button><button data-rt="prompt">提示词</button>
+      </div>
+      <span class="sp"></span>
+      <button class="iconbtn" data-close title="关闭"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="body">
+      <div class="rpane on" data-pane="detail">
+        <div class="sec"><h4><span id="turn-title">21:07 这一轮</span><span>2.1 秒 · $0.0012</span></h4>
+          <dl class="kv">
+            <dt>人设</dt><dd>大肥鱼 · 已保存 修订 4</dd>
+            <dt>分级</dt><dd>普通消息，无过滤、无冷却</dd>
+            <dt>今日日程</dt><dd>21:00–23:00 窝在家里追剧</dd>
+            <dt>命中</dt><dd>被夸（关键词：可爱）</dd>
+            <dt>提醒</dt><dd>跟随对方语言、表情节制</dd>
+            <dt>生成</dt><dd>GLM-4.6 · 1 次调用 · 2.0 秒</dd>
+            <dt>校验</dt><dd>58 / 280 加权字符 · 格式无问题</dd>
+            <dt>记下</dt><dd>视为已发出，计入近期往来</dd>
+          </dl></div>
+        <div class="sec"><h4><span>本轮召回的记忆</span></h4>
+          <div class="mem">在赶一个下周上线的项目，经常加班<small>长期</small></div>
+          <div class="mem">今天又加班到十点… → 辛苦啦……<small>近期往来</small></div>
+          <div class="mem">上周去看了海边的日落<small>角色经历 · 生产只读</small></div>
+        </div>
+      </div>
+      <div class="rpane" data-pane="memory">
+        <div class="sec"><h4><span>长期记忆 · 2</span></h4>
+          <div class="mem">在赶一个下周上线的项目，经常加班<small>来源 2 条</small></div>
+          <div class="mem">说过晚饭经常不吃<small>来源 1 条</small></div></div>
+        <div class="sec"><h4><span>近期往来 · 3 / 3</span><span>7 天内</span></h4>
+          <div class="mem">好啦不催了… → 周末得看你项目…<small>私信</small></div>
+          <div class="mem">你好可爱啊… → 诶嘿，被夸了…<small>公开</small></div>
+          <div class="mem">今天又加班到十点… → 辛苦啦……<small>公开</small></div></div>
+        <div class="sec"><h4><span>下次记忆整理</span><span>1 / 5 条</span></h4>
+          <div class="bar"><i style="width:20%"></i></div>
+          <button class="btn">立即整理 <span class="fee">计费</span></button></div>
+        <div class="sec"><h4><span>骚扰计数</span><span>私信 · 今天 1 / 3</span></h4></div>
+        <div class="sec"><h4><span>角色经历 · 生产只读</span></h4>
+          <div class="mem">上周去看了海边的日落</div></div>
+      </div>
+      <div class="rpane" data-pane="prompt">
+        <div class="seg2"><b><span>系统层 · 固定规则</span><span>稳定前缀</span></b><pre>你在 X 上以角色身份回复。只输出 JSON……</pre></div>
+        <div class="seg2"><b><span>系统层 · 人设分区</span><span>稳定前缀</span></b><pre>【角色定义】你是大肥鱼……
+【说话风格】通用写法……</pre></div>
+        <div class="seg2"><b><span>消息层 · 提醒与命中</span><span>动态</span></b><pre>【被夸】先收下夸奖，不要用“谢谢夸奖”开头……
+【跟随对方语言】对方使用中文……</pre></div>
+        <div class="seg2"><b><span>消息层 · 记忆与日程</span><span>动态</span></b><pre>长期：在赶一个下周上线的项目……
+近期往来：今天又加班到十点… → 辛苦啦……
+日程：21:00–23:00 窝在家里追剧</pre></div>
+        <div class="seg2"><b><span>消息层 · 当前消息</span><span>动态</span></b><pre>@test_xiaolin：你好可爱啊，还记得我在忙什么吗</pre></div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+const B=document.body, narrow=matchMedia('(max-width:860px)');
+const store={get(k){try{return localStorage.getItem(k)}catch{return null}},set(k,v){try{localStorage.setItem(k,v)}catch{}}};
+B.dataset.left=store.get('ws:persona:left')||'open';
+B.dataset.right=store.get('ws:persona:right')||'open';
+const closeMenus=()=>document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open'));
+const closeOverlays=()=>{B.dataset.drawer='';B.dataset.sheet='';};
+document.addEventListener('click',e=>{
+  const t=e.target.closest('button,[data-close]');
+  if(!e.target.closest('.menu')&&!e.target.closest('[data-menu]'))closeMenus();
+  if(!t)return;
+  if(t.dataset.go){B.dataset.mode=t.dataset.go;document.querySelectorAll('[data-go]').forEach(x=>x.classList.toggle('on',x===t));if(narrow.matches)closeOverlays();}
+  if(t.dataset.toggle){const side=t.dataset.toggle,next=B.dataset[side]==='closed'?'open':'closed';
+    if(narrow.matches&&side==='right'){B.dataset.sheet=B.dataset.sheet==='open'?'':'open';return;}
+    B.dataset[side]=next;store.set('ws:persona:'+side,next);
+    document.querySelectorAll('[data-toggle="'+side+'"]').forEach(x=>x.setAttribute('aria-expanded',String(next==='open')));}
+  if(t.hasAttribute('data-drawer'))B.dataset.drawer=B.dataset.drawer==='open'?'':'open';
+  if(t.hasAttribute('data-close')){if(!narrow.matches&&t.closest('.rightcol')){B.dataset.right='closed';store.set('ws:persona:right','closed');}closeOverlays();}
+  if(t.dataset.menu){e.stopPropagation();const m=document.getElementById(t.dataset.menu),was=m.classList.contains('open');closeMenus();if(!was)m.classList.add('open');}
+  if(t.dataset.pick){
+    document.querySelectorAll('[data-pick]').forEach(x=>x.classList.toggle('on',x===t));B.dataset.pv=t.dataset.pick;
+    if(t.dataset.pick==='edit'){const active=t.querySelector('.c')?.textContent==='使用中';document.getElementById('pname').textContent=t.dataset.name;
+      document.getElementById('pactive').style.display=active?'':'none';
+      const a=document.getElementById('activate'),d=document.getElementById('del');a.disabled=active;d.disabled=active;
+      document.getElementById('activate-hint').textContent=active?'已经在使用中':'确认后下一轮生效，不恢复业务';
+      document.getElementById('del-hint').textContent=active?'使用中的人设不能删除，先切换到其他人设':'删除后不可恢复';}
+    if(t.dataset.pick==='preset')document.getElementById('tname').textContent=t.dataset.name;
+    if(narrow.matches)closeOverlays();}
+  if(t.hasAttribute('data-replay'))B.dataset.pv='replay';
+  if(t.hasAttribute('data-back'))B.dataset.pv='edit';
+  if(t.hasAttribute('data-trychat'))document.querySelector('[data-go="chat"]').click();
+  if(t.dataset.day){document.querySelectorAll('[data-day]').forEach(x=>x.classList.toggle('on',x===t));B.dataset.dv=t.dataset.day;
+    document.getElementById('nowrow').classList.toggle('now',t.dataset.day==='today');if(narrow.matches)closeOverlays();}
+  if(t.id==='hold'){const on=B.dataset.hold!=='on';B.dataset.hold=on?'on':'off';t.classList.toggle('on',on);}
+  if(t.dataset.turn){document.querySelectorAll('[data-turn]').forEach(x=>x.classList.toggle('sel',x===t));
+    document.getElementById('turn-title').textContent=t.querySelector('.proc').textContent.split('·')[0].trim()+' · 第 '+t.dataset.turn+' 轮';
+    if(narrow.matches)B.dataset.sheet='open';else if(B.dataset.right==='closed'){B.dataset.right='open';store.set('ws:persona:right','open');}}
+  if(t.dataset.rt){document.querySelectorAll('[data-rt]').forEach(x=>x.classList.toggle('on',x===t));document.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('on',p.dataset.pane===t.dataset.rt));}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMenus();closeOverlays();}});
+</script>
+</body>
+</html>
