@@ -112,14 +112,23 @@ export async function runBatch(options={}){
 
    if(await modelFingerprint(base,headers,options)!==state.modelHash){state.stopReason='model-settings-changed';writeJSON(file,state);break batch;}
    const attempt={number:row.attempts.length+1,status:'inflight',startedAt:new Date().toISOString(),calls:[],fees:null};row.conversationId=question.conversationId;row.round=question.round;row.attempts.push(attempt);state.rows[key]=row;writeJSON(file,state);performed++;
+   let received;
    try{
     const response=await request(base,'/api/persona/preview',headers,{persona:presets.get(presetId).persona,channel:'public',messages:[{role:'user',text:question.text}],...(question.conversationId?{memory:{recent}}:{})},options.timeoutMs??120000),r=response.data;
+    received=r;
     attempt.responseReceived=true;attempt.httpStatus=response.status;attempt.calls=Array.isArray(r.calls)?r.calls.map(call=>({callId:call.callId,purpose:call.purpose,input:call.input,output:call.output,cache:call.cache,cost:call.cost??null,pricingStatus:call.pricingStatus})):[];attempt.fees=r.fees??null;
     if(response.status!==200){attempt.status=response.status<500?'failed':'uncertain';attempt.errorCode='http-'+response.status;}
     else if(!r.draft||r.error){attempt.status='failed';attempt.errorCode='preview-generation-failed';}
-    else{attempt.status='completed';attempt.resultFile='replies/'+presetId+'-'+questionId+'-attempt'+attempt.number+'.json';writeJSON(join(out,attempt.resultFile),{presetId,questionId,conversationId:question.conversationId,round:question.round,question:question.text,...(question.conversationId?{recent}:{}),draft:r.draft,hits:r.hits??[],calls:attempt.calls,fees:attempt.fees,latencyMs:r.latencyMs,interactionId:r.interactionId});}
+    else attempt.status='completed';
    }catch{attempt.status='uncertain';attempt.errorCode='request-outcome-unknown';}
-   attempt.finishedAt=new Date().toISOString();if((attempt.fees?.requests??attempt.calls.length)>1)state.stopReason='unexpected-extra-model-calls';writeJSON(file,state);summaryFiles(out,state,data);options.onProgress?.({performed,presetId,questionId,status:attempt.status});if(state.stopReason)break batch;
+   // 已收到的失败响应也需私有留证；语义统计仍只读取 completed，不能把校验失败当成功。
+   if(attempt.responseReceived){
+    const r=received&&typeof received==='object'?received:{};
+    if(attempt.status!=='completed')attempt.errorMessage=typeof r.error==='string'?r.error.slice(0,300):attempt.errorCode;
+    attempt.resultFile='replies/'+presetId+'-'+questionId+'-attempt'+attempt.number+'.json';
+    writeJSON(join(out,attempt.resultFile),{presetId,questionId,conversationId:question.conversationId,round:question.round,question:question.text,...(question.conversationId?{recent}:{}),status:attempt.status,httpStatus:attempt.httpStatus,draft:r.draft??null,error:typeof r.error==='string'?r.error:null,errorCode:attempt.errorCode??null,hits:r.hits??[],meta:r.meta??null,calls:attempt.calls,fees:attempt.fees,latencyMs:r.latencyMs,interactionId:r.interactionId});
+   }
+   attempt.finishedAt=new Date().toISOString();if((attempt.fees?.requests??attempt.calls.length)>1)state.stopReason='unexpected-extra-model-calls';writeJSON(file,state);summaryFiles(out,state,data);await options.onProgress?.({performed,presetId,questionId,status:attempt.status});if(state.stopReason)break batch;
    if(await modelFingerprint(base,headers,options)!==state.modelHash){state.stopReason='model-settings-changed';writeJSON(file,state);break batch;}
   }
   return {executed:true,performed,summary:summaryFiles(out,state,data)};

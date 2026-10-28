@@ -2,7 +2,7 @@
 // 必须 --network none；全部资料与凭据为临时合成，不能挂载生产目录。
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,statSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {observer} from '/opt/role-camoufox/launch.mjs';
 import {startApp} from '../dist/app.js';
@@ -14,7 +14,7 @@ const OUT=process.env.ARTIFACT_DIR||'/artifacts';mkdirSync(OUT,{recursive:true})
 const root=mkdtempSync(tmpdir()+'/persona-presets-'),actor='preset_worker',ingress='preset-ingress-fixture-only',browserKey='preset-browser-fixture-only',modelKey='preset-model-fixture-only';
 const envKeys=['DATA_DIR','CONFIG_PATH','SECRETS_DIR','PORT','BROWSER_ENDPOINT','MAINTENANCE_DIR'],prior=Object.fromEntries(envKeys.map(key=>[key,process.env[key]])),signals=new Set(process.listeners('SIGTERM'));
 const report={evidence:'服务器隔离真实前端→HTTP startApp→PersonaService→Pi→localhost SSE→ModelService→SQLite；无真实模型/X/生产资料',checks:[],errors:[],screenshots:[],modelRequests:0,browserRequests:[],externalRequests:[],realModelUsed:false,platformUsed:false};
-const questions=loadQuestions(),invocations=[],uiBodies=[];let appRun,browser,context,page,base,queuedEvent,failQuestion=null;
+const questions=loadQuestions(),invocations=[],uiBodies=[];let appRun,browser,context,page,base,queuedEvent,failQuestion=null,lastPreviewResponse=null;
 function persist(){writeFileSync(OUT+'/persona-presets-e2e.json',JSON.stringify({...report,passed:report.checks.length,failed:report.errors.length},null,2));}
 async function check(name,fn){console.log('[开始] '+name);const start=Date.now();try{const detail=await fn();report.checks.push({name,durationMs:Date.now()-start,...(detail?{detail}:{})});console.log('[通过] '+name);}catch(error){report.errors.push({name,error:error.stack||String(error)});console.log('[失败] '+name+'：'+String(error));}finally{persist();}}
 function section(user,title){const marker='【'+title+'】\n',start=user.indexOf(marker);if(start<0)return null;const from=start+marker.length,to=user.indexOf('\n\n【',from);try{return JSON.parse(user.slice(from,to<0?undefined:to));}catch{return null;}}
@@ -68,7 +68,7 @@ try{
  writeFileSync(root+'/config.json',JSON.stringify(config));Object.assign(process.env,{DATA_DIR:root+'/data',CONFIG_PATH:root+'/config.json',SECRETS_DIR:root+'/secrets',PORT:'0',BROWSER_ENDPOINT:browserStub.url,MAINTENANCE_DIR:root+'/no-host-bridge'});
  appRun=await startApp();appRun.workflow.stop();base='http://127.0.0.1:'+appRun.app.server.address().port;await api('/api/status');
  // 只给隔离工具注入只读fixture标记；所有业务响应均来自未修改的真实app。
- evalProxy=await serve(async(req,res,body)=>{const response=await fetch(base+req.url,{method:req.method,headers:{'x-ingress-key':String(req.headers['x-ingress-key']??''),'x-workflow-control':String(req.headers['x-workflow-control']??''),origin:'https://'+new URL(base).host,'content-type':'application/json'},body:['GET','HEAD'].includes(req.method)?undefined:JSON.stringify(body)});res.writeHead(response.status,{'content-type':'application/json',...(req.url==='/api/model'?{'x-persona-eval-fixture':'persona-presets-local-sse-v1'}:{})});res.end(await response.text());});
+ evalProxy=await serve(async(req,res,body)=>{const response=await fetch(base+req.url,{method:req.method,headers:{'x-ingress-key':String(req.headers['x-ingress-key']??''),'x-workflow-control':String(req.headers['x-workflow-control']??''),origin:'https://'+new URL(base).host,'content-type':'application/json'},body:['GET','HEAD'].includes(req.method)?undefined:JSON.stringify(body)}),text=await response.text();if(req.url==='/api/persona/preview')lastPreviewResponse=JSON.parse(text);res.writeHead(response.status,{'content-type':'application/json',...(req.url==='/api/model'?{'x-persona-eval-fixture':'persona-presets-local-sse-v1'}:{})});res.end(text);});
  const requestOptions={execute:true,mode:'mock',baseUrl:evalProxy.url,headers:{'x-ingress-key':ingress},out:OUT+'/batch'};
 
  await check('默认240计划不访问接口、不读凭据，启发式明确不等于语义审定',async()=>{
@@ -95,10 +95,40 @@ try{
 
  await check('30独立题＋2组五轮×6正式预设240预览，断点只继续待执行并保留明确失败调用费用',async()=>{
   failQuestion='q02';const before=report.modelRequests,first=await runBatch({...requestOptions,maxRequests:2});assert.equal(first.performed,2);assert.equal(first.summary.completed,1);assert.equal(first.summary.failed,1);assert.equal(first.summary.fees.requests,2);
+  const initialState=JSON.parse(readFileSync(OUT+'/batch/state.json','utf8')),failedAttempt=initialState.rows['default:q02'].attempts[0],failedPath=OUT+'/batch/'+failedAttempt.resultFile,failedResult=JSON.parse(readFileSync(failedPath,'utf8'));
+  assert.equal(failedAttempt.status,'failed');assert.equal(failedAttempt.errorMessage,lastPreviewResponse.error.slice(0,300));assert.equal(statSync(failedPath).mode&0o777,0o600);assert.equal(failedResult.status,'failed');assert.equal(failedResult.httpStatus,200);assert.equal(failedResult.draft,null);assert.equal(failedResult.error,lastPreviewResponse.error);assert.equal(failedResult.interactionId,lastPreviewResponse.interactionId);assert.deepEqual(failedResult.hits,lastPreviewResponse.hits);assert.deepEqual(failedResult.meta,lastPreviewResponse.meta);assert.deepEqual(failedResult.calls,failedAttempt.calls);assert.deepEqual(failedResult.fees,lastPreviewResponse.fees);assert.equal(first.summary.metrics.byPreset.find(preset=>preset.presetId==='default').completed,1);
   const continued=await runBatch({...requestOptions,resume:true,onProgress:progress=>{if(progress.performed%30===0)console.log('[批量进度] 新执行 '+progress.performed+' 条');}});assert.equal(continued.performed,238);assert.equal(continued.summary.completed,239);assert.equal(continued.summary.failed,1);assert.equal(continued.summary.fees.requests,240);assert.equal(report.modelRequests,before+240);
+  const continuedFailure=JSON.parse(readFileSync(OUT+'/batch/state.json','utf8')).rows['default:q02'].attempts;assert.equal(continuedFailure.length,1);assert.equal(continuedFailure[0].resultFile,failedAttempt.resultFile);assert.deepEqual(JSON.parse(readFileSync(failedPath,'utf8')),failedResult);
   const retried=await runBatch({...requestOptions,resume:true,retryFailed:true});assert.equal(retried.performed,1);assert.equal(retried.summary.completed,240);assert.equal(retried.summary.attempts,241);assert.equal(retried.summary.fees.requests,241);assert.equal(retried.summary.fees.unpriced,241);assert.equal(retried.summary.fees.estimatedUsd,null);const again=await runBatch({...requestOptions,resume:true,retryFailed:true});assert.equal(again.performed,0);assert.equal(report.modelRequests,before+241);const state=JSON.parse(readFileSync(OUT+'/batch/state.json','utf8'));assert.equal(state.rows['default:q02'].attempts.length,2);assert.ok(state.rows['default:q02'].attempts.every(attempt=>attempt.calls[0].callId));assert.notEqual(state.rows['default:q02'].attempts[0].calls[0].callId,state.rows['default:q02'].attempts[1].calls[0].callId);
   for(const presetId of questions.presets)for(const conversation of questions.conversations)for(let index=0;index<5;index++){const turn=conversation.turns[index],row=state.rows[presetId+':'+turn.id],result=JSON.parse(readFileSync(OUT+'/batch/'+row.attempts.at(-1).resultFile,'utf8')),expected=conversation.turns.slice(0,index).map(prior=>{const earlier=JSON.parse(readFileSync(OUT+'/batch/'+state.rows[presetId+':'+prior.id].attempts.at(-1).resultFile,'utf8'));return {message:prior.text,reply:earlier.draft.text,channel:'public'};});assert.deepEqual(result.recent,expected);const matched=invocations.filter(call=>call.questionId===turn.id);assert.equal(matched.length,6);assert.deepEqual(matched[questions.presets.indexOf(presetId)].recent,expected.length?expected:'暂无');}
   assert.ok(retried.summary.metrics.byPreset.every(preset=>preset.continuous.every(c=>c.completed===5)));return {cells:240,attempts:241,explicitFailureRetried:1,unpricedCalls:241,estimatedUsd:null,summary:OUT+'/batch/summary.md'};
+ });
+
+ await check('HTTP明确失败与服务端不确定响应均保留私有诊断，且不误计成功或自动重试',async()=>{
+  let responseStatus=400;const payload={draft:null,error:'隔离HTTP失败：保留已脱敏的接口诊断',interactionId:'failed-response-fixture',hits:[{id:'fixture-hit',title:'合成触发',reason:'只验证留证'}],meta:{promptVersion:'fixture-error-v1'},calls:[],fees:{requests:0,estimatedUsd:null,unpriced:0,unknown:1},latencyMs:1},fixture=await serve(async(req,res,body)=>{
+   if(req.url==='/api/persona/preview')return respond(res,responseStatus,payload);
+   const response=await fetch(evalProxy.url+req.url,{method:req.method,headers:{'x-ingress-key':ingress,'x-workflow-control':'1','content-type':'application/json'},body:['GET','HEAD'].includes(req.method)?undefined:JSON.stringify(body)});res.writeHead(response.status,{'content-type':'application/json',...(req.url==='/api/model'?{'x-persona-eval-fixture':'persona-presets-local-sse-v1'}:{})});res.end(await response.text());
+  });
+  const before=report.modelRequests;
+  try{for(const status of [400,503]){
+   responseStatus=status;const out=OUT+'/http-error-'+status,options={...requestOptions,baseUrl:fixture.url,out,preset:'default',question:'q01'},result=await runBatch({...options,maxRequests:1}),state=JSON.parse(readFileSync(out+'/state.json','utf8')),attempt=state.rows['default:q01'].attempts[0],path=out+'/'+attempt.resultFile,saved=JSON.parse(readFileSync(path,'utf8'));
+   assert.equal(attempt.status,status<500?'failed':'uncertain');assert.equal(attempt.errorCode,'http-'+status);assert.equal(attempt.errorMessage,payload.error);assert.equal(statSync(path).mode&0o777,0o600);assert.equal(saved.httpStatus,status);assert.equal(saved.status,attempt.status);assert.equal(saved.error,payload.error);assert.equal(saved.interactionId,payload.interactionId);assert.deepEqual(saved.hits,payload.hits);assert.deepEqual(saved.meta,payload.meta);assert.deepEqual(saved.calls,payload.calls);assert.deepEqual(saved.fees,payload.fees);assert.equal(result.summary.completed,0);assert.equal(result.summary.metrics.byPreset.find(preset=>preset.presetId==='default').completed,0);
+   const resumed=await runBatch({...options,resume:true});assert.equal(resumed.performed,0);assert.equal(resumed.summary.completed,0);assert.equal(JSON.parse(readFileSync(out+'/state.json','utf8')).rows['default:q01'].attempts.length,1);
+  }}finally{await new Promise(resolve=>fixture.server.close(resolve));}
+  assert.equal(report.modelRequests,before);return {httpStatuses:[400,503],realModelRequests:0,outputMode:'0600',automaticRetries:0,failedResponsesExcludedFromMetrics:true};
+ });
+
+ await check('异步进度核对未放行时不发下一题，放行后才继续且兼容原同步回调',async()=>{
+  const before=report.modelRequests;let release,entered,finished=false;
+  const held=new Promise(resolve=>{release=resolve;}),reached=new Promise(resolve=>{entered=resolve;});
+  const running=runBatch({...requestOptions,out:OUT+'/async-progress',preset:'default',maxRequests:2,onProgress:async progress=>{if(progress.performed===1){entered();await held;}}});
+  running.then(()=>{finished=true;},()=>{finished=true;});
+  try{
+   await Promise.race([reached,running.then(()=>{throw Error('批次未经过第一题异步核对');})]);
+   await new Promise(resolve=>setTimeout(resolve,150));assert.equal(finished,false);assert.equal(report.modelRequests,before+1);
+   release();const result=await running;assert.equal(result.performed,2);assert.equal(result.summary.completed,2);assert.equal(report.modelRequests,before+2);
+  }finally{release();await running.catch(()=>{});}
+  return {heldRequests:1,completedAfterRelease:2,realModelUsed:false};
  });
 
  await check('进程在途记录转uncertain，resume及仅失败重跑都不自动重复',async()=>{
