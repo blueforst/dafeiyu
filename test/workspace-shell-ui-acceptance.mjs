@@ -42,6 +42,13 @@ await check('收起存储与重新加载恢复，控制关系可访问',async()=
  assert.equal(await page.locator('.ws-right').isVisible(),false);await page.getByRole('button',{name:'展开右栏',exact:true}).click();
  assert.equal(await page.locator('.ws-right').isVisible(),true);
 });
+await check('侧栏图标按状态变化且键盘切换保留可见焦点',async()=>{
+ await page.setViewportSize({width:1440,height:900});await open();if(await page.getByRole('button',{name:'展开左栏',exact:true}).isVisible())await page.getByRole('button',{name:'展开左栏',exact:true}).click();if(await page.getByRole('button',{name:'展开右栏',exact:true}).isVisible())await page.getByRole('button',{name:'展开右栏',exact:true}).click();
+ const close=page.getByRole('button',{name:'收起左栏',exact:true});await close.focus();const before=await close.locator('svg g path').last().getAttribute('d');await close.press('Enter');const launch=page.getByRole('button',{name:'展开左栏',exact:true});assert.equal(await launch.evaluate(node=>document.activeElement===node),true);assert.notEqual(await launch.locator('svg g path').last().getAttribute('d'),before);await launch.press('Space');assert.equal(await close.isVisible(),true);assert.equal(await close.evaluate(node=>document.activeElement===node),true);
+ const rightClose=page.locator('.ws-right').getByRole('button',{name:'收起右栏',exact:true});await rightClose.focus();await rightClose.press('Enter');assert.equal(await page.getByRole('button',{name:'展开右栏',exact:true}).evaluate(node=>document.activeElement===node),true);
+ await page.setViewportSize({width:375,height:900});await page.getByRole('button',{name:'展开左栏',exact:true}).click();assert.equal(await close.locator('svg rect').isVisible(),false);assert.equal(await close.locator('svg>path').isVisible(),true);await page.keyboard.press('Escape');assert.equal(await page.getByRole('button',{name:'展开左栏',exact:true}).evaluate(node=>document.activeElement===node),true);
+ await page.setViewportSize({width:1440,height:900});if(await page.getByRole('button',{name:'展开左栏',exact:true}).isVisible())await page.getByRole('button',{name:'展开左栏',exact:true}).click();if(await page.getByRole('button',{name:'展开右栏',exact:true}).isVisible())await page.getByRole('button',{name:'展开右栏',exact:true}).click();
+});
 await check('禁用存储时默认展开且交互不异常',async()=>{
  await open('?blocked=1');assert.equal(await page.locator('.ws-left').isVisible(),true);assert.equal(await page.locator('.ws-right').isVisible(),true);
  await page.getByRole('button',{name:'收起左栏',exact:true}).first().click();assert.equal(await page.locator('.ws-left').isVisible(),false);
@@ -52,7 +59,7 @@ await check('左栏展开入口靠左，右栏入口靠右，宽窄屏浅深色�
   await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:900});await open('?right='+right);
   const close=page.getByRole('button',{name:'收起左栏',exact:true});if(await close.isVisible())await close.click();
   const launcher=page.getByRole('button',{name:'展开左栏',exact:true}),header=await page.locator('.ws-main>.ws-header').boundingBox(),left=await launcher.boundingBox(),title=await page.locator('.ws-main .ws-header-content').boundingBox();
-  assert.ok(left&&header&&title,'主区及左栏入口可见');
+  assert.ok(left&&header&&title,'主区及左栏入口可见');const icon=await launcher.locator('svg').evaluate(node=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};});assert.ok(icon&&icon.width===16&&icon.height===16,JSON.stringify({scheme,width,right,icon}));assert.ok(Math.abs(icon.x+icon.width/2-left.x-left.width/2)<1&&Math.abs(icon.y+icon.height/2-left.y-left.height/2)<1,'图标须在点击区域中居中');
   await page.screenshot({path:OUT+`/shell-collapsed-${scheme}-${width}-right-${right}.png`});
   assert.ok(left.x>=header.x&&left.x<=header.x+16,`${scheme}/${width}/${right} 左栏入口应贴近主区左缘，实际 x=${left.x}`);
   assert.ok(left.x+left.width<=title.x+1,'左栏入口在标题之前');

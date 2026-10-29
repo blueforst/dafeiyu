@@ -74,3 +74,9 @@
 
 - 本提案修改的 `activity-feed` 需求来自未归档的 `simplify-panel-activity-feed` 和 `separate-run-control-from-takeover`，需要排在它们以及 `add-persona-workspace`、`redesign-settings-workspace` 之后归档。
 - OpenSpec 严格校验通过只代表规划结构可用，不勾选任何业务任务。
+
+## 4. 2026-10-30 侧栏与首帧返修
+
+- [ ] 4.1 修正侧栏图标、展开状态和隐藏控件后的可见焦点，通过服务器宽窄屏与键盘验收。
+- [ ] 4.2 动态样式提前加载并跨页保留，延迟样式冷启动和往返切页均没有无样式首帧。
+- [ ] 4.3 通过三工作区适用回归并发布前端层，核对后端、业务数据和最新控制状态，归档证据及回退。

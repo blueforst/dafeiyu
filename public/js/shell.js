@@ -4,6 +4,15 @@ export { fmtUsd, fmtUsdText, advanced, advancedDialog, rowActions, emptyLine, ta
 let serial = 0;
 const stored = (key, value) => { try { if (value === undefined) return localStorage.getItem(key) === '1'; localStorage.setItem(key, value ? '1' : '0'); } catch { return false; } };
 
+// 固定 SVG 画布避免字体替换造成菜单字符错位；箭头表示当前可执行的展开／收起。
+function paneToggleIcon(side) {
+  const node=(tag,attrs)=>{const el=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [key,value] of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
+  const svg=node('svg',{width:16,height:16,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':1.7,'stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false'});
+  const panel=node('g',{}),arrow=node('path',{}),cross=node('path',{d:'M6 6l12 12M18 6 6 18'});
+  panel.append(node('rect',{x:3,y:4,width:18,height:16,rx:2}),node('path',{d:side==='left'?'M8 4v16':'M16 4v16'}),arrow);svg.append(panel,cross);
+  return {svg,panel,arrow,cross};
+}
+
 /** 工作区内容容器不包含页头；dispose 负责还原全局布局并移除监听。 */
 export function mountWorkspace(root, { page, left, main, right } = {}) {
   const uid = 'ws-' + (++serial), narrow = matchMedia('(max-width: 860px)');
@@ -21,7 +30,8 @@ export function mountWorkspace(root, { page, left, main, right } = {}) {
   };
   const l = pane('left', left), m = pane('main', main), r = pane('right', right);
   const el = h('div', { class: 'ws-shell', dataset: { page } }, mask, l.el, m.el, r.el);
-  const toggle = (side, holder) => { const b = h('button', { class:'ws-icon-button',type:'button','aria-controls':`${uid}-${side}`,onclick:()=>collapse(side,!isCollapsed(side)) }, side==='left'?'☰':'▥');holder.append(b);return b; };
+  const icons=new Map();
+  const toggle = (side, holder) => { const icon=paneToggleIcon(side),b=h('button', { class:'ws-icon-button ws-pane-toggle',type:'button','aria-controls':`${uid}-${side}`,onclick:()=>collapse(side,!isCollapsed(side)) },icon.svg);icons.set(b,icon);holder.append(b);return b; };
   const leftClose = toggle('left',l.tools), leftOpen = toggle('left',m.tools), rightToggle = toggle('right',m.tools), rightClose = toggle('right',r.tools);
   // 左栏展开入口放在标题前，独立于各页面会重绘的标题内容。
   m.header.before(leftOpen);
@@ -37,20 +47,24 @@ export function mountWorkspace(root, { page, left, main, right } = {}) {
         b.setAttribute('aria-expanded',String(!hidden));
         b.setAttribute('aria-label',(hidden?'展开':'收起')+(side==='left'?'左栏':'右栏'));
         b.title=b.getAttribute('aria-label');
+        const icon=icons.get(b),drawerClose=narrow.matches&&(b===leftClose||b===rightClose),pointsRight=(side==='left')===hidden;
+        icon.panel.toggleAttribute('hidden',drawerClose);icon.cross.toggleAttribute('hidden',!drawerClose);
+        icon.arrow.setAttribute('d',side==='left'?(pointsRight?'m13 9 3 3-3 3':'m16 9-3 3 3 3'):(pointsRight?'m8 9 3 3-3 3':'m11 9-3 3 3 3'));
       }
     }
     leftOpen.hidden=!isCollapsed('left');
     rightToggle.hidden=!hasRight;
-    rightClose.textContent=narrow.matches?'×':'▥';
     mask.hidden=!(narrow.matches&&(mobile.left||hasRight&&mobile.right));
     r.el.setAttribute('role',narrow.matches&&mobile.right?'dialog':'region');
     if(narrow.matches&&mobile.right) r.el.setAttribute('aria-modal','true');else r.el.removeAttribute('aria-modal');
   }
   function collapse(side, value) {
     if (!['left','right'].includes(side)) return;
+    const active=document.activeElement,pane=side==='left'?l:r;
     if (narrow.matches) { mobile[side]=!value; if(!value){mobile[side==='left'?'right':'left']=false;focusBack=document.activeElement;} }
     else { closed[side]=!!value;stored(`ws:${page}:${side}`,!!value); }
     render();
+    if(!narrow.matches){if(value&&pane.el.contains(active))(side==='left'?leftOpen:rightToggle).focus();else if(!value&&side==='left'&&active===leftOpen)leftClose.focus();}
     if(narrow.matches){if(!value){const p=side==='left'?l:r;queueMicrotask(()=>p.el.querySelector('button,a,input,select,textarea,[tabindex]')?.focus());}else if(focusBack?.isConnected)focusBack.focus();}
   }
   function open(side,trigger) { if(trigger)focusBack=trigger;collapse(side,false);if(trigger)focusBack=trigger; }

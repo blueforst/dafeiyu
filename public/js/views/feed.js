@@ -20,7 +20,6 @@ export function mount(root,ctx){
  let listBusy=false,listAgain=false,itemBusy=false,itemAgain=false,listWatermark=0,itemWatermark=0,lastLatest=null,nextBefore=null,total=0,firstAt=0,selectedId=null,guard=()=>true;
  let posting=null,program=null,health=null,pending=0,importsPending=0,privateRequests=null,requestSignature='',warnings=[],currentConversation=null;
  const conversations=new Map(),entries=new Map(),buttons=new Map(),ws=mountWorkspace(root,{page:'feed',right:true});ws.el.classList.add('feed-workspace');
- const css=h('link',{rel:'stylesheet',href:'/js/views/feed-workspace.css'});document.head.append(css);
  const filters=h('div',{class:'feed-filters',role:'group','aria-label':'动态筛选'}),attention=h('button',{class:'feed-attention',hidden:true,onclick:()=>navigate('#/feed/attention')}),pendingImports=h('button',{class:'feed-pending-imports',hidden:true,onclick:()=>navigate('#/feed/import')});
  const requestNotice=h('button',{class:'feed-request-status',hidden:true,type:'button','aria-label':'私信请求处理状态',onclick:()=>navigate('#/settings/logs')});
  const list=h('nav',{class:'feed-conversations','aria-label':'会话列表'}),listError=h('div',{role:'alert'}),more=h('button',{class:'btn small',hidden:true,onclick:()=>loadList('more')},'加载更多会话'),overview=h('div',{class:'feed-statusbox'});
@@ -144,7 +143,7 @@ export function mount(root,ctx){
  const offStatus=onStatus(s=>{if(s&&accountId&&s.accountId&&s.accountId!==accountId){accountId=s.accountId;privateRequests=null;requestSignature='';renderRequests();conversations.clear();entries.clear();activeKey=null;listWatermark=0;itemWatermark=0;epoch++;detailEpoch++;set(thread,empty('工作账号已变化，正在重新读取…'));set(detail);set(memory);void loadList('reset');}else if(s?.accountId)accountId=s.accountId;renderOverview(s);});
  const offFeed=onEvent('feed',p=>{const pendingChanged=Number(p.pending||0)!==pending;updatePending(p.pending);if(p.latest!==lastLatest||pendingChanged){lastLatest=p.latest;void loadList('changes');void loadItems('changes');imports.refresh();void refreshProgram();}}),offHealth=onEvent('health',d=>{health=d;renderOverview(getStatus());}),offProgram=onEvent('program',()=>void refreshProgram());
  api('/api/health').then(d=>{if(alive){health=d;renderOverview(getStatus());}}).catch(()=>{});api('/api/account/posting-limits').then(d=>{if(alive){posting=d;renderOverview(getStatus());}}).catch(()=>{});void refreshProgram();void route(ctx.route);void loadList('reset');
- return()=>{alive=false;epoch++;detailEpoch++;cleanupGuard();imports.dispose();offStatus();offFeed();offHealth();offProgram();window.removeEventListener('panel-route',routeEvent);ws.dispose();css.remove();};
+ return()=>{alive=false;epoch++;detailEpoch++;cleanupGuard();imports.dispose();offStatus();offFeed();offHealth();offProgram();window.removeEventListener('panel-route',routeEvent);ws.dispose();};
 }
 
 function readableDetails(data){
