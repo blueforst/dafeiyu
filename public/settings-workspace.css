@@ -377,3 +377,7 @@ tr.selected td,.ws-row-hover.selected{background:var(--ws-hover)}
 @media(max-width:860px){
  .settings-item-content .memory-inline-search{width:100%;min-width:0;flex-basis:100%;order:1}
 }
+/* 历史筛选在真实任务种类较多时也留在主区内。 */
+.history-toolbar{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;min-width:0}
+.history-toolbar>.sp{flex:1}
+.history-toolbar .history-seg{flex-wrap:wrap;min-width:0;max-width:100%}
