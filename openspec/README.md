@@ -133,8 +133,24 @@
 
 当前 **8/8**。删除模型参数中的“回复长度上限”和“超时”：输出上限取模型自身最大值，回复长度只受 X 账号发帖限制约束；每次请求固定 180 秒保护时限。实施时同步修改 `config.yaml` 中“默认 4096 token”的约定。
 
+## 试聊与动态对话排版改版：待实施
+
+[提案](changes/redesign-conversation-layout/proposal.md) · [设计](changes/redesign-conversation-layout/design.md) · [任务](changes/redesign-conversation-layout/tasks.md) · [增量规格](changes/redesign-conversation-layout/specs/) · [草图](changes/redesign-conversation-layout/design-mockup.html)
+
+2026-10-29 根据管理员“试聊界面太丑、主要是排版”和“动态页也优化一下”的反馈整理。管理员从两种试聊草图中选定“对话优先”，并确认了按同一思路改的动态页草图。当前 **0/17**，只改前端：
+
+- **两页共用：**
+  - 对方消息只留气泡；时间改为五分钟或跨日分隔。
+  - 角色一侧带人设首字头像和人设名。
+  - 时间、分级、费用、回执等摘要只在悬停或选中时显示；需要关注的结果始终可见；选中只加浅灰底。
+  - 头像改为可读配色；右栏名称与数值对齐。
+- **试聊：** 渠道切换分隔线；卡片标签、复制、失败重试；模型和 token 只在右栏；输入区改为灰色大圆角框，控件在框内，处理中发送变停止。
+- **动态：** 状态放在人设名旁，“已发送”最安静，其余上色并写原因；草稿改为圆角编辑框，按钮在框内；其他操作进入下方操作行；左栏状态改为彩色文字。
+- **不改：** 处理流程、接口、数据、计费、草稿规则和状态名称。
+
 ## 依赖与维护规则
 
+- `redesign-conversation-layout` 修改的 `chat-test`“本轮诊断”以 `convert-trigger-cards-to-skills` 修改后的文字为基础，`activity-feed` 两项修改以 `redesign-feed-workspace` 为基础，`panel-design-system` 新增在 `add-persona-workspace` 之上；应在这三份之后归档。实施时不得回退触发卡提案对读取卡片和工具调用的展示。
 - `convert-trigger-cards-to-skills` 修改七页基线、参考补齐、人设预设、人设工作区、回复提示词、文风、设置细节、回放、人设文件和五页面板中的能力，归档应在这些来源提案之后；`simplify-model-params` 应在五页面板之后归档。两者都修改 `model-configuration`，但改的是不同需求。
 
 - 七页基线提案和原计划保留为来源；后续修改以相应 change 的提案、完整增量规格、设计和任务为准，避免设计分叉。

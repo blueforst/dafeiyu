@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>对话排版草图</title>
+<style>
+:root{--bg:#fff;--page:#f5f5f7;--side:#f9fafb;--hover:rgba(38,49,72,.05);--active:#ebeef2;--card:#f5f7fa;--t1:#0f1115;--t2:#61666b;--t3:#81858c;--cap:#adb2b8;--b1:rgba(0,0,0,.08);--b2:rgba(0,0,0,.12);--bubble:#edf3fe;--brand:#4176e6;--brand-soft:#e4edfd;--ok:#15803d;--warn:#aa6416;--warn-soft:#fef5e7;--fill:#f3f4f6;--av-bg:#ffe3c7;--av-fg:#7a3e10}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151517;--page:#0c0c0d;--side:#1b1b1c;--hover:rgba(255,255,255,.05);--active:#2c2c2e;--card:#1f1f21;--t1:#f9fafb;--t2:#adb2b8;--t3:#81858c;--cap:#61666b;--b1:rgba(255,255,255,.08);--b2:rgba(255,255,255,.16);--bubble:#283142;--brand:#7aaaff;--brand-soft:#28314a;--ok:#4ade80;--warn:#fbbf24;--warn-soft:#27241f;--fill:#232326;--av-bg:#4a3322;--av-fg:#ffd2a8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--t1);font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.intro{max-width:1180px;margin:0 auto;padding:20px 16px 12px}
+.intro h1{font-size:18px;margin:0 0 4px}.intro p{margin:0;color:var(--t2);font-size:13px}
+.frame{max-width:1180px;margin:0 auto 32px;display:grid;grid-template-columns:minmax(0,1fr) 300px;height:720px;background:var(--bg);border:1px solid var(--b1);border-radius:14px;overflow:hidden}
+@media(max-width:860px){.frame{grid-template-columns:minmax(0,1fr);height:auto;margin:0 16px 32px}.right{border-left:0;border-top:1px solid var(--b1)}}
+svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.wh{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--b1);font-size:13px}
+.wh b{font-weight:600}.wh small{color:var(--t3);font-size:12px}.wh .sp{flex:1}.wh .st{color:var(--t3);font-size:12px}
+.more{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;color:var(--t2)}
+.scroll{flex:1;overflow:auto;min-height:0}
+.thread{max-width:680px;margin:0 auto;padding:16px 20px 8px;display:flex;flex-direction:column}
+.day{align-self:center;font-size:11.5px;color:var(--cap);margin:6px 0 14px}
+.chan{display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--t3);margin:10px 0 16px}
+.chan:before,.chan:after{content:"";flex:1;height:1px;background:var(--b1)}
+.chan b{font-weight:500;color:var(--brand)}
+.u{align-self:flex-end;max-width:78%;margin-bottom:6px;display:flex;flex-direction:column;align-items:flex-end}
+.bub{background:var(--bubble);border-radius:16px;padding:8px 14px;line-height:22px;white-space:pre-wrap}
+.mark{font-size:11px;color:var(--cap);margin-top:3px}
+.u + .r{margin-top:12px}
+.r{display:grid;grid-template-columns:30px minmax(0,1fr);gap:0 12px;padding:6px 10px;margin:0 -10px 18px;border-radius:12px;cursor:pointer}
+.r.sel{background:var(--hover)}
+.av{width:30px;height:30px;border-radius:50%;background:var(--av-bg);color:var(--av-fg);font-size:13px;font-weight:600;display:grid;place-items:center;margin-top:1px}
+.who{font-size:12px;color:var(--t3);display:flex;gap:6px;align-items:center;min-height:20px;flex-wrap:wrap}
+.who b{color:var(--t2);font-weight:500}
+.hit{font-size:11px;line-height:17px;padding:0 5px;border-radius:4px;background:var(--brand-soft);color:var(--brand)}
+.txt{line-height:1.8;margin-top:2px}
+.act{display:flex;align-items:center;gap:2px;margin-top:6px;color:var(--t3);font-size:11.5px;flex-wrap:wrap}
+.ib{width:26px;height:24px;border-radius:6px;display:grid;place-items:center}
+.ib:hover{background:var(--hover)}
+.det{display:inline-flex;align-items:center;padding:0 8px;height:22px;border-radius:99px;border:1px solid var(--b1);color:var(--t2)}
+.r.sel .det{background:var(--brand-soft);border-color:transparent;color:var(--brand)}
+.stat{margin-left:6px;color:var(--cap);font-variant-numeric:tabular-nums;opacity:0;transition:opacity .12s}
+.r:hover .stat,.r:focus-within .stat,.r.sel .stat{opacity:1}
+@media(hover:none){.r:hover .stat{opacity:0}.r.sel .stat{opacity:1}}
+.skip{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--t3);padding:4px 10px;border:1px dashed var(--b2);border-radius:10px;width:fit-content;margin-top:4px}
+.warnline{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--warn);background:var(--warn-soft);padding:2px 8px;border-radius:7px;width:fit-content;margin-top:6px}
+.sys{align-self:center;font-size:11.5px;color:var(--t3);padding:2px 10px;border-radius:99px;background:var(--side);border:1px solid var(--b1);margin:-4px 0 18px}
+.dock{flex:none;padding:6px 20px 12px}
+.box{max-width:640px;margin:0 auto;border-radius:24px;background:var(--fill);padding:12px 10px 9px 16px}
+.ph{color:var(--cap);padding:2px 2px 14px}
+.bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--t2);padding:2px 9px;border-radius:99px;border:1px solid var(--b1);white-space:nowrap;background:var(--bg)}
+.chip .dot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.seg{display:inline-flex;padding:2px;border-radius:99px;background:var(--bg);border:1px solid var(--b1)}
+.seg span{font-size:12px;padding:1px 10px;border-radius:99px;color:var(--t3)}
+.seg span.on{background:var(--brand-soft);color:var(--brand)}
+.sp{flex:1}
+.send{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff;opacity:.45;flex:none}
+.send svg{width:15px;height:15px}
+.cap{text-align:center;font-size:11.5px;color:var(--cap);margin-top:7px}
+.right{border-left:1px solid var(--b1);display:flex;flex-direction:column;min-height:0}
+.tabs{display:flex;gap:1px;padding:2px;background:var(--active);border-radius:8px}
+.tabs span{font-size:11.5px;padding:3px 8px;border-radius:6px;color:var(--t3)}
+.tabs span.on{background:var(--bg);color:var(--t1)}
+.rbody{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.card{background:var(--card);border-radius:12px;padding:14px}
+.card h3{font-size:13px;font-weight:600;margin:0 0 8px}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start;font-size:12.5px;padding:3px 0}
+.row span:first-child{color:var(--t3);white-space:nowrap}
+.row span:last-child{text-align:right;overflow-wrap:anywhere}
+.note{font-size:12px;color:var(--t3);margin-top:4px}
+#feed{--bg:#fff;--side:#f9fafb;--hover:rgba(38,49,72,.05);--active:#ebeef2;--card:#f5f7fa;--t1:#0f1115;--t2:#61666b;--t3:#81858c;--cap:#adb2b8;--b1:rgba(0,0,0,.08);--b2:rgba(0,0,0,.12);--bubble:#edf3fe;--brand:#4176e6;--brand-soft:#e4edfd;--ok:#15803d;--ok-soft:#e6faed;--warn:#aa6416;--warn-soft:#fef5e7;--bad:#dc2626;--bad-soft:#fef2f2;--fill:#f3f4f6;
+ --a1b:#ffe3c7;--a1f:#7a3e10;--a2b:#dbeafe;--a2f:#1e3a8a;--a3b:#dcfce7;--a3f:#14532d;--a4b:#fce7f3;--a4f:#831843;--a5b:#ede9fe;--a5f:#4c1d95;--a6b:#e0f2fe;--a6f:#0c4a6e;
+ font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;color:var(--t1)}
+#feed *{box-sizing:border-box}
+#feed svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+#feed .app{display:grid;grid-template-columns:240px minmax(0,1fr) 290px;height:780px;background:var(--bg);border:1px solid var(--b1);border-radius:14px;overflow:hidden}
+#feed .col{display:flex;flex-direction:column;min-width:0;min-height:0}
+#feed .left{background:var(--side);border-right:1px solid var(--b1)}
+#feed .right{border-left:1px solid var(--b1)}
+#feed .h{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--b1);font-size:13px}
+#feed .h b{font-weight:600}
+#feed .h .sp{flex:1}
+#feed .ib{width:26px;height:24px;border-radius:6px;display:grid;place-items:center;color:var(--t3)}
+#feed .filters{display:flex;gap:2px;padding:8px 8px 4px;font-size:12.5px;color:var(--t3)}
+#feed .filters span{padding:2px 7px;border-radius:7px;white-space:nowrap}
+#feed .filters span.on{background:var(--active);color:var(--t1);font-weight:500}
+#feed .attn{margin:4px 8px 6px;font-size:12px;color:var(--bad);background:var(--bad-soft);border-radius:8px;padding:5px 10px}
+#feed .list{flex:1;overflow:hidden;padding:2px 6px}
+#feed .it{display:flex;gap:9px;align-items:center;padding:7px 8px;border-radius:9px}
+#feed .it.sel{background:var(--active)}
+#feed .av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:600;flex:none;position:relative}
+#feed .it .av{width:32px;height:32px}
+#feed .c1{background:var(--a1b);color:var(--a1f)}
+#feed .c2{background:var(--a2b);color:var(--a2f)}
+#feed .c3{background:var(--a3b);color:var(--a3f)}
+#feed .c4{background:var(--a4b);color:var(--a4f)}
+#feed .c5{background:var(--a5b);color:var(--a5f)}
+#feed .c6{background:var(--a6b);color:var(--a6f)}
+#feed .cnt{position:absolute;top:-3px;right:-3px;min-width:15px;height:15px;border-radius:8px;background:var(--brand);color:#fff;font-size:10px;display:grid;place-items:center;padding:0 3px;border:2px solid var(--side)}
+#feed .it .tx{flex:1;min-width:0}
+#feed .it .t{display:flex;gap:6px;font-size:13px}
+#feed .it .t b{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#feed .it .t time{font-size:11px;color:var(--cap)}
+#feed .it .s{font-size:12px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#feed .it .s em{font-style:normal;color:var(--brand)}
+#feed .it .s em.w{color:var(--warn)}
+#feed .foot{border-top:1px solid var(--b1);padding:8px 14px;font-size:11.5px;color:var(--t3);line-height:1.7}
+#feed .mh{flex-direction:row}
+#feed .mh .who2{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+#feed .mh .who2 small{font-size:11.5px;color:var(--t3)}
+#feed .mh a{font-size:12px;color:var(--brand);text-decoration:none}
+#feed .scroll{flex:1;overflow:hidden}
+#feed .thread{max-width:680px;margin:0 auto;padding:14px 22px 20px;display:flex;flex-direction:column}
+#feed .day{align-self:center;font-size:11.5px;color:var(--cap);margin:4px 0 14px}
+#feed .u{align-self:flex-end;max-width:78%;margin-bottom:6px;display:flex;flex-direction:column;align-items:flex-end}
+#feed .bub{background:var(--bubble);border-radius:16px;padding:8px 14px;line-height:22px}
+#feed .mark{font-size:11px;color:var(--cap);margin-top:3px}
+#feed .u + .r{margin-top:10px}
+#feed .r{display:grid;grid-template-columns:30px minmax(0,1fr);gap:0 12px;padding:6px 10px;margin:0 -10px 18px;border-radius:12px}
+#feed .r.sel{background:var(--hover)}
+#feed .nm{font-size:12px;color:var(--t3);display:flex;gap:6px;align-items:center;min-height:20px;flex-wrap:wrap}
+#feed .nm b{color:var(--t2);font-weight:500}
+#feed .st{display:inline-flex;align-items:center;gap:4px;font-size:11px;line-height:18px;padding:0 7px;border-radius:99px;background:var(--active);color:var(--t2)}
+#feed .st.quiet{background:none;padding:0;color:var(--cap)}
+#feed .st.quiet svg{width:11px;height:11px;color:var(--ok)}
+#feed .st.blue{background:var(--brand-soft);color:var(--brand)}
+#feed .st.warn{background:var(--warn-soft);color:var(--warn)}
+#feed .st.bad{background:var(--bad-soft);color:var(--bad)}
+#feed .txt{line-height:1.8;margin-top:2px}
+#feed .act{display:flex;align-items:center;gap:2px;margin-top:6px;color:var(--t3);font-size:11.5px;flex-wrap:wrap}
+#feed .det{display:inline-flex;align-items:center;padding:0 8px;height:22px;border-radius:99px;border:1px solid var(--b1);color:var(--t2)}
+#feed .r.sel .det{background:var(--brand-soft);border-color:transparent;color:var(--brand)}
+#feed .lk{color:var(--brand);padding:0 6px}
+#feed .mini{display:inline-flex;align-items:center;padding:0 9px;height:22px;border-radius:99px;border:1px solid var(--b2);color:var(--t1);margin-left:4px}
+#feed .stat{margin-left:6px;color:var(--cap);font-variant-numeric:tabular-nums;opacity:0;transition:opacity .12s}
+#feed .r:hover .stat, #feed .r.sel .stat{opacity:1}
+#feed .skip{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--t3);padding:4px 10px;border:1px dashed var(--b2);border-radius:10px;width:fit-content;margin-top:4px}
+#feed .why{font-size:12.5px;color:var(--t3);margin-top:2px}
+#feed .warnline{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--warn);background:var(--warn-soft);padding:2px 8px;border-radius:7px;width:fit-content;margin-top:6px}
+#feed .draft{margin-top:6px;border-radius:18px;background:var(--fill);padding:10px 10px 8px 14px;box-shadow:inset 0 0 0 1px var(--brand-soft)}
+#feed .draft .ed{line-height:1.8;min-height:44px;outline:none}
+#feed .draft .bar{display:flex;align-items:center;gap:6px;margin-top:8px}
+#feed .draft .bar .sp{flex:1}
+#feed .draft .hint{font-size:11.5px;color:var(--cap)}
+#feed .pbtn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 14px;border-radius:99px;font-size:12.5px;border:1px solid var(--b2);background:var(--bg);color:var(--t1)}
+#feed .pbtn.primary{background:var(--t1);color:var(--bg);border-color:transparent}
+#feed .bill{font-size:10.5px;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:var(--warn)}
+#feed .rbody{flex:1;overflow:hidden;padding:12px;display:flex;flex-direction:column;gap:10px}
+#feed .card{background:var(--card);border-radius:12px;padding:13px 14px}
+#feed .card h3{font-size:13px;font-weight:600;margin:0 0 8px}
+#feed .row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start;font-size:12.5px;padding:3px 0}
+#feed .row span:first-child{color:var(--t3);white-space:nowrap}
+#feed .row span:last-child{text-align:right;overflow-wrap:anywhere}
+#feed .mem{font-size:12.5px;color:var(--t2);padding:6px 0;border-bottom:1px solid var(--b1)}
+#feed .mem:last-child{border:0}
+#feed .note{margin-top:18px;font-size:13px;color:var(--text-secondary,#666);line-height:1.8}
+#feed .note b{color:var(--text-primary,#111)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) #feed{--bg:#151517;--side:#1b1b1c;--hover:rgba(255,255,255,.05);--active:#2c2c2e;--card:#1f1f21;--t1:#f9fafb;--t2:#adb2b8;--t3:#81858c;--cap:#61666b;--b1:rgba(255,255,255,.08);--b2:rgba(255,255,255,.16);--bubble:#283142;--brand:#7aaaff;--brand-soft:#28314a;--ok:#4ade80;--ok-soft:#233c2c;--warn:#fbbf24;--warn-soft:#27241f;--bad:#f87171;--bad-soft:#3a1d1d;--fill:#232326;
+ --a1b:#4a3322;--a1f:#ffd2a8;--a2b:#1e2a4a;--a2f:#bfdbfe;--a3b:#1a3a26;--a3f:#bbf7d0;--a4b:#45192f;--a4f:#fbcfe8;--a5b:#2e2350;--a5f:#ddd6fe;--a6b:#123247;--a6f:#bae6fd}}
+#feed .app{max-width:1180px;margin:0 auto 32px}
+@media(max-width:860px){#feed .app{grid-template-columns:minmax(0,1fr);height:auto;margin:0 16px 32px}#feed .left,#feed .right{display:none}}
+</style>
+</head>
+<body>
+<div class="intro">
+ <h1>试聊对话排版草图 · 方案 B“对话优先”</h1>
+ <p>管理员 2026-10-29 选定左侧主区排版。右栏只用来说明“名称与数值同一行”的修正，是规划时补的示意。数字和文案只是示例。悬停回复可以看到统计行。</p>
+</div>
+<div class="frame">
+ <section class="main">
+  <div class="wh"><b>小林</b><small>@test_lin</small><span class="sp"></span><span class="st">5 轮 · 估算 $0.006</span><span class="more">⋯</span></div>
+  <div class="scroll"><div class="thread">
+   <div class="day">今天 21:04 · 公开</div>
+   <div class="u"><div class="bub">今天又加班到十点，项目下周就要上线了</div></div>
+   <div class="r" tabindex="0">
+    <div class="av">大</div>
+    <div>
+     <div class="who"><b>大肥鱼</b></div>
+     <div class="txt">辛苦啦……上线前一周真的是最熬人的时候。先去吃点热的，项目不会因为你多饿一小时就跑得更快的</div>
+     <div class="act"><span class="det">详情</span><span class="ib" title="复制回复"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></span><span class="stat">普通 · 召回 1 条 · 1.8 秒 · 估算 $0.0011</span></div>
+    </div>
+   </div>
+   <div class="u"><div class="bub">你好可爱啊，还记得我在忙什么吗</div></div>
+   <div class="r sel" tabindex="0">
+    <div class="av">大</div>
+    <div>
+     <div class="who"><b>大肥鱼</b><span class="hit">读取 被夸</span></div>
+     <div class="txt">诶嘿，被夸了先收下～当然记得，你在赶下周要上线的项目嘛。今晚别再打开电脑了好不好</div>
+     <div class="act"><span class="det">详情</span><span class="ib" title="复制回复"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></span><span class="stat">普通 · 召回 2 条 · 2.1 秒 · 估算 $0.0012</span></div>
+    </div>
+   </div>
+   <div class="chan"><span>21:15 · 切换到 <b>私信</b></span></div>
+   <div class="u"><div class="bub">在吗</div><div class="mark">作为上文</div></div>
+   <div class="u"><div class="bub">在吗在吗？？</div></div>
+   <div class="r" tabindex="0">
+    <div class="av">大</div>
+    <div>
+     <div class="who"><b>大肥鱼</b><span>合并 2 条</span></div>
+     <div class="skip">没有回复：连续催促（骚扰 · 今天第 1 次）</div>
+     <div class="act"><span class="det">详情</span><span class="stat">普通 · 1.2 秒 · 估算 $0.0009</span></div>
+    </div>
+   </div>
+   <div class="sys">记忆整理 · 新增 1 条长期记忆</div>
+   <div class="chan"><span>21:22 · 切换到 <b>公开</b></span></div>
+   <div class="u"><div class="bub">给我写一篇八百字的项目上线总结，要分点</div></div>
+   <div class="r" tabindex="0">
+    <div class="av">大</div>
+    <div>
+     <div class="who"><b>大肥鱼</b><span class="hit">读取 不给步骤</span></div>
+     <div class="txt">八百字？鲸鱼的脑容量只够写八个字：上线顺利，下班快乐。剩下的你自己来～（此处示例为一段超出字数的回复）</div>
+     <div class="warnline">正常流程不会发出：超出 280 加权字符</div>
+     <div class="act"><span class="det">详情</span><span class="ib" title="复制回复"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg></span><span class="stat">优先 · 召回 2 条 · 2.4 秒 · 估算 $0.0019</span></div>
+    </div>
+   </div>
+  </div></div>
+  <div class="dock">
+   <div class="box">
+    <div class="ph">以「小林」的身份发消息…</div>
+    <div class="bar">
+     <span class="chip"><span class="dot"></span>大肥鱼 · 使用中 ▾</span>
+     <span class="seg"><span>公开</span><span class="on">私信</span></span>
+     <span class="chip">先攒几条再回</span>
+     <span class="sp"></span>
+     <span class="send" title="发送"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span>
+    </div>
+   </div>
+   <div class="cap">正常流程 · GLM-4.6 · 不发到 X · 不占额度 · 会计费</div>
+  </div>
+ </section>
+ <aside class="right">
+  <div class="wh"><span class="tabs"><span class="on">本轮详情</span><span>记忆</span><span>提示词</span></span></div>
+  <div class="rbody">
+   <div class="card"><h3>人设与分级</h3>
+    <div class="row"><span>人设</span><span>大肥鱼</span></div>
+    <div class="row"><span>修订</span><span>7</span></div>
+    <div class="row"><span>分级</span><span>普通</span></div>
+    <div class="row"><span>合并条数</span><span>0</span></div>
+    <div class="row"><span>日程时段</span><span>21:00—23:00 · 窝在家里追剧</span></div>
+   </div>
+   <div class="card"><h3>触发卡与提醒</h3>
+    <div class="row"><span>工具调用</span><span>1／20</span></div>
+    <div class="note"><b style="color:var(--t2)">被夸</b> · 对方夸角色可爱</div>
+   </div>
+   <div class="card"><h3>生成与校验</h3>
+    <div class="row"><span>模型</span><span>GLM-4.6</span></div>
+    <div class="row"><span>调用次数</span><span>2</span></div>
+    <div class="row"><span>耗时</span><span>2,104 ms</span></div>
+    <div class="row"><span>输入 token</span><span>1,388</span></div>
+    <div class="row"><span>输出 token</span><span>46</span></div>
+    <div class="row"><span>字数校验</span><span>通过</span></div>
+    <div class="note">估算 $0.0012</div>
+   </div>
+  </div>
+ </aside>
+</div>
+
+<div class="intro">
+ <h1>动态页 · 同一思路</h1>
+ <p>管理员 2026-10-29 确认。示例为公开会话 @anna，含已发送、草稿、等待发送、待回查、已过滤五种状态。状态名称以现有实现为准，图中“草稿待审”仅为示例。悬停回复可以看到摘要。</p>
+</div>
+<div id="feed">
+<div class="app">
+ <!-- 左栏 -->
+ <aside class="col left">
+  <div class="h"><b>动态</b><span class="ib">＋</span><span class="sp"></span></div>
+  <div class="filters"><span class="on">全部</span><span>待处理 3</span><span>公开</span><span>私信</span><span>角色帖</span></div>
+  <div class="attn">需要关注 · 7 项</div>
+  <div class="list">
+   <div class="it"><div class="av c2">u</div><div class="tx"><div class="t"><b>@user002</b><time>03:57</time></div><div class="s">另一会话新消息</div></div></div>
+   <div class="it sel"><div class="av c4">a<span class="cnt">1</span></div><div class="tx"><div class="t"><b>@anna</b><time>03:57</time></div><div class="s"><em>草稿待审</em> · 好呀，周末见～</div></div></div>
+   <div class="it"><div class="av c3">私</div><div class="tx"><div class="t"><b>私信 · 5678</b><time>03:57</time></div><div class="s">最后回复 1</div></div></div>
+   <div class="it"><div class="av c1">帖</div><div class="tx"><div class="t"><b>角色帖</b><time>03:56</time></div><div class="s"><em class="w">已错过</em> · 晚安任务错过窗口</div></div></div>
+   <div class="it"><div class="av c5">u</div><div class="tx"><div class="t"><b>@user003</b><time>03:56</time></div><div class="s"><em>等待处理</em> · 回复 m3</div></div></div>
+   <div class="it"><div class="av c6">u</div><div class="tx"><div class="t"><b>@user004</b><time>03:56</time></div><div class="s">最后回复 4</div></div></div>
+   <div class="it"><div class="av c2">u</div><div class="tx"><div class="t"><b>@user005</b><time>03:56</time></div><div class="s">最后回复 5</div></div></div>
+  </div>
+  <div class="foot">草稿模式 · deepseek-v4.1-flash<br>本小时 公开 4/10 · 私信 0/30</div>
+ </aside>
+
+ <!-- 主区 -->
+ <section class="col">
+  <div class="h mh"><div class="who2"><b>@anna</b><small>公开 · 往来 36 条 · 首次 10/29 03:57</small></div><span class="sp"></span><a>在 X 上查看 ↗</a><a>记忆 →</a></div>
+  <div class="scroll"><div class="thread">
+   <div class="day">今天 03:41</div>
+   <div class="u"><div class="bub">今天又加班到十点，项目下周就要上线了</div></div>
+   <div class="r">
+    <div class="av c1">大</div>
+    <div>
+     <div class="nm"><b>大肥鱼</b><span class="st quiet"><svg viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg>已发送</span></div>
+     <div class="txt">辛苦啦……上线前一周真的是最熬人的时候。先去吃点热的，项目不会因为你多饿一小时就跑得更快的</div>
+     <div class="act"><span class="det">详情</span><span class="lk">在 X 上查看 ↗</span><span class="stat">普通 · 提交于 03:42 · 回执已确认</span></div>
+    </div>
+   </div>
+
+   <div class="u"><div class="bub">你好可爱啊，周末有空一起看电影吗？</div></div>
+   <div class="r sel">
+    <div class="av c1">大</div>
+    <div>
+     <div class="nm"><b>大肥鱼</b><span class="st blue">草稿待审</span><span class="hit" style="font-size:11px;padding:0 5px;border-radius:4px;background:var(--brand-soft);color:var(--brand)">读取 被夸</span></div>
+     <div class="draft">
+      <div class="ed" contenteditable="true">诶嘿，被夸了先收下～周末得看你项目上线顺不顺利啦，搞定了我们再约</div>
+      <div class="bar"><span class="hint">批准后真实发送到 X；暂停期间等待恢复</span><span class="sp"></span><span class="pbtn">重写 <span class="bill">计费</span></span><span class="pbtn primary">发送</span></div>
+     </div>
+     <div class="act"><span class="det">详情</span><span class="lk">查看原文 ↗</span><span class="stat">优先 · 明确提问 · 生成于 03:48</span></div>
+    </div>
+   </div>
+
+   <div class="u"><div class="bub">那我先去吃饭了</div></div>
+   <div class="r">
+    <div class="av c1">大</div>
+    <div>
+     <div class="nm"><b>大肥鱼</b><span class="st">等待发送</span></div>
+     <div class="txt">去吧去吧，吃饱了才有力气改 bug</div>
+     <div class="why">回复时段已关闭，08:00 开放后发送</div>
+     <div class="act"><span class="det">详情</span><span class="mini">取消发送</span><span class="stat">普通 · 批准于 03:50</span></div>
+    </div>
+   </div>
+
+   <div class="u"><div class="bub">晚安～</div></div>
+   <div class="r">
+    <div class="av c1">大</div>
+    <div>
+     <div class="nm"><b>大肥鱼</b><span class="st warn">待回查</span></div>
+     <div class="txt">晚安，明天见</div>
+     <div class="warnline">提交后没有拿到回执，下一轮先去 X 上核对，不会重复发送</div>
+     <div class="act"><span class="det">详情</span><span class="stat">普通 · 提交于 03:53</span></div>
+    </div>
+   </div>
+
+   <div class="u"><div class="bub">关注我领红包 https://…</div><div class="mark">已过滤</div></div>
+   <div class="r">
+    <div class="av c1">大</div>
+    <div>
+     <div class="nm"><b>大肥鱼</b><span class="st">已过滤</span></div>
+     <div class="skip">没有回复：广告关键词与链接</div>
+     <div class="act"><span class="det">详情</span><span class="mini">重新入队</span></div>
+    </div>
+   </div>
+  </div></div>
+ </section>
+
+ <!-- 右栏 -->
+ <aside class="col right">
+  <div class="h"><b>详情</b><span class="sp"></span><span class="ib">✕</span></div>
+  <div class="rbody">
+   <div class="card"><h3>这条往来</h3>
+    <div class="row"><span>状态</span><span>草稿待审</span></div>
+    <div class="row"><span>分级</span><span>优先 · 明确提问</span></div>
+    <div class="row"><span>原文时间</span><span>10/29 03:47</span></div>
+    <div class="row"><span>生成</span><span>deepseek-v4.1-flash · 2.1 秒</span></div>
+    <div class="row"><span>字数</span><span>38 / 280 加权字符</span></div>
+    <div class="row"><span>费用</span><span>估算 $0.0012</span></div>
+   </div>
+   <div class="card"><h3>对 @anna 的记忆 · 只读</h3>
+    <div class="mem">在赶下周要上线的项目</div>
+    <div class="mem">经常加班到很晚</div>
+   </div>
+  </div>
+ </aside>
+</div>
+</div>
+</body>
+</html>
