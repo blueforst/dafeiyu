@@ -159,10 +159,10 @@ export function mount(root,ctx={}){
    ?Math.max(Number(activity?.peakDailyTokens||0),...summary.daily.map(d=>Number(d.totalTokens||0)))
    :activity?.peakDailyTokens;
   const costNode=t.costUSD==null
-   ?h('span',{class:'ws-usd',title:'费用未知'},'费用未知')
+   ?h('span',{class:'ws-usd',title:'费用未知'},'—')
    :fmtUsd(t.costUSD);
   const avgNode=average==null
-   ?h('span',{class:'ws-usd',title:'费用未知'},'费用未知')
+   ?h('span',{class:'ws-usd',title:'费用未知'},'—')
    :fmtUsd(average);
   const unpricedSub=(t.unpriced||t.unknown)
    ?`另有 ${t.unpriced||0} 次未定价 / ${t.unknown||0} 次未知`
@@ -172,7 +172,7 @@ export function mount(root,ctx={}){
    ['累计 token',compact(t.totalTokens),'token'],
    ['可估算费用',costNode,unpricedSub],
    ['单日峰值',compact(peak),'token'],
-   ['缓存读取占比',cache==null?'未知':(cache*100).toFixed(1)+'%','缓存读取 /（输入 + 缓存读取）'],
+   ['缓存读取占比',cache==null?'—':(cache*100).toFixed(1)+'%','缓存读取 /（输入 + 缓存读取）'],
    ['每次回复均费',avgNode,'仅含已定价回复']
   ];
   set(metrics,items.map(([title,v,sub])=>h('div',{class:'ws-stat-cell usage-stat'},

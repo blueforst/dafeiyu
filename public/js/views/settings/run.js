@@ -11,7 +11,7 @@ export function mount(root,ctx){
   const pubBar=h('i',{style:'width:0%'}),privBar=h('i',{style:'width:0%'});
   const pubUsedText=h('span',{class:'run-usage-nums'},'0 · 0'),privUsedText=h('span',{class:'run-usage-nums'},'0 · 0');
   const content=h('div',{class:'ws-stack'}),error=h('div',{role:'status'});
-  const page=h('div',{class:'ws-stack settings-run'},error,content),modes=h('div',{class:'settings-mode-cards run-modes-compact',role:'radiogroup','aria-label':'运行模式'}),limitsBox=h('div',{class:'ws-card'}),hoursBox=h('div',{class:'ws-card'}),posting=h('div',{id:'posting-limits',class:'run-posting-inline'});
+  const page=h('div',{class:'ws-stack settings-run'},error,content),modes=h('div',{class:'settings-mode-cards run-modes-compact',role:'radiogroup','aria-label':'运行模式'}),limitsBox=h('div',{class:'ws-card'}),hoursBox=h('div',{class:'ws-card'}),posting=h('div',{id:'posting-limits',class:'run-adv-limits'});
   let advEl=null;
   set(root,page);
   const save=h('button',{id:'program-settings-save',type:'button',class:'btn primary small',onclick:saveLimits},'保存');
@@ -80,13 +80,13 @@ export function mount(root,ctx){
             h('td',{},'公开回复'),
             h('td',{},numInput('publicPerHour','公开每小时上限',1,25)),
             h('td',{},numInput('publicPerDay','公开每日上限',1,1000)),
-            h('td',{class:'run-limit-used'},h('span',{class:'run-usage-bar'},pubBar),pubUsedText)
+            h('td',{class:'run-used-cell'},h('span',{class:'run-used-bar'},pubBar),pubUsedText)
           ),
           h('tr',{},
             h('td',{},'私信'),
             h('td',{},numInput('privatePerHour','私信每小时上限',1,100)),
             h('td',{},numInput('privatePerDay','私信 24 小时上限',1,500)),
-            h('td',{class:'run-limit-used'},h('span',{class:'run-usage-bar'},privBar),privUsedText)
+            h('td',{class:'run-used-cell'},h('span',{class:'run-used-bar'},privBar),privUsedText)
           )
         )
       )
@@ -106,7 +106,7 @@ export function mount(root,ctx){
     set(hoursBox,
       h('div',{class:'ws-card-head'},h('b',{},'回复时段'),h('span',{class:'sp'}),hoursStatus),
       h('div',{class:'run-hours-row'},hoursBig,hoursUnit),
-      h('label',{class:'run-hours-row run-switch-label'},enabledSwitch,h('span',{},'跟随早晚安：早安帖后开放，晚安帖后延迟关闭')),
+      h('label',{class:'run-switch-row'},enabledSwitch,h('span',{},'跟随早晚安：早安帖后开放，晚安帖后延迟关闭')),
       h('div',{class:'small muted'},'早晚安任务停用或失败时，仍按上面的时间开关')
     );
     advEl=advanced('run',advSummary,

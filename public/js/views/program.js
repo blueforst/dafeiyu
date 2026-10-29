@@ -414,7 +414,7 @@ export function mount(root, ctx) {
         tbody.append(h('tr', { class: 'log-detail-row' }, detailTd));
       }
     }
-    set(logContainer, h('table', { class: 'logs-table' }, tbody));
+    set(logContainer, h('table', { class: 'logs-table' }, h('colgroup',{},h('col',{class:'log-col-time'}),h('col',{class:'log-col-cat'}),h('col',{}),h('col',{class:'log-col-raw'})), tbody));
   }
 
   async function loadLogs(append = false) {

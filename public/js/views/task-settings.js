@@ -294,7 +294,7 @@ export function mount(root,ctx){
 
     set(tableCard,
       h('table',{class:'tasks-table'},
-        h('thead',{},h('tr',{},h('th',{style:'width:44px'},''),h('th',{},'任务'),h('th',{},'时间'),h('th',{},'上次执行'),h('th',{},''))),
+        h('thead',{},h('tr',{},h('th',{style:'width:44px'},''),h('th',{},'任务'),h('th',{},'时间'),h('th',{},'上次执行'),h('th',{class:'task-col-act'},''))),
         tbody
       )
     );

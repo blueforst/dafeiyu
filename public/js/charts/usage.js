@@ -49,8 +49,24 @@ export function heatmap(data,mode='daily'){
  for(let w=0;w<52;w++){const group=s('g',{class:'heat-week','data-week':w});groups.push(group);for(let d=0;d<7;d++){const row=weeks[w][d],v=mode==='daily'?row:mode==='weekly'?weekly[w]:cumulative[w],n=Number(v.totalTokens||0),level=n===0?0:Math.min(4,Math.max(1,Math.ceil(n/max*4))),index=w*7+d,label=mode==='daily'?dateLabel(row.date):mode==='weekly'?dateLabel(addDays(from,w*7),false)+' – '+dateLabel(addDays(from,w*7+6),false):'截至 '+dateLabel(addDays(from,w*7+6),false),rect=s('rect',{id:id+'-'+index,x:10+w*10,y:18+d*10,width:8,height:8,rx:1.4,class:'heat-cell heat-'+level,'data-day':index,'data-week':w,'aria-label':label+'，'+compact(n)+' token'});cells.push(rect);group.append(rect);if(row.date?.slice(8)==='01'&&row.date.slice(5,7)!==lastMonth){lastMonth=row.date.slice(5,7);svg.append(s('text',{x:10+w*10,y:10,class:'chart-axis'},Number(lastMonth)+'月'));}}svg.append(group);}
  svg.append(s('text',{x:0,y:25,class:'chart-axis'},'日'),s('text',{x:0,y:55,class:'chart-axis'},'三'),s('text',{x:0,y:85,class:'chart-axis'},'六'));
  const frame=h('div',{class:'chart-frame chart-stack '+(mode==='daily'?'daily-heat':'column-heat')},svg,h('div',{class:'small muted heat-caption'},'少 ',[0,1,2,3,4].map(i=>h('span',{class:'heat-key heat-'+i,'aria-hidden':'true'})),' 多 · token'));
+ // 按容器宽度分配列宽；不拉伸 SVG 文字，也不让格子缩在中央。
+ const resizeHeat=()=>{
+  const width=Math.max(240,frame.clientWidth),step=(width-20)/52;
+  svg.setAttribute('viewBox',`0 0 ${width} 112`);
+  cells.forEach((cell,i)=>{cell.setAttribute('x',20+Math.floor(i/7)*step);cell.setAttribute('y',18+(i%7)*13);cell.setAttribute('width',Math.max(1,step-2));cell.setAttribute('height',11);});
+  for(const text of svg.querySelectorAll(':scope>text')){
+   if(text.dataset.heatX===undefined)text.dataset.heatX=text.getAttribute('x');
+   const original=Number(text.dataset.heatX);
+   text.setAttribute('x',original===0?0:20+(original-10)/10*step);
+  }
+  const labels=[...svg.querySelectorAll(':scope>text')].filter(el=>Number(el.dataset.heatX)===0);
+  labels.forEach((label,i)=>label.setAttribute('y',27+i*39));
+ };
+ const resizeObserver=new ResizeObserver(resizeHeat);resizeObserver.observe(frame);
  const latest=(data.daily||[]).map(r=>r.date).sort().at(-1)||new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai'}).format(Date.now()),initial=clamp(days(from,latest).length,0,363),cache=new Map();
- return interaction(frame,svg,{initial,hit:event=>{const target=event.target.closest?.('[data-day]');return target&&svg.contains(target)?{index:Number(target.dataset.day)}:null;},anchor:i=>cells[i],activate:i=>{cells.forEach((c,n)=>c.classList.toggle('is-active',n===i));groups.forEach((g,w)=>g.classList.toggle('is-active',mode!=='daily'&&w===Math.floor(i/7)));svg.setAttribute('aria-activedescendant',cells[i].id);},clear:()=>{cells.forEach(c=>c.classList.remove('is-active'));groups.forEach(g=>g.classList.remove('is-active'));},move:(i,key)=>moveHeatIndex(i,key,mode),content:i=>{if(!cache.has(i))cache.set(i,heatmapTooltip(data,mode,i));return cache.get(i);}});
+ const result=interaction(frame,svg,{initial,hit:event=>{const target=event.target.closest?.('[data-day]');return target&&svg.contains(target)?{index:Number(target.dataset.day)}:null;},anchor:i=>cells[i],activate:i=>{cells.forEach((c,n)=>c.classList.toggle('is-active',n===i));groups.forEach((g,w)=>g.classList.toggle('is-active',mode!=='daily'&&w===Math.floor(i/7)));svg.setAttribute('aria-activedescendant',cells[i].id);},clear:()=>{cells.forEach(c=>c.classList.remove('is-active'));groups.forEach(g=>g.classList.remove('is-active'));},move:(i,key)=>moveHeatIndex(i,key,mode),content:i=>{if(!cache.has(i))cache.set(i,heatmapTooltip(data,mode,i));return cache.get(i);}});
+ const destroy=frame.destroyChart;frame.destroyChart=()=>{resizeObserver.disconnect();destroy();};
+ return result;
 }
 export function trend(summary,range,metric='totalTokens'){
  const chart=trendData(summary,range,metric),{dates,series}=chart;if(!series.length||!dates.length)return h('div',{class:'empty-state'},'该范围没有模型用量');

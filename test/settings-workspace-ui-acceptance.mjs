@@ -16,6 +16,7 @@ const users=[{userId:'x:one',label:'@one',accountId:'fixture',channel:'public',i
 let memoryItems=[{id:'memory-1',text:'喜欢散步 <img src=x onerror=alert(1)>',type:'preference',revision:0,sourceStatus:'complete',updatedAt:now,sources:[]}];
 const totals={calls:4,input:100,output:100,totalTokens:1000,costUSD:.04840811,unpriced:0,unknown:0},model={id:'fixture-model',active:true,source:'catalog',params:{reasoningLevel:'off'},info:{id:'fixture-model',name:'fixture-model',api:'openai-completions',contextWindow:128000,maxTokens:8192,reasoning:false,vision:false,levels:['off'],costKnown:true,cost:{input:1,output:2}},lastTest:{ok:true,at:now,latencyMs:12}};
 const library={version:1,active:{default:{key:'deepseek',modelId:model.id}},providers:[{key:'deepseek',provider:'deepseek',name:'DeepSeek',baseUrl:'https://fixture.example/v1',hasKey:true,keyHint:'••••1234',ready:true,active:true,models:[model]},{key:'custom',provider:'custom',name:'备用接口',baseUrl:'https://backup.example/v1',api:'openai-completions',hasKey:true,keyHint:'••••5678',ready:true,models:[{...model,active:false}]}]};
+let richVisual=false;
 let windowOverride=null,publicUsed=2;const windowState=()=>windowOverride||({open:true,reason:null,closeTime:String(Math.floor((23*60+settings.replyHours.closeDelayMinutes)%1440/60)).padStart(2,'0')+':'+String(settings.replyHours.closeDelayMinutes%60).padStart(2,'0'),openTime:'08:00',closesAt:now+3600000,opensAt:now,closures:[]});
 const summary=()=>({publicToday:2,publicPerDay:180,privateRecent:3,privatePerDay:settings.privatePerDay,queues:[{channel:'public',tier:'normal',count:2,oldestAt:now-3000}],reasons:[{status:'filtered',reason:'广告关键词',count:1}]});
 const healthy=()=>({status:'attention',at:now,metrics:[{id:'reply-stall',level:'normal',summary:'回复正常'},{id:'compliance-label',level:'attention',summary:'未标注自动化账号'}],activeAlerts:[],compliance:{checkedAt:now,disclosure:'missing',missingPhrases:['AI'],automatedLabel:'missing',qualityFilter:'on'},browser:null});
@@ -41,10 +42,17 @@ await page.route('**/api/**',async route=>{const request=route.request(),url=new
  if(path.startsWith('/api/memory/users/')){const id=decodeURIComponent(path.split('/')[4]),user=users.find(u=>u.userId===id)||users[0];if(method==='GET')return send({...user,items:user.channel==='public'?memoryItems:[],recent:[],experiences:[],progress:{}});const action=path.split('/').at(-1);if(action==='forget')user.forgotten=true;if(action==='remember')user.forgotten=false;return send({written:action==='summarize',items:memoryItems});}
  if(path.startsWith('/api/memory/items/')){if(method==='DELETE')memoryItems=[];else Object.assign(memoryItems[0],{text:body.text,revision:memoryItems[0].revision+1});return send({ok:true});}
  if(path==='/api/memory/experiences')return send({accountId:'fixture',items:[],revision:0,nextCursor:null});
- if(path==='/api/model')return send({library:{...library,revision:modelRevision},revision:modelRevision});
+ if(path==='/api/model'){
+ const richLibrary={...library,providers:library.providers.map((p,i)=>i?p:{...p,starred:[model.id,'layout-model-01','layout-model-02'],models:[model,...Array.from({length:29},(_,n)=>({...model,id:'layout-model-'+String(n+1).padStart(2,'0'),active:false,lastUsedAt:n<5?now-n*1000:null,info:{...model.info,reasoning:n%2===0,vision:n%3===0}}))]})};
+ return send({library:{...(richVisual?richLibrary:library),revision:modelRevision},revision:modelRevision});
+}
  if(path==='/api/model/providers')return send([{id:'deepseek',name:'DeepSeek',group:'cn',baseUrl:'https://fixture.example/v1',available:true,apis:['openai-completions']},{id:'anthropic',name:'Anthropic',group:'intl',available:true,baseUrl:'https://anthropic.example',apis:['anthropic-messages']}]);
  if(path.startsWith('/api/model/')){modelRevision++;return send({library:{...library,revision:modelRevision},revision:modelRevision});}
- if(path==='/api/health')return summaryFailure?send({error:'合成摘要故障'},503):send(healthy());
+ if(path==='/api/health'){
+ const data=healthy();
+ if(richVisual){const ids=['send-stall','reply-stall','reply-hours','round-failures','watchdog-failure','collection-public','collection-private','collection-failures','cooldown-public','cooldown-private','automation-public','automation-private','browser-human','browser-recovery','browser-resource-pressure','account-restricted','backup-failure','certificate-expiry'];data.metrics=[...ids.map(id=>({id,level:'normal',summary:'合成正常状态'})),...data.metrics.filter(m=>m.level!=='normal')];}
+ return summaryFailure?send({error:'合成摘要故障'},503):send(data);
+}
  if(path==='/api/health/alerts')return send({items:[],nextCursor:null});
  if(path==='/api/health/reports')return send({items:[{date:day,model:{calls:4,totalTokens:1000,costUSD:.04,unpriced:0,unknown:0},channels:{public:{received:4,replied:2,skipped:1,failed:0,unknown:0},private:{received:0,replied:0,skipped:0,failed:0,unknown:0}},responseLatencyMs:{median:100,p90:200},alerts:1,automationBlocks:0,browserRestarts:0,pausedMs:1000}]});
  if(path==='/api/health/settings'){if(method==='GET')return send({settings:health,revision:healthRevision});const{revision,...value}=body;health=value;return send({revision:++healthRevision});}
@@ -194,7 +202,7 @@ await check('记忆自动选中首个身份、深链三视图与条目操作',as
  await page.locator('#memory-identity').waitFor({state:'attached'});
 });
 
-await check('连接桌面切项保持，同页返回还原操作，外页断开',async()=>{await go('browser');const ratio=await page.locator('.desk-placeholder').evaluate(el=>el.getBoundingClientRect().height/(window.innerHeight-el.getBoundingClientRect().top));assert.ok(ratio>=0.85,`未接管占位区高度占比过低: ${ratio}`);await page.locator('#connect').click();await page.locator('#desktop-frame').waitFor();const frame=await page.locator('#desktop-frame').elementHandle(),loads=desktopLoads;await go('health');assert.equal(await frame.evaluate(el=>el.isConnected),true);await go('browser');assert.equal(await page.locator('#desktop-frame').evaluate((el,old)=>el===old,frame),true);assert.equal(await page.locator('#release').isVisible(),true);assert.equal(desktopLoads,loads);await page.getByRole('link',{name:/^动态/}).click();await page.waitForTimeout(150);assert.equal(await frame.evaluate(el=>el.isConnected),false);assert.equal(control.value,'manual');control.value='paused';});
+await check('连接桌面切项保持，同页返回还原操作，外页断开',async()=>{await go('browser');const ratio=await page.locator('.desk-placeholder').evaluate(el=>el.getBoundingClientRect().height/(window.innerHeight-el.getBoundingClientRect().top));assert.ok(ratio>=0.85,`未接管占位区高度占比过低: ${ratio}`);const widthRatio=await page.locator('.desk-placeholder').evaluate(el=>el.getBoundingClientRect().width/el.parentElement.getBoundingClientRect().width);assert.ok(widthRatio>=.95,`未接管占位区宽度占比过低: ${widthRatio}`);await page.locator('#connect').click();await page.locator('#desktop-frame').waitFor();assert.ok(await page.locator('#desktop-frame').evaluate(el=>el.getBoundingClientRect().width/el.closest('.settings-browser').getBoundingClientRect().width>=.95),'连接后桌面没有铺满宽度');assert.ok(await page.locator('#desktop-frame').evaluate(el=>el.getBoundingClientRect().height/el.parentElement.getBoundingClientRect().height>=.98),'连接后桌面没有铺满高度');const frame=await page.locator('#desktop-frame').elementHandle(),loads=desktopLoads;await go('health');assert.equal(await frame.evaluate(el=>el.isConnected),true);await go('browser');assert.equal(await page.locator('#desktop-frame').evaluate((el,old)=>el===old,frame),true);assert.equal(await page.locator('#release').isVisible(),true);assert.equal(desktopLoads,loads);await page.getByRole('link',{name:/^动态/}).click();await page.waitForTimeout(150);assert.equal(await frame.evaluate(el=>el.isConnected),false);assert.equal(control.value,'manual');control.value='paused';});
 
 await check('全部旧地址和最近设置项兼容',async()=>{for(const [old,target]of [['overview','feed'],['model','settings/model'],['program','settings/logs'],['tasks','settings/tasks'],['browser','settings/browser'],['memory?account=fixture&user=x%3Aone&channel=public','settings/memory?account=fixture&user=x%3Aone&channel=public'],['billing','settings/billing'],['settings/limits','settings/run']]){await page.goto(BASE+'/#/'+old);await page.waitForFunction(expected=>location.hash==='#/'+expected,target);assert.equal(await page.evaluate(()=>location.hash),'#/'+target);}await go('triage');await page.goto(BASE+'/#/settings');await page.waitForFunction(()=>location.hash==='#/settings/triage');});
 
@@ -202,7 +210,59 @@ await check('摘要故障隔离、状态刷新与无额外采集请求',async()=
 
 await check('设置左栏收起刷新后恢复并可展开',async()=>{await go('run');await page.getByRole('button',{name:'收起左栏',exact:true}).click();assert.equal(await page.locator('.ws-left').isVisible(),false);await page.reload();await page.locator('input[data-setting="privatePerDay"]').waitFor();assert.equal(await page.locator('.ws-left').isVisible(),false);await page.getByRole('button',{name:'展开左栏',exact:true}).click();assert.equal(await page.locator('.ws-left').isVisible(),true);});
 
-await check('四宽浅深十一项截图与无横向溢出',async()=>{for(const scheme of ['light','dark'])for(const width of [1440,1280,860,375]){await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:1000});for(const id of Object.keys({run:1,model:1,tasks:1,triage:1,memory:1,billing:1,browser:1,sources:1,health:1,logs:1,history:1})){await go(id);await page.waitForTimeout(60);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,scheme+' '+width+' '+id);const file='settings-'+id+'-'+scheme+'-'+width+'.png';await page.screenshot({path:OUT+'/'+file,fullPage:true});report.screenshots.push(file);}if(width<=860){await go('run');await page.getByRole('button',{name:'展开左栏',exact:true}).click();await page.locator('[data-settings-item="memory"]').click();await page.locator('.settings-memory').waitFor();assert.equal(await page.locator('.ws-left').isVisible(),false);assert.equal(await page.locator('#memory-identity').isVisible(),true);}}});
+// 用几何断言复现曾被“页面可打开”和无整体溢出漏掉的视觉偏差。
+richVisual=true;
+await page.emulateMedia({colorScheme:'light'});
+await page.setViewportSize({width:1440,height:868});
+await page.evaluate(()=>{for(const k of Object.keys(localStorage))if(k.startsWith('ws:settings:advanced:'))localStorage.removeItem(k);});
+const box=async selector=>page.locator(selector).first().evaluate(el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom};});
+await check('草图：任务、日志、历史与来源表格铺满容器',async()=>{
+ for(const [id,selector]of [['tasks','.tasks-table'],['logs','.logs-table'],['history','.hist-table'],['sources','.sources-table']]){
+  await go(id);await page.locator(selector).waitFor();
+  const ratio=await page.locator(selector).evaluate(el=>{const p=el.parentElement,c=getComputedStyle(p);return el.getBoundingClientRect().width/(p.clientWidth-parseFloat(c.paddingLeft)-parseFloat(c.paddingRight));});
+  assert.ok(ratio>=.97,id+' 表格未铺满：'+ratio);
+ }
+});
+await check('草图：日志筛选在宽屏保持一行',async()=>{
+ await go('logs');
+ const b=await box('.log-toolbar');assert.ok(b.height<=42,'日志筛选被拆成多行：'+b.height);
+ const inputs=await page.locator('.log-toolbar>.input').evaluateAll(els=>els.map(el=>el.getBoundingClientRect().top));
+ assert.ok(Math.max(...inputs)-Math.min(...inputs)<3);
+});
+await check('草图：模型工具栏单行、内部栏满高与十四行可见',async()=>{
+ await go('model');await page.locator('.model-row').nth(29).waitFor({state:'attached'});
+ assert.ok((await box('.model-toolbar')).height<=42,'模型工具栏被拆成多行');
+ assert.ok((await box('.provider-sidebar')).bottom>=840,'服务商栏没有填满可用高度');
+ const visible=await page.locator('.model-table .model-row').evaluateAll(els=>els.filter(el=>{const r=el.getBoundingClientRect();return r.y>=100&&r.bottom<=868;}).length);
+ assert.ok(visible>=14,'首屏只有 '+visible+' 行模型');
+ await go('memory');assert.ok((await box('.memory-sidebar')).bottom>=840,'记忆身份栏没有填满可用高度');
+});
+await check('草图：运行双卡等高、用量条与开关同行',async()=>{
+ await go('run');const cards=await page.locator('.settings-run .ws-cols>.ws-card').evaluateAll(els=>els.map(el=>el.getBoundingClientRect().height));
+ assert.ok(Math.abs(cards[0]-cards[1])<2,'并列卡片底边不齐');
+ assert.equal(await page.locator('.run-used-bar').count(),2);
+ assert.ok((await box('.run-used-bar')).width>=68,'发送用量条没有渲染');
+});
+await check('草图：健康告警逐项成行、分组纵排且完整状态首屏可见',async()=>{
+ await go('health');const rows=await page.locator('.health-attention-row').evaluateAll(els=>els.map(el=>{const r=el.getBoundingClientRect();return {top:r.top,bottom:r.bottom};}));
+ assert.equal(rows.length,3);for(let i=1;i<rows.length;i++)assert.ok(rows[i].top>=rows[i-1].bottom-1,'告警被挤到同一行');
+ assert.equal(await page.locator('.health-groups-grid .health-chip').count(),21);
+ const groups=await page.locator('.health-group-card').evaluateAll(els=>els.map(el=>{const h=el.querySelector('.health-group-head').getBoundingClientRect(),c=el.querySelector('.health-chips').getBoundingClientRect();return {head:h.bottom,chips:c.top};}));
+ assert.ok(groups.every(g=>g.chips>=g.head),'健康组标题与胶囊挤成横排');
+ assert.ok((await box('.health-page')).bottom<=868,'收起高级设置后健康页仍需滚动');
+});
+await check('草图：计费流水紧凑、热力格铺满、柱图保持模型色',async()=>{
+ await go('billing');
+ assert.ok((await box('.usage-calls>summary')).height<=68,'收起的流水标题过高');
+ assert.ok((await box('.usage-calls')).bottom<=868,'首屏看不到完整流水标题');
+ const coverage=await page.locator('.usage-heatmap').evaluate(svg=>{const cells=[...svg.querySelectorAll('.heat-cell')].map(el=>el.getBoundingClientRect());return (Math.max(...cells.map(r=>r.right))-Math.min(...cells.map(r=>r.left)))/svg.getBoundingClientRect().width;});
+ assert.ok(coverage>=.92,'热力格缩在中间：'+coverage);
+ assert.ok((await box('.usage-lines')).height<=220,'柱图超出指定高度');
+ const color=await page.locator('.trend-bar').first().evaluate(el=>getComputedStyle(el).fill),legend=await page.locator('.billing-trend-card .legend-swatch').first().evaluate(el=>getComputedStyle(el).backgroundColor);
+ assert.equal(color,legend,'柱色和模型图例颜色不一致');
+});
+
+await check('四宽浅深十一项截图与无横向溢出',async()=>{for(const scheme of ['light','dark'])for(const width of [1440,1280,860,375]){await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:868});for(const id of Object.keys({run:1,model:1,tasks:1,triage:1,memory:1,billing:1,browser:1,sources:1,health:1,logs:1,history:1})){await go(id);await page.waitForTimeout(60);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,scheme+' '+width+' '+id);assert.equal(await page.locator('.ws-main>.ws-content').evaluate(el=>el.scrollWidth>el.clientWidth+1),false,'主区横向溢出 '+scheme+' '+width+' '+id);const file='settings-'+id+'-'+scheme+'-'+width+'.png';await page.screenshot({path:OUT+'/'+file,fullPage:true});report.screenshots.push(file);}if(width<=860){await go('run');await page.getByRole('button',{name:'展开左栏',exact:true}).click();await page.locator('[data-settings-item="memory"]').click();await page.locator('.settings-memory').waitFor();assert.equal(await page.locator('.ws-left').isVisible(),false);assert.equal(await page.locator('#memory-identity').isVisible(),true);}}});
 
 await check('计费fmtUsd与堆叠柱图、日志事件表、任务历史合并与来源显式读取',async()=>{
  await page.setViewportSize({width:1440,height:868});
