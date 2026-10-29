@@ -123,7 +123,10 @@ export class ReplyTriage{
  }
  refreshQueued(accountId:string,maxAgeHours=3,_options:TriageAgeOptions={}){
   // 先注册全部滑动窗口命中，再统一分类；旧库首轮与名单变动均可重新计算。
-  this.transaction(()=>{const rows=this.store.db.prepare("SELECT * FROM messages WHERE status='queued' AND account_id=? ORDER BY created_at,id").all(accountId) as any[];for(const row of rows)this.hit(parseEvent(row),accountId,Math.min(this.now(),row.created_at));for(const row of rows)this.apply(row,maxAgeHours);});
+  this.transaction(()=>{const rows=this.store.db.prepare("SELECT * FROM messages WHERE status='queued' AND account_id=? ORDER BY created_at,id").all(accountId) as any[];for(const row of rows)this.hit(parseEvent(row),accountId,Math.min(this.now(),row.created_at));for(const row of rows)this.apply(row,maxAgeHours);
+   const latest=new Map<string,any>(),native=this.store.db.prepare("SELECT * FROM messages WHERE account_id=? AND channel='private' AND status='queued' AND json_valid(body) AND json_extract(body,'$.privateContract')='xchat-native-v2' ORDER BY created_at DESC,id DESC").all(accountId) as any[];
+   for(const row of native){const event=parseEvent(row);if(!event.conversationId||event.userId!=='dm:'+event.conversationId)continue;const key=JSON.stringify([event.userId,event.conversationId]),newest=latest.get(key);if(!newest){latest.set(key,row);continue;}if(!isReview(row)&&this.store.get(this.manualKey(row.id))!=='1')this.terminal(row,'merged','同会话仅处理最新消息，前文保留为上下文',{mergedInto:newest.id});}
+  });
  }
  private forgottenScopeSQL(){return "NOT EXISTS(SELECT 1 FROM account_users au WHERE au.account_id=m.account_id AND au.id=m.user_id AND au.forgot=1) AND (NOT EXISTS(SELECT 1 FROM users u WHERE u.id=m.user_id AND u.forgot=1) OR EXISTS(SELECT 1 FROM account_users au WHERE au.account_id=m.account_id AND au.id=m.user_id AND au.epoch>0 AND au.forgot=0))";}
  queuedEligibility(maxAgeHours=3,options:TriageAgeOptions={},at=this.now()){

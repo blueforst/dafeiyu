@@ -463,7 +463,7 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
    attempt!.setStage('dm-validate');p=await getDM();const snap=await readDM(p,e.conversationId,handle),native=e.privateContract==='xchat-native-v2';
    const sameTarget=(latest:Event|undefined)=>latest?.platformId===target&&(!native||latest.privateContract===e.privateContract&&latest.text===e.text&&latest.timestamp===e.timestamp&&latest.senderId===e.senderId&&latest.nativeSequence===e.nativeSequence);
    if(!sameTarget(snap.events.at(-1)))throw new Error('私信上下文已变化，停止发送');
-   const composer=native?await nativeComposerLocators(p,e.conversationId):null,input=composer?.input??p.locator('[data-testid="dmComposerTextInput"]');if(await input.count()!==1)throw new Error('当前私信输入框尚未适配');
+   const composer=native?await nativeComposerLocators(p,e.conversationId,{requireSubmit:false}):null,input=composer?.input??p.locator('[data-testid="dmComposerTextInput"]');if(await input.count()!==1)throw new Error('当前私信输入框尚未适配');
    attempt!.setStage('reply-fill');await input.fill(text);
    if(native&&await input.evaluate(node=>node instanceof HTMLTextAreaElement?node.value:(node as HTMLElement).innerText)!==text)throw new Error('新 Chat 输入框未完整保留待发送正文');
    attempt!.setStage('identity');await check(handle);if(mode!=='auto')throw new BrowserOperationError('control-unavailable','control');

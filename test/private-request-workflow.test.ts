@@ -53,3 +53,10 @@ test('夜间接受和采集历史照常入动态，开放后只对最新消息�
 test('回复通道额度或unknown受限仍正常接受入库，生成发送继续受限',async()=>{
  const f=fixture();try{(f.workflow as any).channelWaitReason=()=> 'quota';await f.workflow.resume();await f.workflow.tick();assert.equal(f.counts().accepts,1);assert.equal(f.store.getMessage(f.candidate.event.id,'worker')?.status,'queued');assert.equal(f.counts().calls,0);assert.equal(f.counts().sends,0);}finally{f.close();}
 });
+test('跨轮间隔超过半小时仍只回复同会话最新入站，前文留在模型输入',async()=>{
+ const f=fixture();let open=false;try{(f.workflow as any).replyHours=()=>({open});
+  const first={...f.candidate.event,timestamp:Date.now()-2*3600000,text:'前一轮尚未回答的问题'};f.candidate.event=first;f.result({status:'accepted',reason:'已接受',events:[first]});await f.workflow.resume();await f.workflow.tick();
+  const id='66666666-6666-4666-8666-666666666666',latest={...first,id:'dm:111-222:'+id,platformId:id,timestamp:Date.now()-1000,text:'现在只需要回答这条最新问题'};f.candidate.event=latest;f.result({status:'accepted',reason:'正常收件',events:[{...first,privateHistoryOf:id},latest]});f.transport.context=async()=>JSON.stringify([{text:first.text,direction:'in'},{text:latest.text,direction:'in'}]);await f.workflow.tick();
+  assert.equal(f.store.getMessage(first.id,'worker')?.status,'merged');assert.equal(f.store.getMessage(latest.id,'worker')?.status,'queued');open=true;await f.workflow.tick();assert.equal(f.counts().calls,1);assert.equal(f.counts().sends,1);assert.ok(f.prompts[0].includes(first.text));assert.ok(f.prompts[0].includes(latest.text));
+ }finally{f.close();}
+});
