@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -14,7 +15,7 @@ function fixture(run?:(user:string)=>Promise<string>) {
  const dir=mkdtempSync(join(tmpdir(),'role-daily-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=dir;
  const store=new Store(join(dir,'workflow.sqlite'));store.set('control','running');
  let at=Date.parse('2026-10-28T07:00:00+08:00'),calls=0;
- const generator:Generator={async complete(c,system,user){calls++;return {text:run?await run(user):JSON.stringify(content(JSON.parse(user).date)),input:10,output:20,cache:0,callId:'call-'+calls};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user){calls++;return {text:run?await run(user):JSON.stringify(content(JSON.parse(user).date)),input:10,output:20,cache:0,callId:'call-'+calls};}};
  const service=new DailyStateService(store,generator,()=>structuredClone(exampleConfig) as Config,()=>at);
  return {store,service,generator,get calls(){return calls;},get now(){return at;},set now(v:number){at=v;},close(){store.db.close();if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;rmSync(dir,{recursive:true,force:true});}};
 }
@@ -72,7 +73,7 @@ test('跨日无今日状态时不冒用昨日，跨日返回的旧生成结果�
   await f.service.ensure('worker-a');f.now+=86400000;
   assert.equal(f.service.describe('worker-a').today,null);assert.equal(f.service.describe('worker-a').currentPeriod,null);assert.equal(f.service.history('worker-a')[0]?.date,'2026-10-28');
   let finish!:(v:any)=>void;
-  const slow:Generator={complete:async(c,system,user)=>new Promise(resolve=>{finish=resolve;})};
+  const slow:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async(c,system,user)=>new Promise(resolve=>{finish=resolve;})};
   const service=new DailyStateService(f.store,slow,()=>structuredClone(exampleConfig) as Config,()=>f.now);
   const pending=service.ensure('worker-a');f.now+=86400000;
   finish({text:JSON.stringify(content('2026-10-29')),input:1,output:1,cache:0});assert.equal((await pending).status,'superseded');assert.equal(service.get('worker-a'),null);assert.equal(service.get('worker-a','2026-10-29'),null);
@@ -117,11 +118,11 @@ test('生成输入包含之前完整七日最新修订，不把第八日或他�
 test('任务关联标识贯穿成功与失败日程调用，失败详情保留费用回查标识',async()=>{
  const f=fixture();try{
   let observed:any;
-  const linked:Generator={async complete(c,system,user,signal,session,meta){observed=meta;return {text:JSON.stringify(content(JSON.parse(user).date)),input:1,output:1,cache:0,callId:'task-call-success'};}};
+  const linked:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,signal,session,meta){observed=meta;return {text:JSON.stringify(content(JSON.parse(user).date)),input:1,output:1,cache:0,callId:'task-call-success'};}};
   const success=new DailyStateService(f.store,linked,()=>structuredClone(exampleConfig) as Config,()=>f.now);
   const ready=await success.ensure('worker-a',{interactionId:'task-run-success'});
   assert.equal(observed.interactionId,'task-run-success');assert.equal(observed.purpose,'daily-state');assert.equal(observed.jsonObject,true);assert.equal(ready.interactionId,'task-run-success');assert.equal(ready.state?.interactionId,'task-run-success');assert.equal(ready.callId,'task-call-success');
-  const failing:Generator={async complete(c,system,user,signal,session,meta){observed=meta;throw Object.assign(new Error('模型失败'),{callId:'task-call-failed'});}};
+  const failing:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,signal,session,meta){observed=meta;throw Object.assign(new Error('模型失败'),{callId:'task-call-failed'});}};
   const service=new DailyStateService(f.store,failing,()=>structuredClone(exampleConfig) as Config,()=>f.now);
   const failed=await service.ensure('worker-b',{interactionId:'task-run-failure'});
   assert.equal(observed.interactionId,'task-run-failure');assert.equal(observed.jsonObject,true);assert.equal(failed.interactionId,'task-run-failure');assert.equal(failed.callId,'task-call-failed');assert.equal(service.describe('worker-b').interactionId,'task-run-failure');assert.equal(service.describe('worker-b').callId,'task-call-failed');

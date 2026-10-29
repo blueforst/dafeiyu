@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -12,7 +13,7 @@ import type { Event } from '../src/types.js';
 import type { Generator } from '../src/model.js';
 import { exampleConfig } from './config-fixture.js';
 
-const sectionsText=(persona:Persona)=>persona.sections.map(section=>section.content).join('\n\n');
+const sectionsText=(persona:Persona)=>[...persona.sections.map(section=>section.content),...persona.triggers.filter(t=>t.enabled).map(t=>'【'+t.title+'】\n'+t.content)].join('\n\n');
 function dailyContent(date:string):DailyContent {
  return {date,fictional:true,periods:[{start:'06:00',end:'24:00',activity:'读书与休息'}],meals:{breakfast:'粥',lunch:'米饭',dinner:'面条'},activities:['读书'],mood:'平静'};
 }
@@ -63,7 +64,7 @@ async function fixture(){
    if(!['reply','persona-preview'].includes(purpose))throw new Error('隔离测试不允许额外模型用途：'+purpose);
    return {text:JSON.stringify({action:'reply',text:'这一轮已收到。',reason:'回应当前消息'}),input:1,output:1,cache:0};
   };
-  current.workflow.generator.complete=complete;
+  current.workflow.generator.complete=complete;current.workflow.generator.converse=(...args)=>fakeConverse({complete},...args as [any,string,any[],any[]]);
   const readHeaders={host:'presets.test','x-ingress-key':ingress};
   const writeHeaders={...readHeaders,'x-workflow-control':'1',origin:'https://presets.test'};
   return {...current,calls,requests,unexpected,readHeaders,writeHeaders,
@@ -94,11 +95,11 @@ test('真实应用预设 GET 沿用鉴权和来源检查、免写标记，嵌套
   const response=await f.app.inject({url,headers:{...f.readHeaders,origin:'https://presets.test'}});
   assert.equal(response.statusCode,200,response.body);
   const snapshot=response.json();
-  assert.equal(snapshot.version,2);assert.equal(snapshot.version,PERSONA_PRESETS_VERSION);
+  assert.equal(snapshot.version,3);assert.equal(snapshot.version,PERSONA_PRESETS_VERSION);
   assert.deepEqual(snapshot.items.map((item:any)=>item.id),['default','deepseek','gpt','claude','kimi','glm']);
   assert.deepEqual(snapshot.items,PERSONA_PRESETS);
   snapshot.items[0].persona.sections[0].content='客户端修改';
-  snapshot.items[0].persona.triggers[0].keywords.push('客户端关键词');
+  snapshot.items[0].persona.triggers[0].condition='客户端条件';
   snapshot.items[1].bioSuggestion='客户端简介';
   const again=await f.app.inject({url,headers:f.readHeaders});
   assert.deepEqual(again.json(),{version:PERSONA_PRESETS_VERSION,items:PERSONA_PRESETS,fixedRules:FIXED_SYSTEM_RULES});
@@ -134,7 +135,7 @@ test('真实应用日程共用默认、自定义及已保存人设，只发送�
   const generate=(revision:number)=>f.app.inject({method:'POST',url:'/api/persona/daily/generate',headers:f.writeHeaders,payload:{revision}});
   const first=await generate(0);assert.equal(first.statusCode,200,first.body);assert.equal(first.json().state.revision,1);assert.equal(first.json().state.configRevision,0);
   assert.equal(JSON.parse(f.calls[0].user).persona,sectionsText(defaultPersona()));
-  for(const card of defaultPersona().triggers)assert.equal(JSON.parse(f.calls[0].user).persona.includes(card.content),false);
+  for(const card of defaultPersona().triggers)assert.equal(JSON.parse(f.calls[0].user).persona.includes(card.content),true);
   const custom='  管理员自定义角色\n保留原文与空白。\n';f.setConfigPersona(custom);
   const second=await generate(1);assert.equal(second.json().state.revision,2);assert.equal(second.json().state.configRevision,0);
   assert.equal(JSON.parse(f.calls[1].user).persona,custom);
@@ -144,7 +145,7 @@ test('真实应用日程共用默认、自定义及已保存人设，只发送�
   const before=(await f.app.inject({url:'/api/persona/daily',headers:f.readHeaders})).json();assert.equal(before.today.revision,2);assert.equal(f.calls.length,2);
   const third=await generate(2);assert.equal(third.statusCode,200,third.body);assert.equal(third.json().state.revision,3);assert.equal(third.json().state.configRevision,1);
   assert.equal(JSON.parse(f.calls[2].user).persona,sectionsText(selected));
-  assert.equal(JSON.parse(f.calls[2].user).persona.includes('本条触发正文不能进入日程'),false);
+  assert.equal(JSON.parse(f.calls[2].user).persona.includes('本条触发正文不能进入日程'),true);
   assert.deepEqual(f.calls.map(call=>call.purpose),['daily-state','daily-state','daily-state']);
   assert.equal(f.workflow.control(),'paused');assert.deepEqual(f.unexpected,[]);
  }finally{await f.close();}
@@ -159,7 +160,7 @@ test('真实生产工作流保留本轮人设快照，保存后的下一轮使�
   const gate=new Promise<void>(resolve=>release=resolve);
   f.onReply(async()=>{if(f.calls.filter(call=>call.purpose==='reply').length===1){entered();await gate;}});
   f.events([publicEvent('7001')]);await f.workflow.resume();pending=f.workflow.tick();
-  await Promise.race([generating,pending.then(()=>{throw new Error('工作流未进入回复生成');})]);
+  await Promise.race([generating,pending.then(()=>{throw new Error('工作流未进入回复生成：'+JSON.stringify({logs:f.store.logs(10),requests:f.requests,calls:f.calls}));})]);
   const chosen=structuredClone(PERSONA_PRESETS.find(item=>item.id==='claude')!.persona);
   const saved=await f.app.inject({method:'PUT',url:'/api/persona',headers:f.writeHeaders,payload:{persona:chosen,revision:0}});assert.equal(saved.statusCode,200,saved.body);assert.equal(f.workflow.control(),'running');
   release();await pending;pending=undefined;

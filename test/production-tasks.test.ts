@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -19,7 +20,7 @@ function fixture(){
  const dir=mkdtempSync(tmpdir()+'/style-production-'),previous=process.env.DATA_DIR;process.env.DATA_DIR=dir;
  const store=new Store(dir+'/workflow.sqlite'),config={...structuredClone(exampleConfig),mode:'auto'} as Config;
  const calls:Array<{system:string;user:string;meta:any}>=[],posts:string[]=[];
- const generator={complete:async(_c:any,system:string,user:string,_signal?:AbortSignal,_session?:string,meta?:any)=>{calls.push({system,user,meta});return {text:JSON.stringify({action:'reply',text:'## 早上好\n**一起出门走走吧**',reason:''}),input:1,output:1,cache:0};}};
+ const generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async(_c:any,system:string,user:string,_signal?:AbortSignal,_session?:string,meta?:any)=>{calls.push({system,user,meta});return {text:JSON.stringify({action:'reply',text:'## 早上好\n**一起出门走走吧**',reason:''}),input:1,output:1,cache:0};}};
  const transport:Transport={identity:async()=>({handle:'worker',loggedIn:true,needsHuman:false}),control:async()=>{},collect:async()=>({events:[],warnings:[]}),context:async()=>'',send:async()=>({status:'confirmed',id:'unused'}),lookup:async()=>({status:'unknown'}),post:async text=>{posts.push(text);return {status:'confirmed',id:'generated-post'};},lookupPost:async()=>({status:'unknown'})};
  const workflow=new Workflow(store,transport,generator,()=>config),outbox=new Outbox(store),memory=new MemoryService(store,generator,()=>config),persona=new PersonaService(store,generator,()=>config),experiences=new RoleExperienceService(store,()=> 'worker');
  persona.get=()=>({persona:legacyPersona('问候帖隔离角色'),revision:0,fixedRules:''});
@@ -36,7 +37,7 @@ test('早晚安帖召回确认帖子与人工经历、排除隐藏项，只加�
   f.memory.recordExperience({accountId:'other',userId:'role',channel:'public',kind:'post',text:'其他账号的帖子原文',receipt:{status:'confirmed',id:'other-post'}});
   f.experiences.create({text:'管理员登记的散步经历',occurredAt:'2026-10-27',revision:f.experiences.list().revision});
   await f.workflow.resume();const time=new Date(Date.now()+8*3600000).toISOString().slice(11,16);f.scheduler.configure(taskId,{enabled:true,time});
-  const run=await f.scheduler.runNow(taskId);assert.equal(run.status,'completed');assert.equal(run.error,null);assert.deepEqual(run.result?.format,{issues:['markdown']});assert.equal(f.calls.length,1);assert.equal(f.calls[0].meta.jsonObject,true);assert.equal(f.posts.length,1);assert.equal(f.posts[0],'## 早上好\n**一起出门走走吧**');
+  const run=await f.scheduler.runNow(taskId);assert.equal(run.status,'completed');assert.equal(run.error,null);assert.deepEqual(run.result?.format,{issues:['markdown']});assert.equal(f.calls.length,1);assert.equal(f.calls[0].meta.jsonObject,false);assert.equal(f.posts.length,1);assert.equal(f.posts[0],'## 早上好\n**一起出门走走吧**');
   assert.ok(f.calls[0].user.includes('前两天发过的独特开头'));assert.ok(f.calls[0].user.includes('管理员登记的散步经历'));assert.ok(!f.calls[0].user.includes('已经隐藏的帖子原文'));assert.ok(!f.calls[0].user.includes('其他账号的帖子原文'));assert.ok(f.calls[0].user.includes('这条帖子不要重复它们的开头、句式和切入点'));assert.ok(f.calls[0].user.includes('今天去散步'));
   assert.deepEqual(JSON.parse(f.store.get('task-result:'+run.id)),{format:{issues:['markdown']}});assert.ok(!JSON.stringify(run.result).includes('早上好'));assert.deepEqual((f.feed.list({filter:'post'}).items[0] as any).format,{issues:['markdown']});
   const ordinary=await f.persona.assemble({accountId:'worker',channel:'public',message:'普通回复'});assert.ok(!ordinary.hints.some(h=>h.kind==='post-variety'));assert.ok(!ordinary.user.includes('这条帖子不要重复它们的开头、句式和切入点'));assert.equal(f.calls.length,1);

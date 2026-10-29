@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -16,7 +17,7 @@ function fixture(run?:(n:number,system:string,user:string,c:Config,meta:any)=>Pr
  const dir=mkdtempSync(join(tmpdir(),'role-persona-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=dir;
  const store=new Store(join(dir,'workflow.sqlite'));store.set('control','paused');let requests=0;
  const invocations:any[]=[];
- const generator:Generator={async complete(c,system,user,signal,session,meta){requests++;invocations.push({c,system,user,signal,session,meta});return run?run(requests,system,user,c,meta):{text:'{"action":"reply","text":"你好","reason":"回应"}',input:10,output:5,cache:0};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,signal,session,meta){requests++;invocations.push({c,system,user,signal,session,meta});return run?run(requests,system,user,c,meta):{text:'{"action":"reply","text":"你好","reason":"回应"}',input:10,output:5,cache:0};}};
  const service=new PersonaService(store,generator,()=>structuredClone(exampleConfig) as Config);
  return {store,service,invocations,get requests(){return requests;},close(){store.db.close();if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;rmSync(dir,{recursive:true,force:true});}};
 }
@@ -56,19 +57,14 @@ test('无启用规则时无语义请求，固定约束始终存在',async()=>{
  }finally{f.close();}
 });
 
-test('一次路由覆盖全部启用条件，未知重复ID忽略并按配置顺序注入',async()=>{
- const f=fixture(async()=>({text:JSON.stringify({matches:[{id:'later',reason:'书籍'},{id:'alien',reason:'未知'},{id:'first',reason:'阅读'},{id:'later',reason:'重复'},{id:'off',reason:'关闭'}]}),input:8,output:20,cache:0}));
- try{
-  const a=await f.service.assemble({persona:rules(),accountId:'worker-a',channel:'public',message:'谈谈阅读',sessionId:'stable-session',interactionId:'interaction-1'});
-  assert.equal(f.requests,1);assert.deepEqual(a.hits.map(h=>h.id),['first','later']);assert.ok(a.user.indexOf('命中前序正文')<a.user.indexOf('命中后序正文'));assert.ok(!a.system.includes('命中前序正文'));assert.ok(!a.user.includes('禁止注入的关闭正文'));
-  const request=f.invocations[0],routing=JSON.parse(request.user);assert.deepEqual(routing.rules.map((r:any)=>r.id),['first','later']);assert.ok(!request.user.includes('命中前序正文'));assert.equal(request.meta.purpose,'semantic-trigger');assert.equal(request.meta.jsonObject,true);assert.equal(request.meta.interactionId,'interaction-1');assert.equal(request.session,'stable-session');assert.equal(request.c.model.maxTokens,512);assert.equal(request.c.model.reasoning,false);
- }finally{f.close();}
+test('组装零模型调用，启用卡目录按配置顺序且不带正文',async()=>{
+ const f=fixture();try{const a=await f.service.assemble({persona:rules(),accountId:'worker-a',channel:'public',message:'谈谈阅读',sessionId:'stable-session',interactionId:'interaction-1'});assert.equal(f.requests,0);assert.deepEqual(a.hits,[]);assert.deepEqual(a.cards.map(c=>c.id),['first','later']);assert.ok(a.system.indexOf('first｜')<a.system.indexOf('later｜'));for(const word of ['命中前序正文','命中后序正文','禁止注入的关闭正文'])assert.ok(!a.system.includes(word)&&!a.user.includes(word));assert.equal(a.interactionId,'interaction-1');}finally{f.close();}
 });
 
 test('格式失败回退静态内容、不重复路由，公开内容不带私信',async()=>{
  const f=fixture(async()=>({text:'不能解析',input:10,output:2,cache:0}));try{
   const a=await f.service.assemble({persona:rules(),accountId:'worker-a',channel:'public',message:'你好',memory:[{visibility:'private',summary:'私密资料'},{visibility:'public',summary:'公开资料'}],conversation:[{channel:'private',message:'私信内容'},{channel:'public',message:'公开对话'}]});
-  assert.equal(f.requests,1);assert.ok(a.warning?.includes('静态'));assert.equal(a.hits.length,0);assert.ok(a.system.includes('原有角色定义'));assert.ok(!a.system.includes('命中前序正文'));assert.ok(!a.user.includes('私密资料'));assert.ok(!a.user.includes('私信内容'));assert.ok(a.user.includes('公开资料'));
+  assert.equal(f.requests,0);assert.equal(a.warning,undefined);assert.equal(a.hits.length,0);assert.ok(a.system.includes('原有角色定义'));assert.ok(!a.system.includes('命中前序正文'));assert.ok(!a.user.includes('私密资料'));assert.ok(!a.user.includes('私信内容'));assert.ok(a.user.includes('公开资料'));
   assert.deepEqual(visibleContext([{channel:'private',text:'x'}],'private'),[{channel:'private',text:'x'}]);
  }finally{f.close();}
 });
@@ -78,7 +74,7 @@ test('生成保存后仍使用当前快照，日程与真实经历分层',async(
  const f=fixture(async()=>new Promise(resolve=>{finish=resolve;}));try{
   const persona=rules();const pending=f.service.assemble({persona,accountId:'worker-a',channel:'public',message:'阅读',dailyState:{fictional:true,activity:'散步'},experiences:[{visibility:'public',sourceId:'receipt-1',summary:'回复过问题'}]});
   await Promise.resolve();await Promise.resolve();persona.sections[0].content='后来的编辑';
-  finish({text:'{"matches":[]}',input:1,output:1,cache:0});const a=await pending;
+  const a=await pending;assert.equal(f.requests,0);
   assert.ok(a.system.includes('原有角色定义'));assert.ok(!a.system.includes('后来的编辑'));const daily=JSON.parse(a.segments.find(s=>s.kind==='daily')!.content),experiences=JSON.parse(a.segments.find(s=>s.kind==='experiences')!.content);assert.equal(daily.fictional,true);assert.equal(experiences.fictional,false);
  }finally{f.close();}
 });
@@ -87,15 +83,15 @@ test('未保存的多轮试聊使用模拟记忆且不写消息、记忆或人�
  const f=fixture(async(n)=>({text:n===1?'{}':'{"action":"reply","text":"收到","reason":"试聊"}',input:10,output:10,cache:0}));try{
   const p=legacyPersona('未保存人格');const result=await f.service.preview({persona:p,channel:'private',messages:[{role:'user',text:'第一轮'},{role:'assistant',text:'你好'},{role:'user',text:'第二轮'}]});
   // 该人格无规则，因此只有最终生成；其格式失败也不能写入真实状态。
-  assert.equal(f.requests,1);assert.equal(result.draft,null);assert.ok(result.error);assert.equal(f.invocations[0].meta.jsonObject,true);assert.ok(f.invocations[0].system.includes('未保存人格'));assert.ok(f.invocations[0].user.includes('第一轮'));assert.ok(f.invocations[0].user.includes('simulated'));
+  assert.equal(f.requests,1);assert.equal(result.draft,null);assert.ok(result.error);assert.equal(f.invocations[0].meta.jsonObject,false);assert.ok(f.invocations[0].system.includes('未保存人格'));assert.ok(f.invocations[0].user.includes('第一轮'));assert.ok(f.invocations[0].user.includes('simulated'));
   assert.equal(Number((f.store.db.prepare('SELECT COUNT(*) AS n FROM messages').get() as any).n),0);assert.equal(Number((f.store.db.prepare('SELECT COUNT(*) AS n FROM memory').get() as any).n),0);assert.equal(readPanelSettings().persona,undefined);
  }finally{f.close();}
 });
 
-test('试聊汇总路由与生成费用，思考不重复累计，格式失败仍保留调用',async()=>{
+test('试聊每轮实际调用汇总费用，格式失败保留已发生用量',async()=>{
  const f=fixture(async n=>({text:n===1?'的确不是JSON':'{"action":"reply","text":"收到","reason":"回应"}',input:20,output:10,cache:4,cost:{input:.00001,output:.00002,cacheRead:0,cacheWrite:0,total:.00003},pricingStatus:'priced'}));try{
-  const result=await f.service.preview({persona:rules(),channel:'public',messages:[{role:'user',text:'你好'}]});
-  assert.equal(result.draft?.text,'收到');assert.equal(f.requests,2);assert.equal(result.fees.requests,2);assert.equal(result.fees.estimatedUsd,.00006);assert.equal(result.calls[0].purpose,'semantic-trigger');assert.ok(result.warning);
+  const first=await f.service.preview({persona:rules(),channel:'public',messages:[{role:'user',text:'你好'}]});assert.equal(first.draft,null);assert.ok(first.error);assert.equal(first.fees.requests,1);assert.equal(first.fees.estimatedUsd,.00003);
+  const second=await f.service.preview({persona:rules(),channel:'public',messages:[{role:'user',text:'你好'}]});assert.equal(second.draft?.text,'收到');assert.equal(second.fees.requests,1);assert.equal(second.calls[0].purpose,'persona-preview');assert.equal(f.requests,2);assert.equal(second.warning,undefined);
  }finally{f.close();}
 });
 

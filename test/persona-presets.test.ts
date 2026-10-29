@@ -1,10 +1,11 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {PERSONA_PRESETS,PERSONA_PRESETS_VERSION,LEGACY_EXAMPLE_PERSONA,DEFAULT_PERSONA_ROLE,defaultPersona,resolvePersona} from '../src/persona-presets.js';
-import {PersonaService,legacyPersona,validatePersona,matchedKeyword,normalizeTriggerText,type Persona} from '../src/persona.js';
+import {PERSONA_PRESETS,PERSONA_PRESETS_VERSION,PERSONA_PRESETS_V2,LEGACY_EXAMPLE_PERSONA,DEFAULT_PERSONA_ROLE,defaultPersona,resolvePersona} from '../src/persona-presets.js';
+import {PersonaService,legacyPersona,validatePersona,type Persona} from '../src/persona.js';
 import {Store} from '../src/store.js';
 import type {Config} from '../src/types.js';
 import type {Generator} from '../src/model.js';
@@ -36,11 +37,11 @@ const COMMON_MESSAGES=[
  'a memorable evening','show tomorrow','tokenizer and tokenization are ready','明天也来问好','准备睡觉了','今天的落日真好看','这句话很有趣','周末愉快','欢迎你来聊天',
 ];
 const text=(persona:Persona)=>persona.sections.map(s=>s.content).join('\n')+'\n'+persona.triggers.map(t=>t.condition+'\n'+t.content+'\n'+(t.keywords??[]).join('、')).join('\n');
-const section=(persona:Persona,id:string)=>{const result=persona.sections.find(s=>s.id===id);assert.ok(result,'缺少分区 '+id);return result.content;};
+const section=(persona:Persona,id:string)=>{const result=[...persona.sections,...persona.triggers].find(s=>s.id===id);assert.ok(result,'缺少分区 '+id);return result.content;};
 const length=(persona:Persona)=>persona.sections.reduce((n,s)=>n+s.content.length,0)+persona.triggers.reduce((n,t)=>n+t.condition.length+t.content.length+(t.keywords??[]).reduce((sum,k)=>sum+k.length,0),0);
 
 test('六个预设按固定ID顺序发布version2，元数据完整且都通过正式人设校验与预算',()=>{
- assert.equal(PERSONA_PRESETS_VERSION,2);assert.deepEqual(PERSONA_PRESETS.map(p=>p.id),IDS);assert.deepEqual(PERSONA_PRESETS.map(p=>p.name),NAMES);
+ assert.equal(PERSONA_PRESETS_VERSION,3);assert.deepEqual(PERSONA_PRESETS.map(p=>p.id),IDS);assert.deepEqual(PERSONA_PRESETS.map(p=>p.name),NAMES);
  for(const preset of PERSONA_PRESETS){
   assert.equal(typeof preset.summary,'string');assert.ok(preset.summary.trim());assert.ok(preset.summary.length<=150);
   assert.deepEqual(validatePersona(preset.persona),preset.persona);assert.ok(length(preset.persona)<=(preset.id==='default'?1500:4000),preset.id+'超出预设预算');
@@ -50,13 +51,12 @@ test('六个预设按固定ID顺序发布version2，元数据完整且都通过�
  assert.equal(PERSONA_PRESETS[0].bioSuggestion,'AI 自动回复');assert.equal(PERSONA_PRESETS[0].persona.sections.length,4);assert.equal(PERSONA_PRESETS[0].persona.triggers.length,2);
 });
 
-test('角色预设另有四个被问到才用分区，第一行明确条件且往事不能冒充今日事实',()=>{
- for(const preset of PERSONA_PRESETS.slice(1)){
-  assert.equal(preset.persona.sections.length,8);assert.deepEqual(preset.persona.sections.slice(4).map(s=>s.id),CONDITIONAL_IDS);
-  for(const id of CONDITIONAL_IDS){assert.ok(preset.persona.sections.find(s=>s.id===id)!.title.includes('被问到才用'));const content=section(preset.persona,id),first=content.split('\n')[0];assert.match(first,/问|提到|聊到/);assert.match(first,/才/);if(id!=='identity')assert.match(first,/平时|主动/);assert.ok(content.includes('\n'),preset.id+'/'+id+'缺少条件后的正文');}
-  const self=section(preset.persona,'self');assert.match(self,/喜欢/);assert.match(self,/讨厌|不喜欢/);assert.match(self,/缺点/);assert.match(self,/以前/);assert.match(self,/今天不要再发生一遍/);assert.match(self,/一致|前后/);
-  const appearance=section(preset.persona,'appearance');assert.match(appearance,/发|髮/);assert.match(appearance,/装|裙|礼服|洋装|服|衣着/);
-  assert.match(section(preset.persona,'friends'),/娘|大肥鱼/);
+test('角色预设的四个按需资料改为触发卡，原正文与往事约束保留',()=>{
+ for(const [i,preset]of PERSONA_PRESETS.entries()){
+  assert.deepEqual(preset.persona.sections,PERSONA_PRESETS_V2[i].persona.sections.slice(0,4));
+  if(i===0)continue;assert.deepEqual(preset.persona.triggers.slice(2,6).map(t=>t.id),CONDITIONAL_IDS);
+  for(const id of CONDITIONAL_IDS){const card=preset.persona.triggers.find(t=>t.id===id)!;assert.ok(card);assert.match(card.condition,/对方/);assert.equal(card.content,PERSONA_PRESETS_V2[i].persona.sections.find(t=>t.id===id)!.content.split('\n').slice(1).join('\n'));}
+  assert.match(section(preset.persona,'self'),/今天不要再发生一遍/);assert.match(section(preset.persona,'appearance'),/发|髮/);
  }
 });
 
@@ -114,7 +114,7 @@ test('所有预设保留AI披露、色情与恶意边界以及危机认真回应
   assert.match(boundaries,/色情/);assert.match(boundaries,/双关/);assert.match(boundaries,/不接|不回应|跳过/);assert.match(boundaries,/不装|不能装/);assert.match(boundaries,/辱骂/);assert.match(boundaries,/挑衅/);assert.match(boundaries,/举报/);assert.match(boundaries,/不还嘴/);assert.match(boundaries,/不阴阳怪气/);assert.match(boundaries,/友好/);
   for(const marker of ['政治','仇恨','钱物','联系方式','自伤','自杀'])assert.ok(boundaries.includes(marker),preset.id+'缺少边界 '+marker);
   assert.match(boundaries,/收起.{0,8}玩笑/);assert.match(boundaries,/认真/);assert.match(boundaries,/身边/);assert.match(boundaries,/专业援助|专业帮助/);
-  for(const trigger of preset.persona.triggers.filter(t=>!t.id.endsWith('-no-steps'))){assert.match(trigger.content,/友好/);assert.match(trigger.content,/恶意/);assert.match(trigger.content,/色情/);assert.match(trigger.content,/危机/);assert.match(trigger.content,/优先.{0,8}互动边界|互动边界.{0,8}优先/);}
+  for(const trigger of preset.persona.triggers.filter(t=>!t.id.endsWith('-no-steps')&&!CONDITIONAL_IDS.includes(t.id))){assert.match(trigger.content,/友好/);assert.match(trigger.content,/恶意/);assert.match(trigger.content,/色情/);assert.match(trigger.content,/危机/);assert.match(trigger.content,/优先.{0,8}互动边界|互动边界.{0,8}优先/);}
   const noSteps=preset.persona.triggers.find(t=>t.id===preset.id+'-no-steps')!;assert.match(noSteps.content,/危机/);assert.match(noSteps.content,/优先/);
  }
 });
@@ -136,82 +136,59 @@ test('预设没有引用禁止素材或无频率的偶尔说法，默认保持�
  assert.equal(section(PERSONA_PRESETS[0].persona,'role'),DEFAULT_PERSONA_ROLE);assert.match(DEFAULT_PERSONA_ROLE,/虚构/);assert.match(DEFAULT_PERSONA_ROLE,/角色设定/);assert.match(DEFAULT_PERSONA_ROLE,/不是真实经历/);
 });
 
-test('卡片全为启用的关键词卡、有序且ID带预设前缀，不用自己的名称或其单字触发招牌',()=>{
- for(const preset of PERSONA_PRESETS){
-  assert.deepEqual(preset.persona.triggers.map(t=>t.order),preset.persona.triggers.map((_,i)=>i));assert.ok(preset.id==='default'?preset.persona.triggers.length===2:preset.persona.triggers.length>=4&&preset.persona.triggers.length<=5);
-  for(const trigger of preset.persona.triggers){assert.equal(trigger.match,'keywords');assert.equal(trigger.enabled,true);assert.ok(trigger.id.startsWith(preset.id+'-'));assert.match(trigger.condition,/消息包含以下任一关键词/);assert.ok(trigger.keywords?.length);assert.ok(trigger.keywords!.length<=30);
-   for(const keyword of trigger.keywords!){assert.equal(keyword,keyword.normalize('NFKC').trim());assert.equal(keyword,keyword.toLowerCase());assert.ok(keyword.length>=1&&keyword.length<=40);if(!trigger.id.endsWith('-no-steps'))for(const alias of ALIASES[preset.id])assert.ok(!normalizeTriggerText(alias).includes(normalizeTriggerText(keyword)),preset.id+'关键词被自身名称包含：'+keyword);}
-  }
- }
+test('预设卡有序启用、目录说明按语义写且不再保存关键词字段',()=>{
+ for(const preset of PERSONA_PRESETS){assert.deepEqual(preset.persona.triggers.map(t=>t.order),preset.persona.triggers.map((_,i)=>i));for(const trigger of preset.persona.triggers){assert.equal(trigger.enabled,true);assert.equal(Object.hasOwn(trigger,'match'),false);assert.equal(Object.hasOwn(trigger,'keywords'),false);assert.ok(trigger.condition.trim());assert.doesNotMatch(trigger.condition,/消息包含以下任一关键词/);}}
 });
 
-test('每个预设的不给步骤卡命中简体繁体英文和全角英文，提醒不列步骤不装懂',()=>{
- const cases=[['番茄炒蛋怎么做','怎么做'],['番茄炒蛋怎麼做，請給我步驟','怎麼做'],['how to make breakfast?','how to make'],['Could you give me a tutorial?','tutorial'],['ＨＯＷ ＴＯ make breakfast?','how to make']];
- for(const preset of PERSONA_PRESETS){const trigger=preset.persona.triggers.find(t=>t.id===preset.id+'-no-steps');assert.ok(trigger);for(const [message,keyword] of cases)assert.equal(matchedKeyword(trigger,message),keyword,preset.id+'没有覆盖 '+message);assert.match(trigger.content,/步骤/);assert.match(trigger.content,/菜谱/);assert.match(trigger.content,/教程/);assert.match(trigger.content,/不知道就说不知道|不懂就说不懂/);}
+test('六预设不给步骤卡用适用意思描述，保留不装懂和危机边界',()=>{
+ for(const preset of PERSONA_PRESETS){const trigger=preset.persona.triggers.find(t=>t.id===preset.id+'-no-steps')!;assert.match(trigger.condition,/做法.*教程.*步骤.*清单.*攻略/);for(const word of ['步骤','菜谱','教程','危机'])assert.ok(trigger.content.includes(word));assert.match(trigger.content,/不知道就说不知道|不懂就说不懂/);}
 });
 
-test('六预设被夸卡命中夸奖而不把否定、英文普通词或角色问候当夸奖',()=>{
- for(const preset of PERSONA_PRESETS){
-  const trigger=preset.persona.triggers.find(t=>t.id===preset.id+'-praise');assert.ok(trigger);
-  for(const message of ['你好可爱','好厉害','好可愛','很厲害','You are so cute!','SO CUTE'])assert.notEqual(matchedKeyword(trigger,message),undefined,preset.id+'漏掉 '+message);
-  for(const message of ['我不喜欢你','execute','execution',preset.name+'早上好',...ALIASES[preset.id].map(alias=>alias+'你好')])assert.equal(matchedKeyword(trigger,message),undefined,preset.id+'误把消息当夸奖 '+message);
-  assert.match(trigger.content,/只在对方夸的是你时/);assert.match(trigger.content,/说话风格.{0,5}口吻/);assert.match(trigger.content,/不以谢谢开头/);assert.match(trigger.content,/不说“过奖了”/);assert.match(trigger.content,/反话|嘲讽/);assert.match(trigger.content,/互动边界/);
-  assert.notEqual(matchedKeyword(trigger,'这只猫好可爱'),undefined,'子串匹配可能命中夸别物，须由正文限定适用对象');
- }
+test('六预设被夸卡明确对象，排除反话嘲讽骚扰并保留原内容边界',()=>{
+ for(const preset of PERSONA_PRESETS){const trigger=preset.persona.triggers.find(t=>t.id===preset.id+'-praise')!;assert.match(trigger.condition,/夸你本人/);assert.match(trigger.condition,/反话.*嘲讽.*骚扰/);assert.match(trigger.content,/只在对方夸的是你时/);assert.match(trigger.content,/不以谢谢开头/);assert.match(trigger.content,/不说“过奖了”/);assert.match(trigger.content,/互动边界/);}
 });
 
-test('全部招牌卡的典型消息命中，普通三十条含自身问候demo与memo不会误触',()=>{
- assert.equal(COMMON_MESSAGES.length,29);
- for(const preset of PERSONA_PRESETS){
-  for(const trigger of preset.persona.triggers.filter(t=>!t.id.endsWith('-no-steps'))){assert.ok(TYPICAL[trigger.id],'测试需补充招牌卡 '+trigger.id);assert.notEqual(matchedKeyword(trigger,TYPICAL[trigger.id]),undefined,trigger.id+'未命中典型消息');}
-  const ordinary=[...COMMON_MESSAGES,preset.name+'早上好'];assert.equal(ordinary.length,30);
-  for(const message of ordinary)for(const trigger of preset.persona.triggers)assert.equal(matchedKeyword(trigger,message),undefined,preset.id+'/'+trigger.id+'误触普通消息：'+message);
-  for(const trigger of preset.persona.triggers)assert.equal(matchedKeyword(trigger,'@tutorial_reader 早上好'),undefined,'账号名不应触发关键词');
- }
+test('全部角色专属卡保留v2正文和防滥用边界，迁移只改目录说明',()=>{
+ for(const [i,preset]of PERSONA_PRESETS.entries())for(const trigger of preset.persona.triggers.filter(t=>t.id.startsWith(preset.id+'-'))){const old=PERSONA_PRESETS_V2[i].persona.triggers.find(t=>t.id===trigger.id)!;assert.equal(trigger.content,old.content);assert.match(trigger.condition,/对方/);}
 });
 
 function fixture(){
  const directory=mkdtempSync(join(tmpdir(),'role-presets-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=directory;
  const store=new Store(join(directory,'workflow.sqlite')),calls:any[]=[],config=structuredClone(exampleConfig) as Config;
- const generator:Generator={async complete(c,system,user,signal,session,meta){calls.push({c,system,user,signal,session,meta});return {text:'{"action":"reply","text":"按当前角色自然回应","reason":"模拟回归"}',input:8,output:4,cache:2};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,signal,session,meta){calls.push({c,system,user,signal,session,meta});return {text:'{"action":"reply","text":"按当前角色自然回应","reason":"模拟回归"}',input:8,output:4,cache:2};}};
  const service=new PersonaService(store,generator,()=>config);
  return {store,service,calls,close(){store.db.close();if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;rmSync(directory,{recursive:true,force:true});}};
 }
 
-test('实际组装命中关键词但不发语义请求，六个预设试聊均只有一次回复生成且不保存',async()=>{
- const f=fixture();try{
-  for(const preset of PERSONA_PRESETS){const before=f.calls.length,assembled=await f.service.assemble({accountId:'presets-test',channel:'public',message:'番茄炒蛋怎么做',persona:preset.persona});assert.equal(f.calls.length,before);assert.ok(assembled.hits.some(hit=>hit.id===preset.id+'-no-steps'&&hit.reason==='关键词：怎么做'));assert.ok(assembled.user.includes(preset.persona.triggers.find(t=>t.id===preset.id+'-no-steps')!.content));
-   const result=await f.service.preview({persona:preset.persona,channel:'public',messages:[{role:'user',text:'番茄炒蛋怎么做'}]});assert.equal(result.draft?.action,'reply');assert.equal(f.calls.length,before+1);assert.equal(f.calls.at(-1).meta.purpose,'persona-preview');assert.equal(result.fees.requests,1);
-  }
-  assert.equal((f.store.db.prepare('SELECT COUNT(*) AS n FROM messages').get() as any).n,0);assert.equal(f.calls.filter(call=>call.meta.purpose==='semantic-trigger').length,0);
- }finally{f.close();}
+test('实际组装只放目录，未读卡的六预设试聊仅一次请求且不保存',async()=>{
+ const f=fixture();try{for(const preset of PERSONA_PRESETS){const before=f.calls.length,assembled=await f.service.assemble({accountId:'presets-test',channel:'public',message:'番茄炒蛋怎么做',persona:preset.persona});assert.equal(f.calls.length,before);assert.deepEqual(assembled.hits,[]);assert.ok(assembled.system.includes('read_card'));for(const card of preset.persona.triggers)assert.ok(!assembled.user.includes(card.content));const result=await f.service.preview({persona:preset.persona,channel:'public',messages:[{role:'user',text:'你好'}]});assert.equal(result.draft?.action,'reply');assert.equal(f.calls.length,before+1);assert.equal(result.fees.requests,1);}assert.equal((f.store.db.prepare('SELECT COUNT(*) AS n FROM messages').get() as any).n,0);}finally{f.close();}
 });
 
 test('友好梗即使命中恶意或危机字样，实际提示词仍同时保留严肃互动边界',async()=>{
  const f=fixture();try{
   for(const preset of PERSONA_PRESETS.slice(1)){const trigger=preset.persona.triggers.find(t=>!t.id.endsWith('-no-steps'))!,message=TYPICAL[trigger.id]+'。这是恶意挑衅，同时我提到自伤与色情双关。',assembled=await f.service.assemble({accountId:'presets-test',channel:'public',message,persona:preset.persona});
-   assert.ok(assembled.hits.some(hit=>hit.id===trigger.id));assert.ok(assembled.system.includes(section(preset.persona,'boundaries')));assert.ok(assembled.user.includes(trigger.content));assert.match(assembled.user,/危机/);assert.equal(assembled.calls.length,0);
+   assert.deepEqual(assembled.hits,[]);assert.ok(assembled.system.includes(section(preset.persona,'boundaries')));assert.ok(!assembled.user.includes(trigger.content));assert.match(assembled.system,/危机/);assert.equal(assembled.calls.length,0);
   }
   assert.equal(f.calls.length,0);
  }finally{f.close();}
 });
 
 test('默认人设返回深拷贝，嵌套分区与关键词编辑不污染常量或下一次读取',()=>{
- const before=JSON.stringify(PERSONA_PRESETS),first=defaultPersona(),second=defaultPersona();assert.deepEqual(first,PERSONA_PRESETS[0].persona);assert.notEqual(first,second);assert.notEqual(first.sections[0],second.sections[0]);assert.notEqual(first.triggers[0].keywords,second.triggers[0].keywords);
- first.sections[0].content='编辑草稿';first.triggers[0].keywords![0]='编辑关键词';first.sections.pop();first.triggers.push({...first.triggers[0],id:'draft-only'});
+ const before=JSON.stringify(PERSONA_PRESETS),first=defaultPersona(),second=defaultPersona();assert.deepEqual(first,PERSONA_PRESETS[0].persona);assert.notEqual(first,second);assert.notEqual(first.sections[0],second.sections[0]);assert.notEqual(first.triggers[0],second.triggers[0]);
+ first.sections[0].content='编辑草稿';first.triggers[0].condition='编辑条件';first.sections.pop();first.triggers.push({...first.triggers[0],id:'draft-only'});
  assert.deepEqual(defaultPersona(),second);assert.equal(JSON.stringify(PERSONA_PRESETS),before);
 });
 
 test('预设常量树不可改写，返回的普通草稿副本仍允许编辑',()=>{
  assert.ok(Object.isFrozen(PERSONA_PRESETS));
- for(const preset of PERSONA_PRESETS){assert.ok(Object.isFrozen(preset));assert.ok(Object.isFrozen(preset.persona));assert.ok(Object.isFrozen(preset.persona.sections));assert.ok(Object.isFrozen(preset.persona.triggers));for(const value of preset.persona.sections)assert.ok(Object.isFrozen(value));for(const value of preset.persona.triggers){assert.ok(Object.isFrozen(value));assert.ok(Object.isFrozen(value.keywords));}}
- assert.throws(()=>{PERSONA_PRESETS[0].name='污染常量';},TypeError);assert.throws(()=>{PERSONA_PRESETS[0].persona.sections[0].content='污染常量';},TypeError);assert.throws(()=>{PERSONA_PRESETS[0].persona.triggers[0].keywords!.push('污染常量');},TypeError);
- const editable=defaultPersona();editable.sections[0].content='可编辑草稿';editable.triggers[0].keywords!.push('新增的草稿关键词');assert.equal(editable.sections[0].content,'可编辑草稿');assert.ok(editable.triggers[0].keywords!.includes('新增的草稿关键词'));assert.ok(!defaultPersona().triggers[0].keywords!.includes('新增的草稿关键词'));
+ for(const preset of PERSONA_PRESETS){assert.ok(Object.isFrozen(preset));assert.ok(Object.isFrozen(preset.persona));assert.ok(Object.isFrozen(preset.persona.sections));assert.ok(Object.isFrozen(preset.persona.triggers));for(const value of preset.persona.sections)assert.ok(Object.isFrozen(value));for(const value of preset.persona.triggers){assert.ok(Object.isFrozen(value));}}
+ assert.throws(()=>{PERSONA_PRESETS[0].name='污染常量';},TypeError);assert.throws(()=>{PERSONA_PRESETS[0].persona.sections[0].content='污染常量';},TypeError);assert.throws(()=>{PERSONA_PRESETS[0].persona.triggers[0].condition='污染常量';},TypeError);
+ const editable=defaultPersona();editable.sections[0].content='可编辑草稿';editable.triggers[0].condition='新增的草稿条件';assert.equal(editable.sections[0].content,'可编辑草稿');assert.equal(editable.triggers[0].condition,'新增的草稿条件');assert.notEqual(defaultPersona().triggers[0].condition,editable.triggers[0].condition);
 });
 
 test('resolve优先正式校验面板保存，包含示例文字的已保存版本不自动换成预设',()=>{
  const saved=legacyPersona(LEGACY_EXAMPLE_PERSONA),resolved=resolvePersona(saved,DEFAULT_PERSONA_ROLE);assert.deepEqual(resolved,saved);assert.equal(resolved.triggers.length,0);assert.notEqual(resolved,saved);resolved.sections[0].content='本地修改';assert.equal(saved.sections[0].content,LEGACY_EXAMPLE_PERSONA);
- const withTrigger=structuredClone(PERSONA_PRESETS[1].persona),copy=resolvePersona(withTrigger,'配置文件里的其他人设');copy.triggers[0].keywords![0]='修改';assert.notEqual(copy.triggers[0].keywords![0],withTrigger.triggers[0].keywords![0]);
+ const withTrigger=structuredClone(PERSONA_PRESETS[1].persona),copy=resolvePersona(withTrigger,'配置文件里的其他人设');copy.triggers[0].condition='修改';assert.notEqual(copy.triggers[0].condition,withTrigger.triggers[0].condition);
  for(const invalid of [null,false,0,'不是结构',{},{sections:[],triggers:[]}])assert.throws(()=>resolvePersona(invalid,LEGACY_EXAMPLE_PERSONA),/人设|静态/);
 });
 
@@ -220,5 +197,5 @@ test('resolve只以trim后精确比较两个随版本示例，单字和内部空
  for(const example of [LEGACY_EXAMPLE_PERSONA,DEFAULT_PERSONA_ROLE])for(const value of [example,' \n'+example+'\t','　'+example+'　'])assert.deepEqual(resolvePersona(undefined,value),defaultPersona());
  const customized=['  管理员自己写的人格\n保留空白  ',LEGACY_EXAMPLE_PERSONA.replace('友善','友好'),LEGACY_EXAMPLE_PERSONA.replace('AI','AI  '),DEFAULT_PERSONA_ROLE.replace('运营','运行'),DEFAULT_PERSONA_ROLE.replace('，','，\n')];
  for(const value of customized){const resolved=resolvePersona(undefined,value);assert.deepEqual(resolved,legacyPersona(value));assert.equal(resolved.sections[0].content,value);assert.equal(resolved.triggers.length,0);}
- const a=resolvePersona(undefined,LEGACY_EXAMPLE_PERSONA);a.triggers[0].keywords![0]='仅本次修改';assert.deepEqual(resolvePersona(undefined,DEFAULT_PERSONA_ROLE),defaultPersona());
+ const a=resolvePersona(undefined,LEGACY_EXAMPLE_PERSONA);a.triggers[0].condition='仅本次修改';assert.deepEqual(resolvePersona(undefined,DEFAULT_PERSONA_ROLE),defaultPersona());
 });

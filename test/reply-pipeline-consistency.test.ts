@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,readFileSync,writeFileSync,mkdirSync} from 'node:fs';
@@ -12,18 +13,18 @@ import type {Config,Event,Channel} from '../src/types.js';
 import type {Transport} from '../src/transport.js';
 import {exampleConfig} from './config-fixture.js';
 
-const fixturePath=process.env.REPLY_BASELINE_PATH??fileURLToPath(new URL('./fixtures/reply-pipeline-v5.json',import.meta.url));
+const fixturePath=process.env.REPLY_BASELINE_PATH??fileURLToPath(new URL('./fixtures/reply-pipeline-v6.json',import.meta.url));
 const at=Date.parse('2026-10-28T04:34:00Z');
 const persona:Persona={sections:[{id:'role',title:'始终生效',content:'固定夹具人格：自然回应，记住已发生的往来。'}],triggers:[
- {id:'praise',title:'被夸',condition:'被夸时',content:'谦逊接住夸奖。',enabled:true,order:0,match:'keywords',keywords:['可爱']},
- {id:'work',title:'工作话题',condition:'谈到项目上线',content:'关心项目进展，不编造项目细节。',enabled:true,order:1,match:'semantic'}
+ {id:'praise',title:'被夸',condition:'被夸时',content:'谦逊接住夸奖。',enabled:true,order:0},
+ {id:'work',title:'工作话题',condition:'谈到项目上线',content:'关心项目进展，不编造项目细节。',enabled:true,order:1}
 ]};
 
 async function record(channel:Channel){
  const dir=mkdtempSync(join(tmpdir(),'reply-consistency-')),old=process.env.DATA_DIR;process.env.DATA_DIR=dir;
  const store=new Store(join(dir,'workflow.sqlite')),calls:any[]=[],stages:string[]=[];
  const config:Config=structuredClone(exampleConfig) as Config;
- const generator:Generator={async complete(c,system,user,_signal,sessionId,meta={}){
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,_signal,sessionId,meta={}){
   calls.push({system,user,sessionId,metadata:meta,model:c.model});
   return {text:meta.purpose==='semantic-trigger'?JSON.stringify({matches:[{id:'work',reason:'明确说到项目上线'}]}):JSON.stringify({action:'reply',text:'项目快上线了，记得给自己留点喘气的时间。',reason:'回应当前话题'}),input:12,output:8,cache:0,callId:'fixture-call-'+calls.length};
  }};
@@ -48,5 +49,5 @@ test('公开与私信生产提示词符合 v5 明确变更后的冻结基线，�
  if(process.env.WRITE_REPLY_BASELINE==='1'){
   mkdirSync(dirname(fixturePath),{recursive:true});writeFileSync(fixturePath,JSON.stringify(value,null,2)+'\n');
  }else assert.deepEqual(value,JSON.parse(readFileSync(fixturePath,'utf8')));
- for(const row of value){assert.equal(row.calls.length,2);assert.equal(row.calls[0].metadata.purpose,'semantic-trigger');assert.equal(row.calls[1].metadata.purpose,'reply');assert.ok(row.calls[1].system.includes('固定夹具人格'));assert.ok(row.calls[1].user.includes('前一条消息'));assert.ok(row.calls[1].user.includes('对方喜欢读书'));assert.ok(row.calls[1].user.includes('此前发过'));}
+ for(const row of value){assert.equal(row.calls.length,1);assert.equal(row.calls[0].metadata.purpose,'reply');assert.deepEqual(row.stages,['context','memory','generation']);assert.ok(row.calls[0].system.includes('固定夹具人格'));assert.ok(row.calls[0].user.includes('前一条消息'));assert.ok(row.calls[0].user.includes('对方喜欢读书'));assert.ok(row.calls[0].user.includes('此前发过'));}
 });

@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test,{mock} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -15,7 +16,7 @@ import { exampleConfig } from './config-fixture.js';
 function fixture(){
  const root=fs.mkdtempSync(join(tmpdir(),'persona-library-fault-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=root;
  const store=new Store(join(root,'workflow.sqlite')),config=()=>structuredClone(exampleConfig) as Config;
- const generator:Generator={async complete(){throw new Error('本组故障验证不允许调用模型');}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(){throw new Error('本组故障验证不允许调用模型');}};
  new MemoryService(store,generator,config);const persona=new PersonaService(store,generator,config);store.set('control','manual');
  mergePanelSettings('program',{mode:'auto',publicPerDay:180,privatePerDay:400,replyHours:{enabled:true,closeDelayMinutes:30}},0);
  mergePanelSettings('model',{provider:'custom',id:'mock-persistence',baseUrl:'https://mock.invalid',reasoningLevel:'off',maxTokens:4096,timeoutMs:60000},0);

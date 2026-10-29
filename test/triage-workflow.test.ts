@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync,writeFileSync } from 'node:fs';
@@ -29,7 +30,7 @@ function fixture(){
  const outbox=new Outbox(store),ledger=new LlmStore(store),triage=new ReplyTriage(store,()=>config.triage!);
  let events:Event[]=[],response:(meta:CallMetadata)=>Draft=()=>({action:'reply',text:'可以先读一小段，再聊聊你的感受。',reason:''});
  const calls:Array<{system:string;user:string;meta:CallMetadata}>=[],sends:Array<{event:Event;text:string}>=[],posts:string[]=[],contexts:string[]=[];
- const generator:Generator={complete:async(c,system,user,_signal,_session,meta={})=>{
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async(c,system,user,_signal,_session,meta={})=>{
   calls.push({system,user,meta});const callId=ledger.start(c.model,meta);
   const text=meta.purpose==='memory-summary'?JSON.stringify({items:[]}):JSON.stringify(response(meta));
   ledger.finish(callId,'completed',{usage:{input:5,output:5,cacheRead:0,cacheWrite:0,totalTokens:10},pricingStatus:'unknown'});
@@ -42,13 +43,13 @@ function fixture(){
  return {root,store,config,outbox,ledger,triage,workflow,memory,generator,calls,sends,posts,contexts,seed,events:(value:Event[])=>{events=value;},response:(value:(meta:CallMetadata)=>Draft)=>{response=value;},row:(id:string)=>store.getMessage(id,account),replyCalls:()=>calls.filter(c=>c.meta.purpose==='reply'),close(){workflow.stop();store.db.close();rmSync(root,{recursive:true,force:true});if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;}};
 }
 
-test('实际工作流在入队过滤广告与三账号刷量，不产生调用流水或出站',async()=>{
+test('实际工作流仍过滤广告，三账号正常同文降优先后可继续回复',async()=>{
  const f=fixture();try{
   f.events([event('ad',{text:'领取空投 https://example.invalid'}),...['one','two','three'].map(id=>event(id,{text:'这是三个不同账号复制粘贴的完全相同内容'}))]);
   await f.workflow.resume();await f.workflow.tick();
-  assert.equal(f.calls.length,0);assert.equal(f.contexts.length,0);assert.equal(f.sends.length,0);
-  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM llm_calls').get()!.n,0);assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM outbox').get()!.n,0);
-  for(const id of ['ad','one','two','three'])assert.equal(f.row(id).status,'filtered');
+  await f.workflow.tick();assert.equal(f.replyCalls().length,3);assert.equal(f.contexts.length,3);assert.equal(f.sends.length,3);
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM outbox').get()!.n,3);assert.equal(f.row('ad').status,'filtered');
+  for(const id of ['one','two','three']){assert.equal(f.row(id).status,'confirmed');assert.equal(f.row(id).tier,'normal');}
  }finally{f.close();}
 });
 

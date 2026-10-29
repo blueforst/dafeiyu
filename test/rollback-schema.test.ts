@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -18,7 +19,7 @@ import { exampleConfig } from './config-fixture.js';
 import { ensureReferenceGapMigration } from '../src/reference-gap-schema.js';
 
 const helper=resolve('deploy/rollback-schema.py');
-const generator:Generator={complete:async()=>{throw new Error('逆迁移测试不得调用模型');}};
+const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>{throw new Error('逆迁移测试不得调用模型');}};
 const externalNames=['forget-ledger.json','forget-history.json','forgotten-sources.json','memory-mutations.json'];
 function migrate(path:string){
  const store=new Store(path);store.boot();new LlmStore(store);new MemoryService(store,generator,()=>exampleConfig as Config);new DailyStateService(store,generator,()=>exampleConfig as Config);

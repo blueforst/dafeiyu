@@ -51,7 +51,7 @@ test('Base URL 拒绝本机、元数据地址、内部服务和带凭据的地�
 test('面板设置覆盖 config.json 的模型，内置服务商不受三种协议限制', () => {
   const s = sandbox();
   try {
-    writePanelSettings({ model: { provider: 'google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', id: 'x', reasoningLevel: 'high', maxTokens: 1024, timeoutMs: 60000 } });
+    writePanelSettings({ model: { provider: 'google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', id: 'x', reasoningLevel: 'high' } });
     const c = loadConfig(s.configPath);
     assert.equal(c.model.source, 'panel');
     assert.equal(c.model.provider, 'google');

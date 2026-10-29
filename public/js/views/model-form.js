@@ -42,7 +42,7 @@ export function defaultLevel(levels) {
 }
 
 export function emptyForm() {
-  return { provider: '', baseUrl: '', api: 'openai-completions', id: '', reasoningLevel: 'off', maxTokens: 4096, timeoutSec: 60, custom: { contextWindow: 128000, reasoning: false } };
+  return { provider: '', baseUrl: '', api: 'openai-completions', id: '', reasoningLevel: 'off', custom: { contextWindow: 128000, reasoning: false } };
 }
 
 export function formFrom(settings) {
@@ -51,7 +51,7 @@ export function formFrom(settings) {
   return {
     ...f,
     provider: settings.provider, baseUrl: settings.baseUrl, api: settings.api || f.api, id: settings.id,
-    reasoningLevel: settings.reasoningLevel || 'off', maxTokens: settings.maxTokens, timeoutSec: Math.round(settings.timeoutMs / 1000),
+    reasoningLevel: settings.reasoningLevel || 'off',
     custom: settings.custom ? { ...settings.custom } : f.custom,
   };
 }
@@ -60,7 +60,6 @@ export function formFrom(settings) {
 export function settingsFrom(form, known) {
   const s = {
     provider: form.provider, baseUrl: form.baseUrl.trim(), id: form.id.trim(), reasoningLevel: form.reasoningLevel,
-    maxTokens: Number(form.maxTokens), timeoutMs: Math.round(Number(form.timeoutSec) * 1000),
   };
   if (form.provider === 'custom') {
     s.api = form.api;

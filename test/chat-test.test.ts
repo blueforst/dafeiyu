@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync,existsSync } from 'node:fs';
@@ -21,7 +22,7 @@ function fixture(){
  store.set('activeAccount','work');store.set('control','manual');
  let at=Date.now(),produce:(system:string,user:string,signal?:AbortSignal)=>any=()=>({action:'reply',text:'记住了，继续聊。',reason:''});
  const requests:any[]=[];
- const generator:Generator={async complete(c,system,user,signal,sessionId,metadata){
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,signal,sessionId,metadata){
   const id=ledger.start(c.model,metadata),request={system,user,signal,sessionId,metadata};requests.push(request);
   let cancel:(()=>void)|undefined;
   try{const pending=Promise.resolve(produce(system,user,signal)),output=signal?await Promise.race([pending,new Promise((_resolve,reject)=>{cancel=()=>reject(new Error('模型请求已取消'));if(signal.aborted)cancel();else signal.addEventListener('abort',cancel,{once:true});})]):await pending;ledger.finish(id,'completed',{usage:{input:10,output:4,cacheRead:0,cacheWrite:0,totalTokens:14},cost:{input:0.001,output:0.001,cacheRead:0,cacheWrite:0,total:0.002},pricingStatus:'priced'});return {text:JSON.stringify(output),input:10,output:4,cache:0,callId:id,pricingStatus:'priced',cost:{input:0.001,output:0.001,cacheRead:0,cacheWrite:0,total:0.002}};}

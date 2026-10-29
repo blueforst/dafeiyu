@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -48,7 +49,7 @@ test('账号、操作、会话、时效与同修订证据冲突均拒绝并使�
 function previewFixture(accountId:string){
  const f=fixture(),config=structuredClone(exampleConfig) as Config,ledger=new LlmStore(f.store);let requests=0,policyReads=0,output='回复正文';const systems:string[]=[],requestsMetadata:any[]=[];
  const service=new PostingCapabilitiesService(f.store,()=>accountId);if(accountId)service.accept(new BrowserPostingCapabilities().observe({...logged,handle:accountId}));
- const generator:Generator={async complete(c,system,_user,_signal,_session,meta){requests++;systems.push(system);requestsMetadata.push(meta);const callId=ledger.start(c.model,meta);ledger.finish(callId,'completed',{usage:{input:10,output:5,cacheRead:2,cacheWrite:0,totalTokens:17},cost:{input:.001,output:.002,cacheRead:0,cacheWrite:0,total:.003},pricingStatus:'priced'});return {callId,text:JSON.stringify({action:'reply',text:output,reason:''}),input:10,output:5,cache:2};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,_user,_signal,_session,meta){requests++;systems.push(system);requestsMetadata.push(meta);const callId=ledger.start(c.model,meta);ledger.finish(callId,'completed',{usage:{input:10,output:5,cacheRead:2,cacheWrite:0,totalTokens:17},cost:{input:.001,output:.002,cacheRead:0,cacheWrite:0,total:.003},pricingStatus:'priced'});return {callId,text:JSON.stringify({action:'reply',text:output,reason:''}),input:10,output:5,cache:2};}};
  const persona=new PersonaService(f.store,generator,()=>config);persona.postingPolicy=()=>{policyReads++;return service.get();};
  return {...f,persona,ledger,systems,requestsMetadata,setOutput:(value:string)=>output=value,get requests(){return requests;},get policyReads(){return policyReads;}};
 }

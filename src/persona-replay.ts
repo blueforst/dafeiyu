@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { loadConfig, redact } from './config.js';
 import { LlmStore, beijingDate, billingRange } from './llm-store.js';
 import { applyMigration } from './migrations.js';
+import {runReplyLoop} from './reply-tools.js';
 import { parseDraft, type Generator } from './model.js';
 import { PersonaService, validatePersona, type Persona } from './persona.js';
 import { opening, expressions, hasSteps } from './reply-style.js';
@@ -163,18 +164,16 @@ export class ReplayRunner {
   const body=parse(row.body),snapshot=this.store.db.prepare('SELECT body_json FROM generation_snapshots WHERE message_id=? AND account_id=?').get(row.id,row.account_id) as any;
   return {id:row.id,channel:row.channel,timestamp:row.created_at,tier:row.tier??null,status:row.status,revision:row.updated_at,contextIncomplete:!snapshot||!!parse(snapshot.body_json).truncated,private:row.channel==='private',...(row.channel==='public'||privateDetail?{message:{text:body.text??'',handle:body.handle??'',url:body.url??''},actual:parse(row.draft,null)}:{collapsed:true})};
  }
- private costEstimate(config:Config,accountId:string,count:number,candidate:Persona,baseline:Persona,mode:ReplayBaseline){
-  const side=(persona:Persona)=>({reply:count,semantic:persona.triggers.some(t=>t.enabled&&t.match!=='keywords')?count:0});
-  const candidateRequests=side(candidate),baselineRequests=mode==='saved'?side(baseline):{reply:0,semantic:0};
-  const requests=candidateRequests.reply+candidateRequests.semantic+baselineRequests.reply+baselineRequests.semantic;
-  const mean=(purpose:string)=>{
-   const rows=this.store.db.prepare("SELECT cost_json,pricing_status FROM llm_calls WHERE account_id=? AND provider=? AND model=? AND purpose=? ORDER BY started_at DESC LIMIT 50").all(accountId,config.model.provider,config.model.id,purpose) as any[];
-   const known=rows.filter(r=>r.pricing_status==='priced'&&Number.isFinite(parse(r.cost_json,null)?.total));
-   return {value:known.length?known.reduce((n,r)=>n+parse(r.cost_json).total,0)/known.length:null,unpriced:rows.some(r=>r.pricing_status==='unpriced'),unknown:rows.length!==known.length};
-  };
-  const reply=mean('reply'),semantic=mean('semantic-trigger'),replies=candidateRequests.reply+baselineRequests.reply,triggers=candidateRequests.semantic+baselineRequests.semantic;
-  const available=reply.value!==null&&(!triggers||semantic.value!==null);
-  return {samples:count,requests,candidateRequests,baselineRequests,estimatedUsd:available?replies*reply.value!+triggers*(semantic.value??0):null,pricingStatus:available?'estimated':reply.unpriced||semantic.unpriced?'unpriced':'unknown',priceSource:'Pi 内置价格快照的最近 50 次同模型调用',note:available?'费用为历史平均估算，实际用量可能变化':'未定价或没有可估算历史，不代表免费'};
+ private averageRounds(config:Config,accountId:string):number {
+  const rows=this.store.db.prepare("SELECT COUNT(*) AS n FROM llm_calls WHERE account_id=? AND provider=? AND model=? AND purpose='reply' AND interaction_id IS NOT NULL AND started_at>=? GROUP BY interaction_id").all(accountId,config.model.provider,config.model.id,this.now()-7*86400000) as {n:number}[];
+  return rows.length?Math.max(1,Math.min(21,rows.reduce((n,r)=>n+r.n,0)/rows.length)):2;
+ }
+ private costEstimate(config:Config,accountId:string,count:number,_candidate:Persona,_baseline:Persona,mode:ReplayBaseline){
+  const rounds=this.averageRounds(config,accountId),side=()=>({reply:Math.ceil(count*rounds),semantic:0});
+  const candidateRequests=side(),baselineRequests=mode==='saved'?side():{reply:0,semantic:0},requests=candidateRequests.reply+baselineRequests.reply;
+  const rows=this.store.db.prepare("SELECT cost_json,pricing_status FROM llm_calls WHERE account_id=? AND provider=? AND model=? AND purpose='reply' ORDER BY started_at DESC LIMIT 50").all(accountId,config.model.provider,config.model.id) as any[];
+  const known=rows.filter(r=>r.pricing_status==='priced'&&Number.isFinite(parse(r.cost_json,null)?.total)),mean=known.length?known.reduce((n,r)=>n+parse(r.cost_json).total,0)/known.length:null;
+  return {samples:count,requests,candidateRequests,baselineRequests,averageRounds:rounds,estimatedUsd:mean===null?null:requests*mean,pricingStatus:mean===null?(rows.some(r=>r.pricing_status==='unpriced')?'unpriced':'unknown'):'estimated',priceSource:'Pi 内置价格快照与近七天回复的平均轮数',note:'按平均轮数估算；读取卡片会增加请求，同轮读取多张只增加一轮。每侧每条最多 21 次；未定价或无历史不代表免费。'};
  }
  estimate(raw:any):any {
   if(!raw||typeof raw!=='object')throw new ReplayError('回放参数无效');
@@ -223,10 +222,10 @@ export class ReplayRunner {
    valid();this.ensureAccount(prepared.accountId);
    const candidateConfig={...structuredClone(prepared.config),model:structuredClone(resolved.model)},freeze=this.options.freezeModel??freezeReplayModel;
    baseline=await freeze(prepared.config,this.generator,valid);candidateModel=await freeze(candidateConfig,this.generator,valid);valid();
-   const count=prepared.samples.length,routes=saved.triggers.some(t=>t.enabled&&t.match!=='keywords')?count:0,baselineTokens=this.tokenMean(prepared.config,'reply',prepared.accountId),candidateTokens=this.tokenMean(candidateConfig,'reply',prepared.accountId)??baselineTokens;
-   const sides={baseline:this.priceEstimate(prepared.config,baseline.price,count,baselineTokens),candidate:this.priceEstimate(candidateConfig,candidateModel.price,count,candidateTokens),shared:this.priceEstimate(prepared.config,baseline.price,routes,this.tokenMean(prepared.config,'semantic-trigger',prepared.accountId))};
-   sides.shared.replyRequests=0;sides.shared.routingRequests=routes;
-   const all=Object.values(sides),estimate={samples:count,requests:count*2+routes,estimatedUsd:all.every(side=>side.estimatedUsd!==null)?all.reduce((n,side)=>n+(side.estimatedUsd??0),0):null,pricingStatus:all.some(side=>side.pricingStatus==='unpriced')?'unpriced':all.some(side=>side.pricingStatus==='unknown')?'unknown':'estimated',sides,note:'两侧各按冻结的 Pi 目录价格和历史 token 均值估算；共享语义判定单列，未定价不代表免费'};
+   const count=prepared.samples.length,baselineRounds=this.averageRounds(prepared.config,prepared.accountId),candidateRounds=this.averageRounds(candidateConfig,prepared.accountId),baselineTokens=this.tokenMean(prepared.config,'reply',prepared.accountId),candidateTokens=this.tokenMean(candidateConfig,'reply',prepared.accountId)??baselineTokens;
+   const sides={baseline:this.priceEstimate(prepared.config,baseline.price,Math.ceil(count*baselineRounds),baselineTokens),candidate:this.priceEstimate(candidateConfig,candidateModel.price,Math.ceil(count*candidateRounds),candidateTokens),shared:this.priceEstimate(prepared.config,baseline.price,0,null)};
+   sides.shared.replyRequests=0;sides.shared.routingRequests=0;
+   const all=Object.values(sides),estimate={samples:count,requests:sides.baseline.requests+sides.candidate.requests,estimatedUsd:all.every(side=>side.estimatedUsd!==null)?all.reduce((n,side)=>n+(side.estimatedUsd??0),0):null,pricingStatus:all.some(side=>side.pricingStatus==='unpriced')?'unpriced':all.some(side=>side.pricingStatus==='unknown')?'unknown':'estimated',sides,note:'两侧各按冻结的 Pi 目录价格和历史 token 均值估算；两侧各自读取卡片；按平均轮数估算，同轮读多张只增加一轮，每侧每条最多 21 次，未定价不代表免费'};
    prepared.compare='model';prepared.modelCandidate=resolved.selection;prepared.candidateConfig=candidateConfig;prepared.frozenModels={baseline,candidate:candidateModel};prepared.assertCurrent=()=>{valid();baseline!.assertCurrent();candidateModel!.assertCurrent();};prepared.dispose=()=>{baseline?.dispose();candidateModel?.dispose();};prepared.estimate=estimate;
    prepared.expiryTimer=setTimeout(()=>this.dropEstimate(prepared.id),600000);prepared.expiryTimer.unref?.();
    return {...existing,...estimate,compare:'model',modelCandidate:resolved.selection};
@@ -242,7 +241,7 @@ export class ReplayRunner {
    for(const sample of prepared.samples){const row=this.store.getMessage(sample.id,prepared.accountId);if(!this.allowed(row,prepared.accountId)||sourceHash(row)!==sample.hash)throw new ReplayError('样本已变化或移除，请重新预估',409);}
   }catch(error){this.dropEstimate(estimateId);throw new ReplayError(error instanceof Error?error.message:'模型配置已变化，请重新预估',409);}
   const id=randomUUID(),now=this.store.nextTimestamp(this.now());
-  const modelSnapshot=(model:Config['model'])=>({provider:model.provider,id:model.id,api:model.api,reasoning:model.reasoning,reasoningLevel:model.reasoningLevel,maxTokens:model.maxTokens,timeoutMs:model.timeoutMs,custom:model.custom,baseUrlHost:(()=>{try{return new URL(model.baseUrl).hostname;}catch{return '';}})()});
+  const modelSnapshot=(model:Config['model'])=>({provider:model.provider,id:model.id,api:model.api,reasoning:model.reasoning,reasoningLevel:model.reasoningLevel,custom:model.custom,baseUrlHost:(()=>{try{return new URL(model.baseUrl).hostname;}catch{return '';}})()});
   const settings={filter:prepared.filter,personaRevision:prepared.libraryBound?-1:prepared.personaRevision,personaItemRevision:prepared.libraryBound?prepared.personaRevision:undefined,personaIdentity:prepared.personaIdentity,personaLibraryBound:prepared.libraryBound,promptHints:prepared.promptHints,dailyState:prepared.dailyState,model:{provider:prepared.config.model.provider,id:prepared.config.model.id},baseline:prepared.baseline,compare:prepared.compare??'persona',modelCandidate:prepared.modelCandidate,models:prepared.compare==='model'?{baseline:modelSnapshot(prepared.config.model),candidate:modelSnapshot(prepared.candidateConfig!.model)}:undefined};
   this.store.db.exec('BEGIN IMMEDIATE');
   try{
@@ -270,21 +269,21 @@ export class ReplayRunner {
   const {event,at,body,memory,recentReplies}=context,config=side==='candidate'?prepared.candidateConfig??prepared.config:prepared.config,generator=prepared.frozenModels?.[side].generator??this.generator;
   return this.persona.assemble({config,persona,message:event.text,channel:sample.channel,quote:event.quote,card:event.card,accountId:prepared.accountId,conversation:body.conversation??[],memory,dailyState:prepared.dailyState,now:at,timestamp:event.timestamp,timestampReliable:event.timestampReliable,conversationId:event.conversationId,promptHints:side==='candidate'?prepared.promptHints as any:prepared.config.promptHints,recentReplies,sampleSource:'replay-current-allowed-history',sessionId:'replay-'+runId+'-'+hash(sample.id).slice(0,16)+(prepared.compare==='model'?'-shared':'-'+side),interactionId:runId,routingPurpose:'persona-replay',routingSource:'panel-replay',routingSide:prepared.compare==='model'?'shared':side,generator,signal});
  }
- private async generateSide(runId:string,sample:any,prepared:Prepared,persona:Persona,side:'baseline'|'candidate',signal:AbortSignal,privacyRevision:string,context:ReplayContext,sharedPrompt?:Awaited<ReturnType<PersonaService['assemble']>>){
+ private async generateSide(runId:string,sample:any,prepared:Prepared,persona:Persona,side:'baseline'|'candidate',signal:AbortSignal,privacyRevision:string,context:ReplayContext){
   const memoryRevision=()=>this.store.get(memoryRevisionKey(prepared.accountId,sample.user_id,sample.channel),'0');
   const latest=this.store.getMessage(sample.id,prepared.accountId);
   if(!this.allowed(latest,prepared.accountId)||sourceHash(latest)!==sourceHash(sample)||memoryRevision()!==privacyRevision)throw new ReplayError('来源或记忆已变化或移除',410);
   prepared.assertCurrent?.();
   const {body}=context,config=side==='candidate'?prepared.candidateConfig??prepared.config:prepared.config,generator=prepared.frozenModels?.[side].generator??this.generator;
   const sessionId='replay-'+runId+'-'+hash(sample.id).slice(0,16)+'-'+side;
-  const assembled=sharedPrompt??await this.assembleSide(runId,sample,prepared,persona,side,signal,context);
+  const assembled=await this.assembleSide(runId,sample,prepared,persona,side,signal,context);
   if(signal.aborted)throw signal.reason??new Error('回放已中止');
   this.ensureAccount(prepared.accountId);
   const current=this.store.getMessage(sample.id,prepared.accountId);
   if(!this.allowed(current,prepared.accountId)||sourceHash(current)!==sourceHash(sample)||memoryRevision()!==privacyRevision)throw new ReplayError('来源或记忆已变化或移除',410);
-  const result=await generator.complete(config,assembled.system,assembled.user,signal,sessionId,{purpose:'persona-replay',source:'panel-replay',side,accountId:prepared.accountId,channel:sample.channel,interactionId:runId,jsonObject:true});
+  const result=await runReplyLoop({generator,config,system:assembled.system,user:assembled.user,cards:assembled.cards,signal,sessionId,metadata:{purpose:'persona-replay',source:'panel-replay',side,accountId:prepared.accountId,channel:sample.channel,interactionId:runId,jsonObject:true}});
   const parsed=replayDraft(result.text,sample.channel),draft=parsed.draft,lengthViolation=draft.action==='reply'&&sample.channel==='public'&&twitterText.parseTweet(draft.text).weightedLength>280;
-  return {draft,validationError:parsed.validationError,lengthViolation,contextIncomplete:!context.hasSnapshot||!!body.truncated,warning:assembled.warning,hits:assembled.hits,callId:result.callId??null};
+  return {draft,validationError:parsed.validationError,lengthViolation,contextIncomplete:!context.hasSnapshot||!!body.truncated,warning:assembled.warning,hits:result.hits,finalTool:result.finalTool,toolCalls:result.toolCalls,toolLimit:result.toolLimit,callIds:result.calls.map(c=>c.callId),callId:result.callId??null};
  }
  private async execute(id:string,prepared:Prepared,signal:AbortSignal):Promise<void>{
   this.store.db.prepare("UPDATE replay_runs SET status='running',updated_at=? WHERE id=?").run(this.now(),id);
@@ -301,11 +300,10 @@ export class ReplayRunner {
     try{
      const context=this.replayContext(row,prepared);
      prepared.assertCurrent?.();
-     const sharedPrompt=prepared.compare==='model'?await this.assembleSide(id,row,prepared,prepared.baseline,'baseline',signal,context):undefined;
      if(prepared.baselineMode==='actual')baseline={draft:parse(row.draft,{action:'skip',text:'',reason:'历史结果缺失'}),actual:true,contextIncomplete:true};
-     else baseline=await this.generateSide(id,row,prepared,prepared.baseline,'baseline',signal,privacyRevision,context,sharedPrompt);
+     else baseline=await this.generateSide(id,row,prepared,prepared.baseline,'baseline',signal,privacyRevision,context);
      if(signal.aborted)throw signal.reason??new Error('回放已中止');
-     candidate=await this.generateSide(id,row,prepared,prepared.candidate,'candidate',signal,privacyRevision,context,sharedPrompt);
+     candidate=await this.generateSide(id,row,prepared,prepared.candidate,'candidate',signal,privacyRevision,context);
     }catch(error){
      status=signal.aborted?'aborted':'failed';candidate={error:signal.aborted?'回放已中止':redact(error instanceof Error?error.message:error).slice(0,300)};
      if(prepared.compare==='model')try{prepared.assertCurrent?.();}catch{invalidModel=true;final='failed';}
@@ -333,7 +331,7 @@ export class ReplayRunner {
  private summary(id:string,accountId:string){
   const rows=(this.store.db.prepare('SELECT * FROM replay_items WHERE run_id=? AND account_id=?').all(id,accountId) as any[]).filter(row=>this.allowed(this.store.getMessage(row.message_id,accountId),accountId)),labels:Record<string,number>={candidate:0,baseline:0,same:0,'both-bad':0},issues:Record<string,number>={},baseline:QualityInput[]=[],candidate:QualityInput[]=[];
   for(const row of rows){if(row.label)labels[row.label]=(labels[row.label]??0)+1;for(const issue of parse(row.issues_json,[]))issues[issue]=(issues[issue]??0)+1;const b=parse(row.baseline_json,null)?.draft,c=parse(row.candidate_json,null)?.draft;if(b)baseline.push({...b,channel:row.channel});if(c)candidate.push({...c,channel:row.channel});}
-  const side=(value:'baseline'|'candidate'|'shared')=>{const result=this.store.db.prepare("SELECT COUNT(*) AS calls,AVG(latency_ms) AS averageLatencyMs,COALESCE(SUM(input_tokens),0) AS input,COALESCE(SUM(output_tokens),0) AS output,COALESCE(SUM(cache_read),0) AS cacheRead,SUM(CASE WHEN pricing_status='priced' AND json_valid(cost_json) THEN json_extract(cost_json,'$.total') END) AS costUSD,SUM(CASE WHEN pricing_status='priced' THEN 1 ELSE 0 END) AS priced,SUM(CASE WHEN pricing_status='unpriced' THEN 1 ELSE 0 END) AS unpriced,SUM(CASE WHEN pricing_status='unknown' THEN 1 ELSE 0 END) AS unknown FROM llm_calls WHERE account_id=? AND interaction_id=? AND purpose='persona-replay' AND source=?").get(accountId,id,'panel-replay:'+value) as any;return {...result,priced:result.priced??0,unpriced:result.unpriced??0,unknown:result.unknown??0};};
+  const side=(value:'baseline'|'candidate'|'shared')=>{const result=this.store.db.prepare("SELECT COUNT(*) AS calls,AVG(latency_ms) AS averageLatencyMs,COALESCE(SUM(input_tokens),0) AS input,COALESCE(SUM(output_tokens),0) AS output,COALESCE(SUM(cache_read),0) AS cacheRead,SUM(CASE WHEN pricing_status='priced' AND json_valid(cost_json) THEN json_extract(cost_json,'$.total') END) AS costUSD,SUM(CASE WHEN pricing_status='priced' THEN 1 ELSE 0 END) AS priced,SUM(CASE WHEN pricing_status='unpriced' THEN 1 ELSE 0 END) AS unpriced,SUM(CASE WHEN pricing_status='unknown' THEN 1 ELSE 0 END) AS unknown FROM llm_calls WHERE account_id=? AND interaction_id=? AND purpose='persona-replay' AND source=?").get(accountId,id,'panel-replay:'+value) as any;const column=value==='baseline'?'baseline_json':value==='candidate'?'candidate_json':null,cardsRead=column?Number((this.store.db.prepare("SELECT COALESCE(SUM(CASE WHEN json_valid("+column+") THEN json_array_length("+column+",'$.hits') END),0) AS n FROM replay_items WHERE run_id=?").get(id) as any)?.n??0):0;return {...result,cardsRead,priced:result.priced??0,unpriced:result.unpriced??0,unknown:result.unknown??0};};
   return {total:rows.length,completed:rows.filter(r=>r.status==='completed').length,failed:rows.filter(r=>r.status==='failed').length,labels,issues,baseline:summaryQuality(baseline),candidate:summaryQuality(candidate),sides:{baseline:side('baseline'),candidate:side('candidate'),shared:side('shared')},fees:this.ledger.summary({accountId,interactionId:id}).totals};
  }
  list(){const accountId=this.account();this.purgeMissingSources();return {items:(this.store.db.prepare('SELECT id,created_at,updated_at,status,baseline_mode,estimate_json,settings_json FROM replay_runs WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT 20').all(accountId) as any[]).map(row=>({id:row.id,createdAt:row.created_at,updatedAt:row.updated_at,status:row.status,baselineMode:row.baseline_mode,compare:parse(row.settings_json).compare??'persona',modelCandidate:parse(row.settings_json).modelCandidate,personaIdentity:this.personaIdentityView(parse(row.settings_json).personaIdentity),canAdopt:parse(row.settings_json).compare!=='model',estimate:parse(row.estimate_json),summary:this.summary(row.id,accountId)}))};}

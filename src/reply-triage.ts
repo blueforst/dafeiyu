@@ -42,11 +42,11 @@ export function classify(event:Event,history:TriageHistory,settings:TriageSettin
  const advertisingText=normalized(text.replace(/#[^\s#]+/g,''));
  const keywordOnly=!!advertisingText&&settings.advertisingKeywords.some(k=>advertisingText===normalized(k));
  if((keyword&&/(?:https?:\/\/|www\.)\S+/i.test(text))||keywordOnly)return {tier:'filtered',reason:'广告关键词'};
- if((history.batchCount??0)>=settings.batchThreshold)return {tier:'filtered',reason:'批量刷量'};
  const priority=event.channel==='public'?settings.priorityPublicHandles.includes(event.handle.replace(/^@/,'').toLowerCase()):settings.priorityPrivateConversations.includes(event.conversationId);
  if(priority)return {tier:'priority',reason:'重点账号'};
  const greeting=!simple||([...simple].length<=6&&settings.greetings.some(g=>normalized(g)===simple));
  if(greeting)return history.totalCount>0?{tier:'skip',reason:'老面孔无内容招呼'}:{tier:'normal',reason:'新人招呼'};
+ if((history.batchCount??0)>=settings.batchThreshold)return {tier:'normal',reason:'同文重复，降低优先级'};
  if(history.recentOtherConversation)return {tier:'normal',reason:'同一用户的后续消息'};
  if(history.processedCount>=3)return {tier:'priority',reason:'老朋友有内容的消息'};
  if(!history.totalCount)return {tier:'priority',reason:'首次来访'};
@@ -84,7 +84,7 @@ export class ReplyTriage{
   this.store.db.prepare('DELETE FROM triage_text_hits WHERE at<?').run(this.now()-hour);
   const hash=batchHash(event.text);if(!hash||!Number.isFinite(observedAt)||observedAt<=0||event.timestampReliable===false||observedAt<this.now()-hour)return {hash:null,count:0};
   this.store.db.prepare('INSERT OR IGNORE INTO triage_text_hits(account_id,hash,user_id,at,message_id) VALUES(?,?,?,?,?)').run(accountId,hash,event.userId,observedAt,event.id);
-  const count=Number((this.store.db.prepare('SELECT count(DISTINCT user_id) n FROM triage_text_hits WHERE account_id=? AND hash=? AND at>=?').get(accountId,hash,this.now()-hour) as any).n);return {hash,count};
+  const count=Number((this.store.db.prepare('SELECT count(DISTINCT h.user_id) n FROM triage_text_hits h JOIN messages m ON m.id=h.message_id AND m.account_id=h.account_id WHERE h.account_id=? AND h.hash=? AND h.at>=? AND m.channel=?').get(accountId,hash,this.now()-hour,event.channel) as any).n);return {hash,count};
  }
  private apply(row:any,maxAgeHours=6){
   row=this.store.getMessage(row.id,row.account_id);if(!row||row.status!=='queued')return;
@@ -99,8 +99,12 @@ export class ReplyTriage{
   if(result.tier==='filtered')this.terminal(row,'filtered',result.reason);
   else if(result.tier==='skip')this.terminal(row,'skipped',result.reason);
   if(hit.hash&&hit.count>=settings.batchThreshold){
-   const matching=this.store.db.prepare("SELECT m.* FROM messages m JOIN triage_text_hits h ON h.message_id=m.id AND h.account_id=m.account_id WHERE h.account_id=? AND h.hash=? AND h.at>=? AND m.status='queued'").all(accountId,hit.hash,this.now()-hour) as any[];
-   for(const other of matching){if(this.store.get(this.manualKey(other.id))==='1'||isReview(other))continue;this.store.db.prepare("UPDATE messages SET tier='filtered',tier_reason='批量刷量' WHERE id=?").run(other.id);this.terminal(other,'filtered','批量刷量');}
+   const matching=this.store.db.prepare("SELECT m.* FROM messages m JOIN triage_text_hits h ON h.message_id=m.id AND h.account_id=m.account_id WHERE h.account_id=? AND h.hash=? AND h.at>=? AND m.channel=? AND m.status='queued'").all(accountId,hit.hash,this.now()-hour,event.channel) as any[];
+   for(const other of matching){
+    if(this.store.get(this.manualKey(other.id))==='1'||isReview(other))continue;
+    const candidate=parseEvent(other),classification=classify(candidate,{...this.history(candidate,accountId),batchCount:hit.count},settings);
+    if(classification.reason==='同文重复，降低优先级')this.store.db.prepare("UPDATE messages SET tier='normal',tier_reason=? WHERE id=? AND status='queued'").run(classification.reason,other.id);
+   }
   }
  }
  ingest(event:Event,accountId=event.accountId??'',maxAgeHours=6):boolean{

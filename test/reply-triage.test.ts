@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -86,17 +87,17 @@ test('重点账号使用完整 handle 与私信会话精确匹配，设置变化
  }finally{f.close();}
 });
 
-test('第三个不同用户的规范化同文过滤仍在排队的全部同文消息，其他账号和短招呼不误伤',()=>{
+test('第三个不同用户的同文消息只降普通优先级，其他账号与短招呼不误伤',()=>{
  const f=fixture();try{
   f.triage.ingest(event('1','@worker 这是同一个批量复制的消息！'),'worker');
   f.triage.ingest(event('2','这是同一个批量复制的消息'),'worker');
   assert.equal(f.row('1').status,'queued');
   f.triage.ingest(event('other','这是同一个批量复制的消息'),'another');
   f.triage.ingest(event('3','这是同一个批量复制的消息。'),'worker');
-  for(const id of ['1','2','3'])assert.equal(f.row(id).status,'filtered');
+  for(const id of ['1','2','3']){assert.equal(f.row(id).status,'queued');assert.equal(f.row(id).tier,'normal');assert.equal(f.row(id).tier_reason,'同文重复，降低优先级');}
   assert.equal(f.row('other','another').status,'queued');
   for(const id of ['4','5','6']){f.triage.ingest(event(id,'早安'),'worker');assert.notEqual(f.row(id).status,'filtered');}
-  assert.ok((f.store.db.prepare("SELECT COUNT(*) n FROM messages WHERE status='filtered' AND processed_seq>0").get() as any).n>=3);
+  assert.equal((f.store.db.prepare("SELECT COUNT(*) n FROM messages WHERE status='filtered'").get() as any).n,0);
  }finally{f.close();}
 });
 
@@ -270,7 +271,7 @@ test('真实数据库的 unknown 阻塞按当前账号和通道判断，终态�
  const f=fixture();
  const transport:Transport={identity:async()=>({loggedIn:true,needsHuman:false,handle:'worker'}),collect:async()=>({events:[],warnings:[]}),context:async()=>'',send:async()=>({status:'unknown'}),lookup:async()=>({status:'unknown'}),control:async()=>{}};
  const config={...structuredClone(exampleConfig),mode:'auto',publicPerHour:1000,privatePerHour:1000} as Config;
- const workflow=new Workflow(f.store,transport,{complete:async()=>({text:'',input:0,output:0,cache:0})},()=>config);
+ const workflow=new Workflow(f.store,transport,{async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>({text:'',input:0,output:0,cache:0})},()=>config);
  try{
   const outbox=new Outbox(f.store);workflow.services={outbox,triage:f.triage};f.store.set('activeAccount','worker');
   f.store.ingest(event('foreign-unknown','其他账号的私信',{channel:'private'}),'another');f.store.update('foreign-unknown','unknown',{},'another');

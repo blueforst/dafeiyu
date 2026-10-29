@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -18,7 +19,7 @@ function fixture(){
  const event:Event={id:'x:101',platformId:'101',targetId:'101',channel:'public',userId:'x:alice',handle:'alice',text:'合成工作流入站',url:'https://x.com/alice/status/101',conversationId:'101',timestamp:Date.now(),timestampReliable:true};
  let events:Event[]=[];
  const transport:Transport={identity:async()=>{identityReads++;return identity;},control:async()=>{},collect:async()=>{collections++;return {events,warnings:[]};},context:async()=>'',send:async()=>{sends++;return {status:'confirmed',id:'receipt-1'};},lookup:async()=>({status:'unknown'})};
- const generator={complete:async()=>{generations++;return {text:JSON.stringify({action:'reply',text:'隔离生成的简短回复',reason:''}),input:0,output:0,cache:0};}};
+ const generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>{generations++;return {text:JSON.stringify({action:'reply',text:'隔离生成的简短回复',reason:''}),input:0,output:0,cache:0};}};
  const workflow=new Workflow(store,transport,generator,()=>config);workflow.services={health,outbox};
  return {store,health,outbox,config,event,transport,workflow,identity:(value:Identity)=>{identity=value;},events:(value:Event[])=>{events=value;},counts:()=>({identityReads,collections,sends,generations}),close(){workflow.stop();store.db.close();rmSync(directory,{recursive:true,force:true});}};
 }

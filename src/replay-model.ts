@@ -13,13 +13,19 @@ export async function freezeReplayModel(config:Config,generator:Generator,valid:
  const known=resolved.pricingKnown&&!!rates;
  const price:ReplayPrice={source:'pi-builtin',known,input:known?number(rates?.input):null,output:known?number(rates?.output):null,cacheRead:known?number(rates?.cacheRead):null,cacheWrite:known?number(rates?.cacheWrite):null};
  const assertCurrent=()=>{valid();if(!state.key||modelKey(config.model)!==state.key)throw new Error('模型 Key 已变化或失效，请重新预估');};
- return {price,assertCurrent,dispose(){state.key='';},generator:{async complete(c,system,user,signal,sessionId,metadata){
+ return {price,assertCurrent,dispose(){state.key='';},generator:{async converse(c,system,messages,tools,signal,sessionId,metadata,options){
+  assertCurrent();const usedKey=state.key;
+  try{const result=await generator.request(c.model,usedKey,system,'',{signal,sessionId,resolvedModel:resolved,context:{systemPrompt:system,messages,tools},...options},metadata);
+   if(['error','aborted','length','deferred','pending'].includes(result.stopReason))throw Object.assign(new Error(result.errorMessage||'模型返回不完整或不支持的响应：'+result.stopReason),{callId:result.callId});
+   return {...result,toolCalls:result.toolCalls??[],assistant:result.assistant!};
+  }catch(error){const e=error instanceof Error?error:new Error(String(error));e.message=e.message.split(usedKey).join('[已隐藏]');throw e;}
+ },async complete(c,system,user,signal,sessionId,metadata){
   assertCurrent();
   const usedKey=state.key;
   try{
    const result=await generator.request(c.model,usedKey,system,user,{signal,sessionId,resolvedModel:resolved},metadata);
    if(['error','aborted','length','toolUse','deferred','pending'].includes(result.stopReason))throw new Error(result.errorMessage||'模型返回不完整或不支持的响应：'+result.stopReason);
    return result;
-  }catch(error){throw new Error(String(error instanceof Error?error.message:error).split(usedKey).join('[已隐藏]'));}
+  }catch(error){const e=error instanceof Error?error:new Error(String(error));e.message=e.message.split(usedKey).join('[已隐藏]');throw e;}
  }}};
 }

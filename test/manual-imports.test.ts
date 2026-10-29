@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -55,7 +56,7 @@ test('每轮最多检查三条，通过后原子管理员优先入队，draft工
   const result=await f.imports.processRound({limit:99,deadline:f.now+45000});assert.equal(result.processed,3);assert.equal(f.calls.length,3);assert.equal(f.imports.summary().pending,2);
   for(const request of result.items){assert.equal(request.status,'imported');const row=f.store.getMessage(request.messageId!,'fixture_worker');assert.equal(row.status,'queued');assert.equal(row.tier,'priority');assert.equal(row.tier_reason,'管理员补录');assert.equal(row.processed_seq,0);assert.equal(f.store.get('triage:manual:'+row.id),'1');}
   // 这里核对补录后的真实生成链路，不让夜间作息关闭使该链路未被执行。
-  const workflow=new Workflow(f.store,{identity:async()=>({handle:'fixture_worker',loggedIn:true,needsHuman:false}),control:async()=>{},collect:async()=>({events:[],warnings:[]}),context:async()=> '合成上下文',send:async()=>{sent++;return {status:'confirmed',id:'must-not-send'};},lookup:async()=>({status:'unknown'})},{complete:async()=>{generated++;return {text:JSON.stringify({action:'reply',text:'五分钟散步会很轻松。',reason:''}),input:0,output:0,cache:0};}},()=>({mode:'draft',pollSeconds:60,maxAgeHours:6,maxPerRound:2,publicPerHour:10,privatePerHour:30,replyHours:{enabled:false,closeDelayMinutes:30},retentionDays:30,persona:'合成测试AI角色',dailyState:'合成虚构日程',model:{provider:'custom',api:'openai-completions',baseUrl:'',id:'',reasoning:false,reasoningLevel:'off',vision:false,maxTokens:4096,timeoutMs:60000}}));
+  const workflow=new Workflow(f.store,{identity:async()=>({handle:'fixture_worker',loggedIn:true,needsHuman:false}),control:async()=>{},collect:async()=>({events:[],warnings:[]}),context:async()=> '合成上下文',send:async()=>{sent++;return {status:'confirmed',id:'must-not-send'};},lookup:async()=>({status:'unknown'})},{async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>{generated++;return {text:JSON.stringify({action:'reply',text:'五分钟散步会很轻松。',reason:''}),input:0,output:0,cache:0};}},()=>({mode:'draft',pollSeconds:60,maxAgeHours:6,maxPerRound:2,publicPerHour:10,privatePerHour:30,replyHours:{enabled:false,closeDelayMinutes:30},retentionDays:30,persona:'合成测试AI角色',dailyState:'合成虚构日程',model:{provider:'custom',api:'openai-completions',baseUrl:'',id:'',reasoning:false,reasoningLevel:'off',vision:false}}));
   workflow.services={triage:f.triage};try{await workflow.resume();await workflow.tick();}finally{workflow.stop();}
   assert.equal(generated,2);assert.equal(sent,0);assert.equal(Number((f.store.db.prepare("SELECT count(*) n FROM messages WHERE status='draft'").get() as any).n),2);
  }finally{f.close();}

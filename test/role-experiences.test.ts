@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -15,7 +16,7 @@ import { exampleConfig } from './config-fixture.js';
 
 function fixture(){
  const dir=mkdtempSync(tmpdir()+'/role-experiences-'),store=new Store(dir+'/workflow.sqlite');store.boot();let account='worker',clock=Date.parse('2026-10-28T12:00:00+08:00');
- const generator:Generator={complete:async()=>{throw new Error('角色经历不得调用模型');}},memory=new MemoryService(store,generator,()=>exampleConfig as Config,()=>clock),outbox=new Outbox(store),experiences=new RoleExperienceService(store,()=>account,()=>clock);
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>{throw new Error('角色经历不得调用模型');}},memory=new MemoryService(store,generator,()=>exampleConfig as Config,()=>clock),outbox=new Outbox(store),experiences=new RoleExperienceService(store,()=>account,()=>clock);
  const create=(raw:any={})=>experiences.create({text:'管理员登记的真实经历',occurredAt:'2026-10-27',revision:experiences.list().revision,...raw});
  const post=(id:string,text='确认发布的角色帖子',scope=account)=>memory.recordExperience({accountId:scope,userId:'role',channel:'public',kind:'post',text,receipt:{status:'confirmed',id,url:'https://x.com/'+scope+'/status/'+id}}).id;
  const inspected=(url:string,over:Partial<Event>={})=>({event:{id:'fixture-post',platformId:new URL(url).pathname.split('/').at(-1)!,userId:'role',channel:'public',handle:account,text:'页面正文',url,conversationId:'thread',timestamp:clock-3600000,timestampReliable:true,...over} as Event});

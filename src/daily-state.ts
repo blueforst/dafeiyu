@@ -171,10 +171,10 @@ export class DailyStateService {
   try {
    if(opts.signal?.aborted)throw new DailyStateError('日程生成已中止',409);
    if(!opts.manual&&!this.canAuto())throw new DailyStateError('业务已暂停，日程未生成',409);
-   const original=this.config(),c:Config={...original,model:{...original.model,maxTokens:Math.min(original.model.maxTokens,3072)}};
+   const c=this.config();
    const settings=readPanelSettings() as any;
    const personaIdentity=new PersonaService(this.store,this.generator,()=>c).activeIdentity();
-   const sections=resolvePersona(settings.persona,c.persona).sections.map(section=>section.content);
+   const resolved=resolvePersona(settings.persona,c.persona),sections=[...resolved.sections.map(section=>section.content),...resolved.triggers.filter(t=>t.enabled).map(t=>'【'+t.title+'】\n'+t.content)];
    // 未保存的旧自定义人格只有角色定义非空，保留此前直接传入原文的语义；已保存分区仍按原格式拼接。
    const persona=(settings.persona===undefined?sections.filter(content=>content!==''):sections).join('\n\n');
    const configRevision=Number(settings.revisions?.persona??0);
@@ -183,7 +183,7 @@ export class DailyStateService {
     AND revision=(SELECT MAX(x.revision) FROM daily_revisions x WHERE x.account_id=d.account_id AND x.local_date=d.local_date)
     ORDER BY local_date DESC LIMIT 7`).all(accountId,historyStart,date) as any[]).map(row=>({date:row.local_date,content:JSON.parse(row.content)}));
    const system='根据给定的人格设定和近七日虚构日程，创作今天一致的虚构生活日程。所有内容均为角色虚构设定，不是已发生的真实事件或用户事实。不要把历史日期的往事照搬成今天真实发生的事情。只输出 JSON，结构为 {"date":"YYYY-MM-DD","fictional":true,"periods":[{"start":"06:00","end":"09:00","activity":"活动"}],"meals":{"breakfast":"早餐","lunch":"午餐","dinner":"晚餐"},"activities":["活动"],"mood":"心情"}。时段按顺序且不重叠，覆盖合理的当日生活。';
-   const response=await this.generator.complete(c,system,JSON.stringify({date,timezone:'Asia/Shanghai',persona,history}),opts.signal,'role-workflow-'+interactionId,{purpose:'daily-state',source:opts.manual?'panel':'task',accountId,interactionId,jsonObject:true});
+   const response=await this.generator.complete(c,system,JSON.stringify({date,timezone:'Asia/Shanghai',persona,history}),opts.signal,'role-workflow-'+interactionId,{maxTokens:3072,purpose:'daily-state',source:opts.manual?'panel':'task',accountId,interactionId,jsonObject:true});
    this.store.db.prepare('UPDATE daily_attempts SET call_id=? WHERE account_id=? AND local_date=?').run(response.callId??null,accountId,date);
    const content=validateDailyContent(parseJSON(response.text),date);
    if(opts.signal?.aborted)throw new DailyStateError('日程生成已中止',409);

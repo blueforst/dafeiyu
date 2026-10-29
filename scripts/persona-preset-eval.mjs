@@ -93,7 +93,7 @@ export async function runBatch(options={}){
  try{
   if(options.resume&&existsSync(join(out,'state.json'))&&JSON.parse(readFileSync(join(out,'state.json'),'utf8')).mode!==options.mode)throw Error('mock/actual不能混合复用断点');
   const got=await request(base,'/api/persona/presets',headers,undefined,options.timeoutMs??120000);if(got.status!==200||!Number.isInteger(got.data.version)||!Array.isArray(got.data.items))throw Error('预设目录接口不可用');
-  const presets=new Map(got.data.items.map(item=>[item.id,item]));for(const id of plan.presets){const p=presets.get(id);if(!p?.persona?.sections?.length||p.persona.triggers.some(t=>t.match!=='keywords'))throw Error('预设缺失或出现额外语义调用规则');}
+  const presets=new Map(got.data.items.map(item=>[item.id,item]));for(const id of plan.presets){const p=presets.get(id);if(!p?.persona?.sections?.length||p.persona.triggers.some(t=>Object.hasOwn(t,'match')||Object.hasOwn(t,'keywords')))throw Error('预设缺失或仍含旧关键词字段');}
   const modelHash=await modelFingerprint(base,headers,options),presetsHash=hash(got.data),questionsHash=hash(data),fingerprint=hash([base,got.data.version,presetsHash,questionsHash,modelHash,options.mode,plan.presets,plan.questions]),file=join(out,'state.json');let state;
   if(existsSync(file)){if(!options.resume)throw Error('输出目录已有记录，必须显式 --resume 或使用新目录，避免重复费用');state=JSON.parse(readFileSync(file,'utf8'));if(state.fingerprint!==fingerprint||state.mode!==options.mode)throw Error('服务、预设或题库已变化，不能混入旧记录');for(const row of Object.values(state.rows))for(const attempt of row.attempts)if(attempt.status==='inflight')attempt.status='uncertain';}
   else state={version:2,mode:options.mode,fingerprint,presetsVersion:got.data.version,presetsHash,questionsHash,modelHash,plan,rows:{}};

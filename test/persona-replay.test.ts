@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
@@ -22,7 +23,7 @@ function fixture(){
  let now=Date.parse('2026-10-28T12:00:00+08:00'),account='worker-a',produce:((r:Invocation)=>Promise<GenerationResult>)|undefined;
  const config=()=>({...structuredClone(exampleConfig),model:{...exampleConfig.model,provider:'custom',id:'mock-model',baseUrl:'https://mock.invalid'}}) as Config;
  const ledger=new LlmStore(store),calls:Invocation[]=[];
- const generator:Generator={async complete(c,system,user,signal,session,meta){
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,signal,session,meta){
   const request={system,user,signal,session,meta};calls.push(request);const id=ledger.start(c.model,meta,now);
   try{
    const result=produce?await produce(request):{text:system.includes('语义路由器')?' {"matches":[]} ':JSON.stringify({action:'reply',text:'候选自然回应',reason:'回应'}),input:12,output:5,cache:0};
@@ -130,7 +131,7 @@ test('费用预估采用相同模型的Pi已定价历史，重新生成基线计
  const f=fixture();try{
   f.add(1);const candidate=legacyPersona('候选');candidate.triggers=[{id:'one',title:'条件',condition:'问候',content:'回应',enabled:true,order:0}];f.persona.save(candidate,0);
   for(const [purpose,cost] of [['reply',.004],['semantic-trigger',.002]] as const){const id=f.ledger.start(f.config().model,{purpose,accountId:'worker-a'},f.now());f.ledger.finish(id,'completed',{usage:{input:10,output:5,cacheRead:0,cacheWrite:0,totalTokens:15},pricingStatus:'priced',cost:{input:cost,output:0,cacheRead:0,cacheWrite:0,total:cost}},f.now());}
-  const estimate=f.estimate({persona:candidate,baselineMode:'saved'});assert.equal(estimate.requests,4);assert.equal(estimate.estimatedUsd,.012);assert.equal(estimate.pricingStatus,'estimated');
+  const estimate=f.estimate({persona:candidate,baselineMode:'saved'});assert.equal(estimate.requests,4);assert.equal(estimate.estimatedUsd,.016);assert.equal(estimate.pricingStatus,'estimated');
  }finally{await f.close();}
 });
 
@@ -138,7 +139,7 @@ test('双版本回放复用组装并独立会话和计费，不改写消息、�
  const f=fixture();try{
   const event=f.add(1);captureGenerationSnapshot(f.store,event,{conversation:[{text:'当时对话'}],memory:{text:'不得复活的旧记忆'},personaRevision:0},f.now());
   const state=f.tableState(),estimate=f.estimate({baselineMode:'saved'}),run=f.replay.start(estimate.estimateId,true);await f.replay.waitIdle();
-  const detail=f.replay.detail(run.id);assert.equal(detail.status,'completed');assert.equal(detail.items[0].candidate.draft.text,'候选自然回应');assert.equal(f.calls.length,2);assert.ok(f.calls.every(x=>x.meta.purpose==='persona-replay'&&x.meta.source==='panel-replay'&&x.meta.interactionId===run.id&&x.meta.jsonObject===true));assert.equal(new Set(f.calls.map(x=>x.session)).size,2);assert.ok(f.calls.every(x=>x.session?.startsWith('replay-'+run.id)));assert.ok(f.calls.every(x=>x.user.includes('当时对话')&&!x.user.includes('不得复活的旧记忆')));assert.deepEqual(f.tableState(),state);assert.equal(detail.summary.fees.calls,2);assert.equal(f.store.get('control'),'paused');
+  const detail=f.replay.detail(run.id);assert.equal(detail.status,'completed');assert.equal(detail.items[0].candidate.draft.text,'候选自然回应');assert.equal(f.calls.length,2);assert.ok(f.calls.every(x=>x.meta.purpose==='persona-replay'&&x.meta.source==='panel-replay'&&x.meta.interactionId===run.id&&x.meta.jsonObject===false));assert.equal(new Set(f.calls.map(x=>x.session)).size,2);assert.ok(f.calls.every(x=>x.session?.startsWith('replay-'+run.id)));assert.ok(f.calls.every(x=>x.user.includes('当时对话')&&!x.user.includes('不得复活的旧记忆')));assert.deepEqual(f.tableState(),state);assert.equal(detail.summary.fees.calls,2);assert.equal(f.store.get('control'),'paused');
  }finally{await f.close();}
 });
 
@@ -154,7 +155,7 @@ test('实际回复基线不请求模型，旧消息标注上下文不完整，�
 test('回放语义判定与回复全部按persona-replay计费，不混入生产语义用途',async()=>{
  const f=fixture();try{
   f.add(1);const candidate=legacyPersona('未保存候选');candidate.triggers=[{id:'greet',title:'问候',condition:'对方问好',content:'自然问候',enabled:true,order:0}];
-  const run=f.replay.start(f.estimate({persona:candidate}).estimateId,true);await f.replay.waitIdle();assert.equal(f.calls.length,2);assert.ok(f.calls.some(x=>x.system.includes('语义路由器')));assert.ok(f.calls.every(x=>x.meta.purpose==='persona-replay'&&x.meta.source==='panel-replay'&&x.meta.jsonObject===true));assert.equal(f.ledger.calls({purpose:'semantic-trigger'}).items.length,0);assert.equal(f.replay.detail(run.id).summary.fees.calls,2);
+  const run=f.replay.start(f.estimate({persona:candidate}).estimateId,true);await f.replay.waitIdle();assert.equal(f.calls.length,1);assert.ok(!f.calls.some(x=>x.system.includes('语义路由器')));assert.ok(f.calls.every(x=>x.meta.purpose==='persona-replay'&&x.meta.source==='panel-replay'&&x.meta.jsonObject===false));assert.equal(f.ledger.calls({purpose:'semantic-trigger'}).items.length,0);assert.equal(f.replay.detail(run.id).summary.fees.calls,1);
  }finally{await f.close();}
 });
 

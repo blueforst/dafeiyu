@@ -40,9 +40,11 @@ import {registerRoleExperienceRoutes} from './role-experience-routes.js';
 import {registerPersonaLibraryRoutes} from './persona-library-routes.js';
 import {ChatTestService} from './chat-test.js';
 import {registerChatTestRoutes} from './chat-test-routes.js';
+import {upgradeSavedPersonas} from './persona-upgrade.js';
 export async function startApp(){
  const app=Fastify({logger:false,bodyLimit:16384});const data=process.env.DATA_DIR||'/data';mkdirSync(data,{recursive:true});
  const store=new Store(data+'/workflow.sqlite');store.boot();
+ upgradeSavedPersonas(store);
  const ingress=readSecret('ingress_key');if(!ingress)throw new Error('缺少入口凭据');
  const transport=new BrowserTransport(process.env.BROWSER_ENDPOINT||'http://browser:3001',readSecret('browser_key'),()=>loadConfig().health??{});
  const generator=new PiGenerator(store),workflow=new Workflow(store,transport,generator);

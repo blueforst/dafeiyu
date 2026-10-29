@@ -5,7 +5,7 @@ import type { Store } from './store.js';
 import { loadConfig, redact } from './config.js';
 import { checkBaseUrl, keyHints, keySlot, readModelKey, readPanelSettings, toConfigModel, type PanelModel, type ReasoningLevel } from './settings.js';
 import { discoverModels, findCatalogModel, isCustom, listModels, listProviders, type ModelInfo } from './model-catalog.js';
-import { ModelService,runCompletion } from './model.js';
+import { ModelService,runCompletion,connectionCheck } from './model.js';
 import { ModelLibraryError,ModelLibraryService } from './model-library.js';
 import { registerModelLibraryRoutes } from './model-library-routes.js';
 
@@ -42,9 +42,7 @@ async function validateModel(raw:any):Promise<{settings:PanelModel; info?:ModelI
   try { checkBaseUrl(raw.baseUrl); } catch (e:any) { throw new HttpError(e.message); }
   const id = String(raw.id ?? '').trim();
   if (!id || id.length > 200) throw new HttpError('请选择或填写模型');
-  const maxTokens = int(raw.maxTokens, 64, 8192, '回复长度上限');
-  const timeoutMs = int(raw.timeoutMs, 1000, 180000, '超时');
-  const settings:PanelModel = { provider, baseUrl: String(raw.baseUrl).trim(), id, reasoningLevel: String(raw.reasoningLevel ?? 'off') as ReasoningLevel, maxTokens, timeoutMs };
+  const settings:PanelModel = { provider, baseUrl: String(raw.baseUrl).trim(), id, reasoningLevel: String(raw.reasoningLevel ?? 'off') as ReasoningLevel };
   if (provider === 'custom') {
     if (!CUSTOM_APIS.includes(raw.api)) throw new HttpError('请选择接口协议');
     settings.api = raw.api;
@@ -53,7 +51,6 @@ async function validateModel(raw:any):Promise<{settings:PanelModel; info?:ModelI
   if (provider === 'custom' && !info) {
     settings.custom = { contextWindow: raw.custom?.contextWindow === undefined ? 128000 : int(raw.custom.contextWindow, 1000, 10000000, '上下文长度'), reasoning: raw.custom?.reasoning === true };
   }
-  if (info && maxTokens > info.maxTokens) throw new HttpError('回复长度上限超过模型上限 ' + info.maxTokens);
   if (!levelsFor(info, provider, settings.custom).includes(settings.reasoningLevel)) throw new HttpError('该模型不支持这个推理档位');
   return { settings, info };
 }
@@ -134,8 +131,8 @@ export function registerModelRoutes(app:FastifyInstance, deps:Deps):void {
     const started = Date.now();
     let result:LastTest;
     try {
-      const r = await service.request(toConfigModel(settings), apiKey, '你是接口验收助手。只输出 MODEL_OK。', '请验证当前配置。', { maxTokens: level === 'off' ? 16 : 2048, reasoning: level },{purpose:'model-test',source:'panel'});
-      const ok = !['error', 'aborted'].includes(r.stopReason);
+      const r = await connectionCheck(service,toConfigModel(settings),apiKey,level,{purpose:'model-test',source:'panel'});
+      const ok = r.ok;
       result = { ok, at: Date.now(), latencyMs: r.latencyMs, provider: settings.provider, id: settings.id, input: r.input, output: r.output,callId:r.callId,usage:r.usage,cost:r.cost,pricingStatus:r.pricingStatus,...(ok ? {} : { error: scrub(r.errorMessage || '模型返回 ' + r.stopReason, apiKey) }) };
     } catch (e:any) {
       result = { ok: false, at: Date.now(), latencyMs: Date.now() - started, provider: settings.provider, id: settings.id,callId:e?.callId,error: scrub(e?.message ?? String(e), apiKey) };

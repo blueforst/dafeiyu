@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
@@ -16,7 +17,7 @@ async function fixture(){
  const dir=mkdtempSync(join(tmpdir(),'persona-api-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=dir;
  const store=new Store(join(dir,'workflow.sqlite'));store.set('control','paused');
  const config=()=>structuredClone(exampleConfig) as Config;
- const generator:Generator={async complete(){return {text:'{"action":"reply","text":"你好","reason":"回应"}',input:10,output:3,cache:0};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(){return {text:'{"action":"reply","text":"你好","reason":"回应"}',input:10,output:3,cache:0};}};
  const persona=new PersonaService(store,generator,config),daily=new DailyStateService(store,generator,config);
  const app=Fastify({bodyLimit:16384});
  app.addHook('onRequest',async(req,reply)=>{if(req.headers['x-test-auth']!=='valid')return reply.code(401).send({error:'未授权'});});

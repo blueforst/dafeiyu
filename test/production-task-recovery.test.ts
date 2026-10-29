@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -12,7 +13,7 @@ import type {TaskContext,TaskRun} from '../src/scheduler.js';
 function fixture(){
  const root=mkdtempSync(tmpdir()+'/role-post-recovery-'),store=new Store(root+'/workflow.sqlite'),outbox=new Outbox(store),health=new RuntimeHealth(store);
  let cools=0,lookups=0,models=0,receipt:any={status:'unknown'};
- const generator={complete:async()=>{models++;throw new Error('回查禁止重新生成');}},memory=new MemoryService(store,generator as any);
+ const generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>{models++;throw new Error('回查禁止重新生成');}},memory=new MemoryService(store,generator as any);
  const workflow:any={store,generator,services:{outbox,memory,health,persona:{get:()=>({persona:{}})},daily:{}},transport:{identity:async()=>({handle:'worker',loggedIn:true,needsHuman:false}),lookupPost:async()=>{lookups++;return receipt;},post:async()=>{throw Error('回查禁止重新发送');}},taskOperation:async(_source:any,fn:any)=>fn(new AbortController().signal),config:()=>({mode:'auto'}),control:()=> 'running',accountId:()=> 'worker',rejectChannel:()=>{cools++;},safetyPause:async()=>{throw Error('身份应保持不变');}};
  const handlers=productionTaskHandlers(workflow),row=outbox.prepare({accountId:'worker',kind:'post',sourceId:'run-one',text:'冻结的早安正文'});outbox.begin(row.id);outbox.settle(row.id,{status:'unknown'});
  const run={id:'run-one',taskId:'morning-post',accountId:'worker',outboxId:row.id} as TaskRun;

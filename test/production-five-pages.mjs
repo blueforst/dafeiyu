@@ -113,7 +113,7 @@ try{
    for(const path of SCOPED_PATHS){const d=await readJson(path,{scoped:true});if(d)results.apiReads.push({path,status:200,...(Array.isArray(d.items)?{items:d.items.length,empty:d.items.length===0}:{})});}
    const feed=cached.get('/api/feed');assert.ok(Array.isArray(feed.items)&&Number.isSafeInteger(feed.pending),'动态接口缺少条目或待处理数');
    const health=cached.get('/api/health');assert.ok(Array.isArray(health.metrics)&&Array.isArray(health.activeAlerts),'健康接口结构无效');
-   const presets=cached.get('/api/persona/presets');assert.equal(presets.version,2);assert.equal(presets.items.length,6,'预设目录缺少六个人设');
+   const presets=cached.get('/api/persona/presets');assert.equal(presets.version,3);assert.equal(presets.items.length,6,'预设目录缺少六个人设');for(const preset of presets.items)for(const card of preset.persona.triggers){assert.equal(Object.hasOwn(card,'match'),false);assert.equal(Object.hasOwn(card,'keywords'),false);}
    const activity=cached.get('/api/billing/activity?weeks=52');assert.ok(Array.isArray(activity.daily)&&activity.totals&&activity.last7,'活动汇总结构无效');
    assert.ok(Array.isArray(cached.get('/api/billing/summary').dailyModels),'计费缺少按日期模型聚合');
    const limits=cached.get('/api/account/posting-limits');assert.ok(limits.effective?.post&&limits.effective?.reply,'字数接口缺少两种操作策略');
@@ -124,7 +124,7 @@ try{
    const keys=new Set();for(const provider of library.providers){assert.ok(provider.key&&!keys.has(provider.key),'服务商标识缺失或重复');keys.add(provider.key);assert.ok(Array.isArray(provider.models),'服务商模型列表无效');if(provider.keyHint)assert.ok(/^[•*●]+.{0,4}$/u.test(String(provider.keyHint)),'Key 未以掩码返回');for(const m of provider.models)assert.ok(!Object.hasOwn(m,'apiKey'),'模型响应包含密钥字段');assert.ok(!Object.hasOwn(provider,'apiKey'),'服务商响应包含密钥字段');}
    for(const hint of Object.values(model.keys||{}))if(hint)assert.ok(/^[•*●]+.{0,4}$/u.test(String(hint)),'旧 Key 槽未以掩码返回');
    const active=library.active?.default;
-   if(active){const provider=library.providers.find(p=>p.key===active.key),entry=provider?.models.find(m=>m.id===active.modelId);assert.ok(provider&&entry,'使用中模型未在库中');assert.equal(model.effective?.id,entry.id,'实际模型与库指向不同');assert.equal(model.effective?.provider,provider.provider,'实际服务商与库指向不同');if(model.settings){assert.equal(entry.params.maxTokens,model.settings.maxTokens);assert.equal(entry.params.timeoutMs,model.settings.timeoutMs);assert.equal(entry.params.reasoningLevel,model.settings.reasoningLevel);}}
+   if(active){const provider=library.providers.find(p=>p.key===active.key),entry=provider?.models.find(m=>m.id===active.modelId);assert.ok(provider&&entry,'使用中模型未在库中');assert.equal(model.effective?.id,entry.id,'实际模型与库指向不同');assert.equal(model.effective?.provider,provider.provider,'实际服务商与库指向不同');if(model.settings){for(const field of ['maxTokens','timeoutMs']){assert.equal(Object.hasOwn(entry.params,field),false);assert.equal(Object.hasOwn(model.settings,field),false);}assert.equal(entry.params.reasoningLevel,model.settings.reasoningLevel);}}
    else assert.ok(model.source==='config'||!model.effective?.id,'面板模型存在却未登记为使用中');
    const second=await readJson('/api/model');assert.equal(hash(second.library),hash(library),'只读模型库读回不稳定');
    results.modelLibrary={version:library.version,revision:library.revision,providers:library.providers.length,active:active?{providerKey:active.key,modelId:active.modelId}:null,source:model.source};

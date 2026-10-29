@@ -8,7 +8,7 @@ for suite in $suites; do
  case "$suite" in *[!a-z0-9-]*|'') echo '验收套件名称无效' >&2; exit 2;; esac
  test -f "test/$suite.mjs" || { echo '验收套件不存在' >&2; exit 2; }
 done
-ssh dsh sh -s -- $suites <<'REMOTE'
+ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=6 dsh sh -s -- $suites <<'REMOTE'
 set -eu
 candidate=/srv/role-workflow-proposals
 artifacts=/var/lib/role-workflow-proposals/artifacts

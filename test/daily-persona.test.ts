@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -15,7 +16,7 @@ function fixture(){
  const dir=mkdtempSync(join(tmpdir(),'role-daily-persona-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=dir;
  const store=new Store(join(dir,'workflow.sqlite'));store.set('control','running');
  const at=Date.parse('2026-10-28T07:00:00+08:00');
- const generator:Generator={async complete(c,system,user){return {text:JSON.stringify(content(JSON.parse(user).date)),input:10,output:10,cache:0};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user){return {text:JSON.stringify(content(JSON.parse(user).date)),input:10,output:10,cache:0};}};
  let identity={id:'first',name:'第一人设',revision:3};
  const original=PersonaService.prototype.activeIdentity;
  PersonaService.prototype.activeIdentity=()=>structuredClone(identity);

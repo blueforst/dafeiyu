@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -23,7 +24,7 @@ function fixture(generator?:Generator){
  const dir=mkdtempSync(join(tmpdir(),'role-reply-prompt-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=dir;
  const store=new Store(join(dir,'workflow.sqlite')),requests:any[]=[];
  const config=structuredClone(exampleConfig) as Config;
- const service=new PersonaService(store,generator??{async complete(c,system,user,signal,session,meta){requests.push({c,system,user,session,meta});return {text:meta?.purpose==='semantic-trigger'?'{"matches":[{"id":"rule","reason":"命中"}]}':'{"action":"reply","text":"收到","reason":"回应"}',input:2,output:3,cache:1};}},()=>config);
+ const service=new PersonaService(store,generator??{async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,signal,session,meta){requests.push({c,system,user,session,meta});return {text:meta?.purpose==='semantic-trigger'?'{"matches":[{"id":"rule","reason":"命中"}]}':'{"action":"reply","text":"收到","reason":"回应"}',input:2,output:3,cache:1};}},()=>config);
  return {store,service,requests,config,close(){store.db.close();if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;rmSync(dir,{recursive:true,force:true});}};
 }
 
@@ -36,7 +37,7 @@ test('北京时间、星期与每个时段边界正确，时间只精确到分�
 test('提示词实际请求与分段一致，动态数据及命中规则不进入system',()=>{
  const input={message:'甲',channel:'public' as const,accountId:'a',staticText:'静态人格',triggered:'不给步骤',dailyState:{activity:'读书'},now:NOW,settings:disabled};
  const first=assembleReplyPrompt(input),second=assembleReplyPrompt({...input,message:'乙',triggered:'另一命中',now:NOW+60000});
- assert.equal(first.system,second.system);assert.ok(!first.system.includes('不给步骤'));assert.ok(!first.system.includes('读书'));assert.ok(first.user.includes('不给步骤'));
+ assert.equal(first.system,second.system);assert.ok(!first.system.includes('不给步骤'));assert.ok(!first.system.includes('读书'));assert.ok(!first.user.includes('不给步骤'));
  assert.equal(first.system,first.segments.filter(s=>s.role==='system').map(s=>s.content).filter(Boolean).join('\n\n'));
  assert.equal(first.user,first.segments.filter(s=>s.role==='user').map(s=>'【'+s.title+'】\n'+s.content).join('\n\n'));
  assert.deepEqual(first.segments.filter(s=>s.role==='user').map(s=>s.kind),['experiences','daily','memory','recent','conversation','reminders','message','now']);
@@ -100,7 +101,7 @@ test('语义判定与提示词层共用一次路由，试聊样本来自模拟�
  const f=fixture();try{
   const persona:Persona=legacyPersona('角色');persona.triggers=[{id:'rule',title:'不给步骤',condition:'问做法',content:'不要提供步骤',enabled:true,order:0}];
   const result=await f.service.preview({persona,channel:'public',messages:[{role:'assistant',text:'模拟开头，原回复'},{role:'user',text:'How are you doing today?'}]});
-  assert.equal(f.requests.length,2);assert.equal(result.meta.promptVersion,REPLY_PROMPT_VERSION);assert.equal(result.meta.sampleSource,'preview-dialogue');assert.ok(result.hints.some(h=>h.kind==='language'));assert.ok(!result.hints.some(h=>String(h.kind)==='opening'));assert.ok(!result.segments.find(s=>s.kind==='reminders')!.content.includes('模拟开头'));assert.ok(result.segments.find(s=>s.kind==='conversation')!.content.includes('模拟开头'));assert.ok(!f.requests[1].system.includes('不要提供步骤'));assert.ok(f.requests[1].user.includes('不要提供步骤'));
+  assert.equal(f.requests.length,1);assert.equal(result.meta.promptVersion,REPLY_PROMPT_VERSION);assert.equal(result.meta.sampleSource,'preview-dialogue');assert.ok(result.hints.some(h=>h.kind==='language'));assert.ok(!result.hints.some(h=>String(h.kind)==='opening'));assert.ok(!result.segments.find(s=>s.kind==='reminders')!.content.includes('模拟开头'));assert.ok(result.segments.find(s=>s.kind==='conversation')!.content.includes('模拟开头'));assert.ok(!f.requests[0].system.includes('不要提供步骤'));assert.ok(!f.requests[0].user.includes('不要提供步骤'));assert.deepEqual(result.hits,[]);
   assert.equal((f.store.db.prepare('SELECT count(*) AS n FROM messages').get() as any).n,0);assert.equal((f.store.db.prepare('SELECT count(*) AS n FROM memory').get() as any).n,0);
  }finally{f.close();}
 });
@@ -109,15 +110,15 @@ test('回放可把语义请求归为persona-replay，模型会话路由与默认
  const f=fixture();try{
   const p=legacyPersona('角色');p.triggers=[{id:'rule',title:'规则',condition:'条件',content:'命中规则',enabled:true,order:0}];
   const result=await f.service.assemble({persona:p,message:'你好',channel:'public',accountId:'a',now:NOW,sessionId:'replay-run-saved',routingPurpose:'persona-replay',routingSource:'panel-replay'});
-  assert.equal(f.requests[0].meta.purpose,'persona-replay');assert.equal(f.requests[0].meta.source,'panel-replay');assert.equal(f.requests[0].session,'replay-run-saved');assert.equal(f.requests[0].c.model.maxTokens,512);assert.equal(result.calls.length,1);
+  assert.equal(f.requests.length,0);assert.equal(result.calls.length,0);assert.ok(result.system.includes('rule｜规则：条件'));assert.ok(!result.user.includes('命中规则'));
  }finally{f.close();}
 });
 
 test('提醒设置在await之前冻结，生成中修改不影响本次请求',async()=>{
- let finish!:(result:any)=>void;const f=fixture({async complete(){return new Promise(resolve=>{finish=resolve;});}});try{
+ let finish!:(result:any)=>void;const f=fixture({async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(){return new Promise(resolve=>{finish=resolve;});}});try{
   const p=legacyPersona('角色');p.triggers=[{id:'rule',title:'规则',condition:'条件',content:'规则正文',enabled:true,order:0}];
   const settings={...DEFAULT_PROMPT_HINTS},pending=f.service.assemble({persona:p,message:'Hello my friend!',channel:'public',accountId:'a',now:NOW,promptHints:settings});
-  await Promise.resolve();await Promise.resolve();settings.languageEnabled=false;finish({text:'{"matches":[]}',input:1,output:1,cache:0});const result=await pending;assert.ok(result.hints.some(h=>h.kind==='language'));
+  await Promise.resolve();await Promise.resolve();settings.languageEnabled=false;const result=await pending;assert.ok(result.hints.some(h=>h.kind==='language'));
  }finally{f.close();}
 });
 
@@ -146,7 +147,7 @@ test('跳过类别白名单兼容缺失或错误值，不丢失骚扰调度标�
 test('正常生产草稿保存提醒meta并关联原调用cacheRead，旧草稿详情兼容且日志无片段',async()=>{
  const f=fixture(),app=Fastify(),ledger=new LlmStore(f.store),now=Date.now();let calls=0;
  const event:Event={id:'prompt-production',platformId:'1234567',channel:'public',userId:'visitor',handle:'visitor',text:'Hello my friend, how is your day?',url:'https://x.com/visitor/status/1234567',conversationId:'1234567',timestamp:now-7200000,timestampReliable:true};
- const generator:Generator={async complete(c,system,user,signal,session,meta){calls++;const callId=ledger.start(c.model,meta);ledger.finish(callId,'completed',{usage:{input:8,output:3,cacheRead:4,cacheWrite:0,totalTokens:15},pricingStatus:'unpriced'});return {text:'{"action":"reply","text":"收到，祝你今天顺利。","reason":"回应"}',input:8,output:3,cache:4,callId};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,signal,session,meta){calls++;const callId=ledger.start(c.model,meta);ledger.finish(callId,'completed',{usage:{input:8,output:3,cacheRead:4,cacheWrite:0,totalTokens:15},pricingStatus:'unpriced'});return {text:'{"action":"reply","text":"收到，祝你今天顺利。","reason":"回应"}',input:8,output:3,cache:4,callId};}};
  const workflow=new Workflow(f.store,{identity:async()=>({handle:'prompt_bot',loggedIn:true,needsHuman:false}),control:async()=>{},collect:async()=>({events:[event],warnings:[]}),context:async()=>'',send:async()=>{throw new Error('草稿模式禁止发送');},lookup:async()=>({status:'unknown'})},generator,()=>f.config);
  const program=new Program(f.store),outbox=new Outbox(f.store),persona=new PersonaService(f.store,generator,()=>f.config);workflow.services={program,outbox,persona};registerProgramRoutes(app,{store:f.store,program,workflow});
  try{

@@ -13,8 +13,6 @@ export function loadConfig(path=process.env.CONFIG_PATH || '/config/config.json'
  if(c.model?.vision)throw new Error('本期视觉输入尚未接入，请保持 vision=false');
  if(!c.model||((c.model.provider==='custom'||c.model.source!=='panel')&&!['openai-completions','openai-responses','anthropic-messages'].includes(c.model.api)))throw new Error('模型协议无效');
  if(c.model.baseUrl){const u=new URL(c.model.baseUrl);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw new Error('模型地址无效');}
- if(!Number.isInteger(c.model.maxTokens)||c.model.maxTokens<64||c.model.maxTokens>8192)throw new Error('输出额度无效');
- if(!Number.isInteger(c.model.timeoutMs)||c.model.timeoutMs<1000||c.model.timeoutMs>180000)throw new Error('模型超时无效');
  return c;
 }
 export function readSecret(name:string,root=process.env.SECRETS_DIR||'/run/role-secrets'){try{return readFileSync(root+'/'+name,'utf8').trim();}catch{return '';}}

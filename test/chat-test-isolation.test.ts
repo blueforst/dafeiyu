@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {existsSync,mkdirSync,mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
@@ -28,7 +29,7 @@ function fixture(){
  const config:Config=structuredClone(exampleConfig) as Config;
  config.mode='draft';config.publicPerHour=1;config.privatePerHour=1;config.publicPerDay=1;config.privatePerDay=1;config.replyHours={enabled:true,closeDelayMinutes:30};
  let reply='先按你的节奏把项目收尾。',dailyReads=0;
- const generator:Generator={async complete(c,system,user,_signal,session,meta={}){
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,_signal,session,meta={}){
   calls.push({system,user,meta,session});const callId=ledger.start(c.model,meta);
   let text:string;if(meta.source==='chat-test:semantic-trigger')text=JSON.stringify({matches:[{id:'semantic',reason:'提到了项目'}]});
   else if(meta.source==='chat-test:memory-summary'){const incoming=JSON.parse(user).incoming;text=JSON.stringify({items:[{type:'fact',text:'测试用户项目下周上线',sourceIds:[incoming[0].id]}]});}

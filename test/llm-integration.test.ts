@@ -36,14 +36,14 @@ function completion(res:ServerResponse,text:string){
  res.end('data: [DONE]\n\n');
 }
 
-test('真实协议解析后业务JSON失败仍保留全部用量，默认4096且不写旧usage',async()=>{
+test('真实协议解析后业务JSON失败仍保留全部用量，使用模型最大输出且不写旧usage',async()=>{
  const f=fixture(),http=await httpFixture(res=>completion(res,'这不是业务JSON'));
  try{
   f.config.model={...f.config.model,provider:'custom',baseUrl:http.base+'/v1',id:'integration-model',reasoning:false};f.save();
   const result=await new ModelService(f.store).complete(f.config,'固定系统规则','真实协议测试',undefined,'stable-session',{purpose:'reply',source:'integration',accountId:'working',channel:'public',interactionId:'bad-json'});
   assert.throws(()=>parseDraft(result.text));
   // 未声明旧兼容字段的自定义 Chat Completions 使用 Pi 的 max_completion_tokens 默认。
-  assert.equal(http.seen[0].body.max_completion_tokens,4096);assert.equal(http.seen[0].body.max_tokens,undefined);
+  assert.equal(http.seen[0].body.max_completion_tokens,8192);assert.equal(http.seen[0].body.max_tokens,undefined);
   const row=f.ledger.get(result.callId!)!;assert.equal(row.status,'completed');assert.equal(row.interactionId,'bad-json');assert.equal(row.pricingStatus,'unpriced');assert.equal(row.cost,null);
   assert.deepEqual({input:row.usage!.input,output:row.usage!.output,cacheRead:row.usage!.cacheRead,cacheWrite:row.usage!.cacheWrite,totalTokens:row.usage!.totalTokens,reasoning:row.usage!.reasoning},{input:20,output:10,cacheRead:4,cacheWrite:6,totalTokens:40,reasoning:3});
   assert.equal((f.store.db.prepare('SELECT COUNT(*) AS n FROM usage').get() as any).n,0);

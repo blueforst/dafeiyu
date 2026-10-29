@@ -23,6 +23,6 @@ test('保存纯配置不包含运行控制字段且拒绝原型污染',()=>{
 test('损坏设置只允许明确模型保存恢复；其他分区不能静默清空',()=>{
  const s=sandbox();try{
   mkdirSync(panelDir(),{recursive:true});writeFileSync(panelDir()+'/settings.json','{broken');assert.throws(()=>mergePanelSettings('persona',{sections:[]}));
-  const result=mergePanelSettings('model',{provider:'custom',baseUrl:'https://model.example',id:'test',api:'openai-completions',reasoningLevel:'off',maxTokens:4096,timeoutMs:60000},0);assert.equal(result.revision,1);assert.equal(readPanelSettings().model?.maxTokens,4096);
+  const result=mergePanelSettings('model',{provider:'custom',baseUrl:'https://model.example',id:'test',api:'openai-completions',reasoningLevel:'off',maxTokens:4096,timeoutMs:60000},0);assert.equal(result.revision,1);assert.equal(Object.hasOwn(readPanelSettings().model??{},'maxTokens'),false);
  }finally{s.close();}
 });

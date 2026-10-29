@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -18,7 +19,7 @@ const secret='下个月要去大阪看樱花';
 function fixture(){
  const path=mkdtempSync(tmpdir()+'/linked-reply-'),previous=process.env.DATA_DIR;process.env.DATA_DIR=path;
  const store=new Store(path+'/workflow.sqlite'),config={...structuredClone(exampleConfig),mode:'auto',replyHours:{enabled:false,closeDelayMinutes:30}} as Config;
- let sends=0;const generator={complete:async()=>({text:JSON.stringify({action:'reply',text:secret+'了吧！',reason:'回应'}),input:1,output:1,cache:0})};
+ let sends=0;const generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>({text:JSON.stringify({action:'reply',text:secret+'了吧！',reason:'回应'}),input:1,output:1,cache:0})};
  const memory=new MemoryService(store,generator,()=>config),outbox=new Outbox(store),triage=new ReplyTriage(store);
  const event:Event={id:'x:100',platformId:'100',targetId:'100',channel:'public',userId:'x:alice',handle:'alice',text:'你还记得我的计划吗？',url:'https://x.com/alice/status/100',conversationId:'100',timestamp:Date.now(),timestampReliable:true};
  const transport:Transport={identity:async()=>({handle:'privacy_bot',loggedIn:true,needsHuman:false}),control:async()=>{},collect:async()=>({events:[event],warnings:[]}),context:async()=>({messages:[]}),send:async()=>{sends++;return {status:'confirmed',id:'sent100'};},lookup:async()=>({status:'unknown'}),post:async()=>({status:'unknown'}),lookupPost:async()=>({status:'unknown'})};
@@ -35,7 +36,7 @@ test('重合检查只用于公开且有私信背景的回复，不改变私信�
 }finally{f.close();}});
 test('v5 时区固定约束、迟到文案及私信背景独立段落只在公开出现',()=>{
  const now=Date.parse('2026-10-29T19:53:00Z'),input={accountId:'bot',channel:'public' as const,message:'你好呀',staticText:'角色',now,memory:{memories:[],recent:[],privateBackground:[{type:'fact',text:secret}]}};
- const prompt=assembleReplyPrompt(input),kinds=prompt.segments.map(s=>s.kind);assert.equal(REPLY_PROMPT_VERSION,'reply-context-v5');assert.equal(kinds.indexOf('private-background'),kinds.indexOf('memory')+1);assert.match(prompt.system,/不知道对方那边几点/);assert.match(prompt.segments.at(-1)!.content,/你这边：.*对方的当地时间未知/);assert.match(prompt.segments.find(s=>s.kind==='daily')!.content,/这是你自己的日程和时段/);assert.ok(!prompt.segments.find(s=>s.kind==='memory')!.content.includes(secret));
+ const prompt=assembleReplyPrompt(input),kinds=prompt.segments.map(s=>s.kind);assert.equal(REPLY_PROMPT_VERSION,'reply-context-v6');assert.equal(kinds.indexOf('private-background'),kinds.indexOf('memory')+1);assert.match(prompt.system,/不知道对方那边几点/);assert.match(prompt.segments.at(-1)!.content,/你这边：.*对方的当地时间未知/);assert.match(prompt.segments.find(s=>s.kind==='daily')!.content,/这是你自己的日程和时段/);assert.ok(!prompt.segments.find(s=>s.kind==='memory')!.content.includes(secret));
  assert.equal(assembleReplyPrompt({...input,channel:'private'}).segments.some(s=>s.kind==='private-background'),false);
  const late=buildReplyHints({...input,timestamp:now-2*3600000,timestampReliable:true}).hints.find(h=>h.kind==='late')!;assert.match(late.text,/自然地为迟到致歉一次/);assert.doesNotMatch(late.text,/按现在的时段问候/);
 });

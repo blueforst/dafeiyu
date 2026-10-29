@@ -4,25 +4,25 @@ import type { Store } from './store.js';
 import { redact } from './config.js';
 import { checkBaseUrl,commitModelLibrary,keyHint,keySlot,readModelKey,readPanelSettings,toConfigModel,writeModelKey,type PanelModel,type ReasoningLevel } from './settings.js';
 import { discoverModels,findCatalogModel,listCatalogModels,listModels,listProviders,type ModelInfo } from './model-catalog.js';
-import { ModelService,runCompletion } from './model.js';
+import { ModelService,runCompletion,connectionCheck } from './model.js';
 import type { Config } from './types.js';
 
 export type LibraryTest = {ok:boolean;at:number;latencyMs:number;provider:string;id:string;input?:number;output?:number;error?:string;callId?:string;usage?:unknown;cost?:unknown;pricingStatus?:string};
-export type LibraryParams = {reasoningLevel:ReasoningLevel;maxTokens:number;timeoutMs:number};
+export type LibraryParams = {reasoningLevel:ReasoningLevel};
 export type LibraryModel = {id:string;source:'discovered'|'catalog'|'manual';missing?:boolean;params?:LibraryParams;custom?:{contextWindow:number;reasoning:boolean};lastTest?:LibraryTest};
 export type LibraryProvider = {key:string;provider:string;name:string;baseUrl:string;api?:PanelModel['api'];fetchedAt?:number;fetchError?:string;models:LibraryModel[]};
 export type ModelLibrary = {version:1;providers:LibraryProvider[];active:{default?:{key:string;modelId:string}}};
 export type ModelLibraryDependencies = {store:Store;run?:typeof runCompletion;discover?:typeof discoverModels};
 export class ModelLibraryError extends Error {constructor(message:string,public statusCode=400,public extra:Record<string,unknown>={}){super(message);}}
 const APIS=['openai-completions','openai-responses','anthropic-messages'];
-const DEFAULT_PARAMS:LibraryParams={reasoningLevel:'off',maxTokens:4096,timeoutMs:60000};
+const DEFAULT_PARAMS:LibraryParams={reasoningLevel:'off'};
 function integer(value:unknown,min:number,max:number,label:string):number {if(!Number.isSafeInteger(value)||(value as number)<min||(value as number)>max)throw new ModelLibraryError(label+'超出范围');return value as number;}
 function modelId(value:unknown):string {if(typeof value!=='string'||!value.trim()||value.trim().length>200||/[\u0000-\u001f]/.test(value))throw new ModelLibraryError('模型 ID 无效');return value.trim();}
 function typedKey(value:unknown):string {if(value===undefined||value==='')return '';if(typeof value!=='string')throw new ModelLibraryError('API Key 格式无效');const key=value.trim();if(!key||key.length>1000||/\s/.test(key))throw new ModelLibraryError('API Key 格式无效');return key;}
 function baseUrl(value:unknown):string {try{return checkBaseUrl(String(value??'')).href.replace(/\/$/,'');}catch(error){throw new ModelLibraryError(error instanceof Error?error.message:'模型地址无效');}}
 function safeError(error:unknown,key=''):string {let value=redact(error instanceof Error?error.message:String(error));if(key)value=value.split(key).join('[已隐藏]');return value.slice(0,500);}
-function sameModel(a:PanelModel|undefined,b:PanelModel):boolean {return !!a&&a.provider===b.provider&&a.id===b.id&&a.baseUrl===b.baseUrl&&(a.api||'')===(b.api||'')&&a.reasoningLevel===b.reasoningLevel&&a.maxTokens===b.maxTokens&&a.timeoutMs===b.timeoutMs&&JSON.stringify(a.custom||null)===JSON.stringify(b.custom||null);}
-function fromLegacy(model:PanelModel,lastTest?:LibraryTest,key?:string):LibraryProvider {return {key:key||(model.provider==='custom'?'custom-legacy':model.provider),provider:model.provider,name:model.provider==='custom'?'自定义接口':model.provider,baseUrl:model.baseUrl,...(model.api?{api:model.api}:{}),models:[{id:model.id,source:'manual',params:{reasoningLevel:model.reasoningLevel,maxTokens:model.maxTokens,timeoutMs:model.timeoutMs},...(model.custom?{custom:structuredClone(model.custom)}:{}),...(lastTest?.provider===model.provider&&lastTest.id===model.id?{lastTest}: {})}]};}
+function sameModel(a:PanelModel|undefined,b:PanelModel):boolean {return !!a&&a.provider===b.provider&&a.id===b.id&&a.baseUrl===b.baseUrl&&(a.api||'')===(b.api||'')&&a.reasoningLevel===b.reasoningLevel&&JSON.stringify(a.custom||null)===JSON.stringify(b.custom||null);}
+function fromLegacy(model:PanelModel,lastTest?:LibraryTest,key?:string):LibraryProvider {return {key:key||(model.provider==='custom'?'custom-legacy':model.provider),provider:model.provider,name:model.provider==='custom'?'自定义接口':model.provider,baseUrl:model.baseUrl,...(model.api?{api:model.api}:{}),models:[{id:model.id,source:'manual',params:{reasoningLevel:model.reasoningLevel},...(model.custom?{custom:structuredClone(model.custom)}:{}),...(lastTest?.provider===model.provider&&lastTest.id===model.id?{lastTest}: {})}]};}
 
 export class ModelLibraryService {
  private service:ModelService;
@@ -60,8 +60,6 @@ export class ModelLibraryService {
  private async info(provider:LibraryProvider,id:string):Promise<ModelInfo|undefined>{if(provider.provider!=='custom')return (await listModels(provider.provider)).find(x=>x.id===id);const known=await findCatalogModel(id);return known?{...known,cost:{input:0,output:0},costKnown:false}:undefined;}
  private async validateModel(provider:LibraryProvider,model:LibraryModel,requireUnknown=true){
   const info=await this.info(provider,model.id),params=model.params||DEFAULT_PARAMS;
-  integer(params.maxTokens,64,8192,'回复长度上限');integer(params.timeoutMs,1000,180000,'超时');
-  if(info&&params.maxTokens>info.maxTokens)throw new ModelLibraryError('回复长度上限超过模型上限 '+info.maxTokens);
   if(!info&&requireUnknown&&!model.custom)throw new ModelLibraryError('未识别的模型需要填写上下文长度和是否支持推理');
   if(model.custom){integer(model.custom.contextWindow,1000,10000000,'上下文长度');if(typeof model.custom.reasoning!=='boolean')throw new ModelLibraryError('请填写是否支持推理');}
   const levels=info?.levels??(model.custom?.reasoning?['off','low','medium','high']:['off']);
@@ -140,7 +138,7 @@ export class ModelLibraryService {
  async updateModel(key:string,id:string,raw:any){
   const state=this.current(raw?.revision),provider=this.provider(state.library,key);id=modelId(id);let model=provider.models.find(x=>x.id===id);if(!model){if(provider.models.length>=2000)throw new ModelLibraryError('模型数量超过上限');model={id,source:'manual'};provider.models.push(model);}
   const old=JSON.stringify([model.params,model.custom]),params=raw.params||raw;
-  model.params={...DEFAULT_PARAMS,...model.params,...(params.reasoningLevel!==undefined?{reasoningLevel:params.reasoningLevel}:{}),...(params.maxTokens!==undefined?{maxTokens:params.maxTokens}:{}),...(params.timeoutMs!==undefined?{timeoutMs:params.timeoutMs}:{})};
+  model.params={...DEFAULT_PARAMS,...model.params,...(params.reasoningLevel!==undefined?{reasoningLevel:params.reasoningLevel}:{})};
   if(raw.custom!==undefined)model.custom={contextWindow:raw.custom?.contextWindow,reasoning:raw.custom?.reasoning};await this.validateModel(provider,model);
   if(old!==JSON.stringify([model.params,model.custom]))delete model.lastTest;
   this.current(state.revision);this.saved(state.library,state.revision,this.active(state.library,provider,model));this.deps.store.log('model-library-model','已更新模型 '+key+'/'+id);return this.view();
@@ -155,7 +153,7 @@ export class ModelLibraryService {
  async test(key:string,id:string,revision:unknown){
   const state=this.current(revision),provider=this.provider(state.library,key),model=this.model(provider,modelId(id)),info=await this.validateModel(provider,model),apiKey=readModelKey(keySlot(provider.provider,provider.baseUrl));if(!apiKey)throw new ModelLibraryError('请先填写 API Key');
   const levels=info?.levels??(model.custom?.reasoning?['off','low','medium','high']:['off']),level=levels.includes('off')?'off':levels[0],started=Date.now();let result:LibraryTest;
-  try{const r=await this.service.request(toConfigModel(this.materialize(provider,model)),apiKey,'你是接口验收助手。只输出 MODEL_OK。','请验证当前配置。',{maxTokens:level==='off'?16:2048,reasoning:level},{purpose:'model-test',source:'model-library:'+key});const ok=!['error','aborted'].includes(r.stopReason);result={ok,at:Date.now(),latencyMs:r.latencyMs,provider:provider.provider,id:model.id,input:r.input,output:r.output,callId:r.callId,usage:r.usage,cost:r.cost,pricingStatus:r.pricingStatus,...(ok?{}:{error:safeError(r.errorMessage||'模型返回 '+r.stopReason,apiKey)})};}
+  try{const r=await connectionCheck(this.service,toConfigModel(this.materialize(provider,model)),apiKey,level,{purpose:'model-test',source:'model-library:'+key});const ok=r.ok;result={ok,at:Date.now(),latencyMs:r.latencyMs,provider:provider.provider,id:model.id,input:r.input,output:r.output,callId:r.callId,usage:r.usage,cost:r.cost,pricingStatus:r.pricingStatus,...(ok?{}:{error:safeError(r.errorMessage||'模型返回 '+r.stopReason,apiKey)})};}
   catch(error:any){result={ok:false,at:Date.now(),latencyMs:Date.now()-started,provider:provider.provider,id:model.id,callId:error?.callId,error:safeError(error,apiKey)};}
   // 网络等待期间任何配置变化均不可把旧结果写入新连接；费用仍已独立记账。
   this.current(state.revision);model.lastTest=result;this.saved(state.library,state.revision);if(this.active(state.library,provider,model))this.deps.store.set('model:lastTest',JSON.stringify(result));

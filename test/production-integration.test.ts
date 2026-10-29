@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -21,7 +22,7 @@ function fixture(){
  const event:Event={id:'x:100',platformId:'100',targetId:'100',channel:'public',userId:'x:alice',handle:'alice',text:'你好',url:'https://x.com/alice/status/100',conversationId:'100',timestamp:Date.now(),timestampReliable:true};
  let events=[event],sends=0,posts=0,generations=0,postReceipt:Receipt={status:'unknown'},lookupReceipt:Receipt={status:'unknown'};
  const transport:Transport={identity:async()=>({loggedIn:true,needsHuman:false,handle:'staging_bot'}),control:async()=>{},collect:async()=>({events,warnings:[]}),context:async()=>'',send:async()=>{sends++;return {status:'confirmed',id:'200'};},lookup:async()=>lookupReceipt,post:async()=>{posts++;return postReceipt;},lookupPost:async()=>lookupReceipt};
- const generator={complete:async()=>{generations++;return {text:JSON.stringify({action:'reply',text:'你好，今天愉快。',reason:''}),input:8,output:8,cache:0};}};
+ const generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>{generations++;return {text:JSON.stringify({action:'reply',text:'你好，今天愉快。',reason:''}),input:8,output:8,cache:0};}};
  const workflow=new Workflow(store,transport,generator,()=>c),program=new Program(store),outbox=new Outbox(store),persona=new PersonaService(store,generator,()=>c),memory=new MemoryService(store,generator,()=>c),daily=new DailyStateService(store,generator,()=>c);
  daily.edit('staging_bot',shanghaiDate(),{date:shanghaiDate(),fictional:true,periods:[{start:'08:00',end:'09:00',activity:'虚构阅读'}],meals:{breakfast:'面包',lunch:'米饭',dinner:'蔬菜'},activities:['阅读'],mood:'平静'},0);
  workflow.services={program,outbox,persona,memory,daily};

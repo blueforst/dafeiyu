@@ -10,7 +10,7 @@ import { registerBillingRoutes } from '../src/billing-routes.js';
 import { resolveRuntimeModel } from '../src/model-catalog.js';
 import type { Config } from '../src/types.js';
 
-const model:Config['model']={provider:'custom',api:'openai-completions',baseUrl:'https://relay.example/v1',id:'my-model',reasoning:false,reasoningLevel:'off',vision:false,maxTokens:4096,timeoutMs:1000,source:'panel'};
+const model:Config['model']={provider:'custom',api:'openai-completions',baseUrl:'https://relay.example/v1',id:'my-model',reasoning:false,reasoningLevel:'off',vision:false,source:'panel'};
 const full=(over:Partial<CompletionResult>={}):CompletionResult=>({text:'不保存的内容',input:100,output:100,cache:20,stopReason:'stop',latencyMs:12,usage:{input:100,output:100,cacheRead:20,cacheWrite:10,totalTokens:230,reasoning:60},cost:{input:.001,output:.002,cacheRead:.0001,cacheWrite:.0002,total:.0033},pricingStatus:'priced',...over});
 function fixture(){const dir=mkdtempSync(tmpdir()+'/role-billing-');const store=new Store(dir+'/workflow.sqlite');return {store,dir,ledger:new LlmStore(store),close(){store.db.close();rmSync(dir,{recursive:true,force:true});}};}
 

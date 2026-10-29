@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
@@ -18,7 +19,7 @@ import type { Generator } from '../src/model.js';
 function fixture(persona=exampleConfig.persona){
  const dir=mkdtempSync(join(tmpdir(),'persona-library-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=dir;
  const store=new Store(join(dir,'workflow.sqlite')),config=()=>({...structuredClone(exampleConfig),persona}) as Config;
- const generator:Generator={async complete(){throw new Error('人设库不应调用模型');}},service=new PersonaService(store,generator,config);
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(){throw new Error('人设库不应调用模型');}},service=new PersonaService(store,generator,config);
  store.set('control','paused');return {dir,store,service,config,generator,file:join(dir,'panel/settings.json'),close(){store.db.close();if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;rmSync(dir,{recursive:true,force:true});}};
 }
 
@@ -47,7 +48,7 @@ test('首次新建整体落库，未使用项保存不改生产镜像，切换�
 
 test('预设复制和空白来源正确，披露提醒只返回数据，旧版本读取镜像保持一致',()=>{
  const f=fixture();try{
-  const preset=PERSONA_PRESETS.find(preset=>preset.id==='glm')!,made=f.service.library.create({from:'preset',presetId:'glm'});assert.deepEqual(made.item.persona,preset.persona);assert.equal(made.item.origin.presetVersion,2);
+  const preset=PERSONA_PRESETS.find(preset=>preset.id==='glm')!,made=f.service.library.create({from:'preset',presetId:'glm'});assert.deepEqual(made.item.persona,preset.persona);assert.equal(made.item.origin.presetVersion,3);
   const copied=f.service.library.create({from:'copy',sourceId:made.item.id});assert.ok(copied.item.name.includes('副本'));assert.deepEqual(copied.item.persona,made.item.persona);assert.equal(copied.item.origin.fromId,made.item.id);assert.equal(copied.item.origin.kind,'copy');
   const activated=f.service.library.activate(copied.item.id,copied.libraryRevision);assert.ok(activated.disclosure?.bioSuggestion.includes('非官方'));assert.equal(activated.disclosure?.requiresDisclosure,true);
   // 冻结旧版读取契约：面板 persona 优先于 config，未知的新分区被忽略。
@@ -116,7 +117,7 @@ test('人设导入导出往返只包含可移植内容，新建未启用并严�
   assert.deepEqual(Object.keys(file).sort(),['format','name','persona','version']);assert.equal(file.format,'role-workflow-persona');assert.deepEqual(file.persona,made.item.persona);
   const imported=f.service.library.importFile({document:file});assert.notEqual(imported.item.id,made.item.id);assert.notEqual(imported.item.name,made.item.name);assert.deepEqual(imported.item.persona,made.item.persona);assert.equal(imported.item.origin.kind,'blank');
   assert.equal(imported.activeId,'current');assert.deepEqual(f.service.get(),before);assert.equal(f.service.library.detail(imported.item.id).origin.kind,'blank');
-  const snapshot=readFileSync(f.file,'utf8');for(const document of [null,{}, {...file,version:2},{...file,format:'other'},{...file,persona:{sections:[],triggers:'bad'}},{...file,name:'x'.repeat(41)}])assert.throws(()=>f.service.library.importFile({document}));
+  const snapshot=readFileSync(f.file,'utf8');for(const document of [null,{}, {...file,version:3},{...file,format:'other'},{...file,persona:{sections:[],triggers:'bad'}},{...file,name:'x'.repeat(41)}])assert.throws(()=>f.service.library.importFile({document}));
   assert.throws(()=>f.service.library.importFile({document:file,name:made.item.name}),/已存在/);assert.equal(readFileSync(f.file,'utf8'),snapshot);assert.equal(f.store.get('control'),'paused');
   while(f.service.library.list().items.length<20)f.service.library.create({from:'blank'});const full=readFileSync(f.file,'utf8');assert.throws(()=>f.service.library.importFile({document:file}),/二十/);assert.equal(readFileSync(f.file,'utf8'),full);
  }finally{f.close();}

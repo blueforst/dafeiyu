@@ -111,7 +111,31 @@
 - 新增公开与私信身份关联（试聊自动、平台读取需真实样本、管理员手动），召回改为双向：私信可用公开往来，公开回复只拿私信长期记忆作背景，并用八字重合检查兜底；
 - 提示词标明北京时间是角色这边的时间，不按它推断对方作息，迟到提醒不再按时段问候，版本升为 `reply-context-v5`。
 
+## 触发卡按需读取与模型参数精简：实施中
+
+2026-10-29 根据管理员反馈整理，两份提案互不依赖，当前实现已进入服务器隔离验收，尚未发布。
+
+### 触发卡改为按需读取
+
+[提案](changes/convert-trigger-cards-to-skills/proposal.md) · [设计](changes/convert-trigger-cards-to-skills/design.md) · [任务](changes/convert-trigger-cards-to-skills/tasks.md) · [增量规格](changes/convert-trigger-cards-to-skills/specs/)
+
+当前 **16/20**。主要内容：
+
+- 取消关键词触发；卡片只填标题、什么时候用、内容；“被问到才用”的分区并入触发卡。
+- 底层按 skill 的方式工作：system 常驻目录，回复模型用原生工具调用读取卡片内容，取消单独的语义路由请求。
+- 一次回复最多 20 次工具调用，读取卡片计入；虚构日程和早晚安帖带全部卡片。
+- 内置预设升至第 3 版；已有人设启动时一次性升级并备份；人设文件升至第 2 版。
+- 连接测试包含一次工具调用。
+
+### 模型参数精简
+
+[提案](changes/simplify-model-params/proposal.md) · [设计](changes/simplify-model-params/design.md) · [任务](changes/simplify-model-params/tasks.md) · [增量规格](changes/simplify-model-params/specs/)
+
+当前 **5/8**。删除模型参数中的“回复长度上限”和“超时”：输出上限取模型自身最大值，回复长度只受 X 账号发帖限制约束；每次请求固定 180 秒保护时限。实施时同步修改 `config.yaml` 中“默认 4096 token”的约定。
+
 ## 依赖与维护规则
+
+- `convert-trigger-cards-to-skills` 修改七页基线、参考补齐、人设预设、人设工作区、回复提示词、文风、设置细节、回放、人设文件和五页面板中的能力，归档应在这些来源提案之后；`simplify-model-params` 应在五页面板之后归档。两者都修改 `model-configuration`，但改的是不同需求。
 
 - 七页基线提案和原计划保留为来源；后续修改以相应 change 的提案、完整增量规格、设计和任务为准，避免设计分叉。
 - `fill-reference-post-gaps` 修改七页基线、回复提示词和回放中的能力；归档应在这些来源提案之后。`add-billing-chart-interaction` 应在 `simplify-panel-activity-feed` 之后。
@@ -171,3 +195,10 @@ OPENSPEC=/srv/role-workflow-openspec-tools/node_modules/.bin/openspec
 ## 人设文件导入与导出
 
 [提案](changes/add-persona-file-transfer/proposal.md) · [任务](changes/add-persona-file-transfer/tasks.md)。当前 **3/3**，已随 0.1.20 发布；支持本地 JSON 下载、文件选择导入，新建未使用项。
+
+
+## 同文重复降优先：实施中
+
+[提案](changes/refine-duplicate-message-triage/proposal.md) · [设计](changes/refine-duplicate-message-triage/design.md) · [任务](changes/refine-duplicate-message-triage/tasks.md)
+
+2026-10-29 管理员确认，同文不再直接硬过滤；同一账号、同一渠道一小时达到阈值只降普通优先级，重点名单与人工操作保留优先。广告过滤及所有出站、额度和暂停规则不变，无新迁移。随本轮一起验证与发布。

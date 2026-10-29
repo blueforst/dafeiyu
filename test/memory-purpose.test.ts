@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -13,7 +14,7 @@ import {exampleConfig} from './config-fixture.js';
 test('记忆整理可只覆盖统一流水用途与账号，记忆仍留在原scope；生产默认用途不变',{timeout:10000},async()=>{
  const root=mkdtempSync(join(tmpdir(),'memory-purpose-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=root;
  const store=new Store(join(root,'workflow.sqlite')),calls:CallMetadata[]=[];
- const generator:Generator={async complete(_c,_s,user,_a,_session,meta){
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(_c,_s,user,_a,_session,meta){
   calls.push(meta??{});const input=JSON.parse(user),sourceId=input.incoming[0].id;
   return {text:JSON.stringify({items:[{type:'fact',text:'测试用户下周上线项目',sourceIds:[sourceId]}]}),input:1,output:1,cache:0};
  }};

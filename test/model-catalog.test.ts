@@ -9,7 +9,7 @@ import { writeModelKey } from '../src/settings.js';
 import type { Config } from '../src/types.js';
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
 
-const deepseek = (over: Partial<Config['model']> = {}): Config['model'] => ({ provider: 'deepseek', api: '', baseUrl: 'https://api.deepseek.com', id: 'deepseek-flash', reasoning: false, reasoningLevel: 'off', vision: false, maxTokens: 1024, timeoutMs: 10000, source: 'panel', ...over });
+const deepseek = (over: Partial<Config['model']> = {}): Config['model'] => ({ provider: 'deepseek', api: '', baseUrl: 'https://api.deepseek.com', id: 'deepseek-flash', reasoning: false, reasoningLevel: 'off', vision: false, source: 'panel', ...over });
 const config = (model: Config['model']): Config => ({ mode: 'draft', pollSeconds: 60, maxAgeHours: 6, maxPerRound: 2, publicPerHour: 10, privatePerHour: 30, retentionDays: 30, persona: '测试 AI', dailyState: '无', model });
 
 type Seen = { url?: string; headers: IncomingHttpHeaders; body: any };
@@ -150,7 +150,7 @@ test('runCompletion 经内置服务商把请求发到改过的地址，并带上
     const r = await runCompletion(deepseek({ baseUrl: 'http://127.0.0.1:' + port }), 'k-unit-0001', '系统', '你好');
     assert.equal(seen[0].headers.authorization, 'Bearer k-unit-0001');
     assert.equal(seen[0].body.model, 'deepseek-flash');
-    assert.equal(seen[0].body.max_tokens, 1024);
+    assert.equal(seen[0].body.max_tokens, (await resolveRuntimeModel(deepseek())).model.maxTokens);
     assert.equal(r.stopReason, 'stop');
     assert.equal(r.input, 12);
     assert.equal(r.text, 'MODEL_OK');

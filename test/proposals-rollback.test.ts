@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -25,7 +26,7 @@ import { exampleConfig } from './config-fixture.js';
 import { ensureReferenceGapMigration } from '../src/reference-gap-schema.js';
 
 const helper=resolve('deploy/prepare-proposals-rollback.py');
-const generator:Generator={complete:async()=>{throw new Error('回退演练不调用模型');}};
+const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>{throw new Error('回退演练不调用模型');}};
 const model={provider:'custom',baseUrl:'https://rollback-fixture.invalid/v1',api:'openai-completions',id:'fixture-model',reasoningLevel:'off',maxTokens:4096,timeoutMs:60000};
 function fixture(){
  const root=mkdtempSync(tmpdir()+'/role-proposals-rollback-'),path=root+'/workflow.sqlite',profile=root+'/profile';mkdirSync(profile);mkdirSync(root+'/panel');

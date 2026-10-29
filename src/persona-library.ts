@@ -1,3 +1,4 @@
+import {upgradePersona} from './persona-upgrade.js';
 import { randomUUID } from 'node:crypto';
 import { commitPersonaLibrary,readPanelSettings,type PanelSettings } from './settings.js';
 import { FIXED_SYSTEM_RULES,legacyPersona,validatePersona,type Persona,type PersonaService } from './persona.js';
@@ -26,7 +27,7 @@ export class PersonaLibraryService {
    if(item.origin.kind==='preset'&&typeof item.origin.presetId!=='string')throw new Error('预设来源无效');
    if(item.origin.kind==='copy'&&typeof item.origin.fromId!=='string')throw new Error('复制来源无效');
    const origin:PersonaOrigin=item.origin.kind==='preset'?{kind:'preset',presetId:item.origin.presetId,presetVersion:item.origin.presetVersion}:item.origin.kind==='copy'?{kind:'copy',fromId:item.origin.fromId,...(item.origin.presetId?{presetId:item.origin.presetId,presetVersion:item.origin.presetVersion}:{})}:{kind:item.origin.kind==='blank'?'blank':'migrated'};
-   return {id:item.id,name:title,revision:item.revision,createdAt:item.createdAt,updatedAt:item.updatedAt,origin,persona:validatePersona(item.persona)};
+   return {id:item.id,name:title,revision:item.revision,createdAt:item.createdAt,updatedAt:item.updatedAt,origin,persona:validatePersona(item.persona,{stored:true})};
   });
   if(!ids.has(raw.activeId))throw new Error('使用中人设不存在');
   return {version:1,activeId:raw.activeId,items};
@@ -41,7 +42,7 @@ export class PersonaLibraryService {
  private unique(library:PersonaLibrary,title:string,id?:string){if(library.items.some(item=>item.id!==id&&item.name===title))throw new PersonaLibraryError('人设名称已存在');}
  private nextName(library:PersonaLibrary,base:string){const prefix=Array.from(base).slice(0,35).join('');for(let n=0;;n++){const value=prefix+(n?' '+(n+1):'');if(!library.items.some(item=>item.name===value))return value;}}
  disclosure(item:PersonaLibraryItem){const origin=item.origin;if(!origin.presetId)return undefined;const preset=PERSONA_PRESETS.find(preset=>preset.id===origin.presetId);return preset&&preset.bioSuggestion?{presetId:preset.id,bioSuggestion:preset.bioSuggestion,requiresDisclosure:preset.id!=='default',message:preset.id==='default'?'今日日程不会自动改变':'恢复业务前请修改 X 账号名称和简介，并考虑把“非官方”加入合规检查披露词'}:undefined;}
- list(){const {library,libraryRevision}=this.read();return {activeId:library.activeId,libraryRevision,items:library.items.map(({persona,...item})=>({...item,characters:persona.sections.reduce((n,s)=>n+s.content.length,0)+persona.triggers.reduce((n,t)=>n+t.content.length+t.condition.length+(t.keywords?.reduce((sum,word)=>sum+word.length,0)??0),0)}))};}
+ list(){const {library,libraryRevision}=this.read();return {activeId:library.activeId,libraryRevision,items:library.items.map(({persona,...item})=>({...item,characters:persona.sections.reduce((n,s)=>n+s.content.length,0)+persona.triggers.reduce((n,t)=>n+t.content.length+t.condition.length,0)}))};}
  detail(id:string){const {library}=this.read(),item=this.find(library,id);return {...structuredClone(item),active:library.activeId===id,fixedRules:FIXED_SYSTEM_RULES,disclosure:this.disclosure(item)};}
  getActive(){const {library}=this.read();return structuredClone(this.find(library,library.activeId));}
  activeIdentity(){return identity(this.getActive());}
@@ -57,10 +58,10 @@ export class PersonaLibraryService {
   const title=raw.name===undefined?this.nextName(library,base):name(raw.name);this.unique(library,title);const at=this.now(),item:PersonaLibraryItem={id:randomUUID(),name:title,revision:1,createdAt:at,updatedAt:at,origin,persona};library.items.push(item);
   const saved=this.persist(library,libraryRevision,panel);this.store.log('persona-create',JSON.stringify(identity(item)));return this.response(item,library,saved.revision);
  }
- exportFile(id:string){const item=this.detail(id);return {format:'role-workflow-persona',version:1,name:item.name,persona:item.persona};}
+ exportFile(id:string){const item=this.detail(id);return {format:'role-workflow-persona',version:2,name:item.name,persona:item.persona};}
  importFile(raw:unknown){
-  if(!object(raw)||!object(raw.document)||raw.document.format!=='role-workflow-persona'||raw.document.version!==1)throw new PersonaLibraryError('请选择本系统导出的人设 JSON 文件（版本 1）');
-  const persona=validatePersona(raw.document.persona),base=name(raw.document.name),{library,libraryRevision,panel}=this.read();
+  if(!object(raw)||!object(raw.document)||raw.document.format!=='role-workflow-persona'||![1,2].includes(raw.document.version))throw new PersonaLibraryError('请选择本系统导出的人设 JSON 文件（版本 1 或 2）');
+  const persona=validatePersona(raw.document.version===1?upgradePersona(raw.document.persona,{kind:'copy',fromId:'file'}).persona:raw.document.persona),base=name(raw.document.name),{library,libraryRevision,panel}=this.read();
   if(library.items.length>=20)throw new PersonaLibraryError('最多保存二十个人设，请先删除不用的人设');
   const title=raw.name===undefined?this.nextName(library,base):name(raw.name);this.unique(library,title);
   const at=this.now(),item:PersonaLibraryItem={id:randomUUID(),name:title,revision:1,createdAt:at,updatedAt:at,origin:{kind:'blank'},persona};

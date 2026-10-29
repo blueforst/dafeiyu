@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -14,7 +15,7 @@ const base={staticText:'固定测试角色',message:'现在聊另一件事',chan
 const segment=(result:ReturnType<typeof assembleReplyPrompt>,kind:string)=>result.segments.find(s=>s.kind===kind)!;
 test('v5只把近期往来放进独立user段，保留删除约束与稳定system',()=>{
  const memory={memories:[{text:'喜欢茶'}],recent:[{message:'昨天好吗',reply:'我用过的口癖'}],experiences:[{text:'已确认的角色发帖'}],recallOmitted:2},before=JSON.stringify(memory),now=Date.now();
- const result=assembleReplyPrompt({...base,memory,now});assert.equal(REPLY_PROMPT_VERSION,'reply-context-v5');assert.ok(FIXED_SYSTEM_RULES.includes('记录由运营者管理'));
+ const result=assembleReplyPrompt({...base,memory,now});assert.equal(REPLY_PROMPT_VERSION,'reply-context-v6');assert.ok(FIXED_SYSTEM_RULES.includes('记录由运营者管理'));
  assert.deepEqual(result.segments.filter(s=>s.role==='user').map(s=>s.kind),['experiences','daily','memory','recent','conversation','reminders','message','now']);
  assert.deepEqual(JSON.parse(segment(result,'memory').content),{memories:memory.memories,recallOmitted:2});const recent=JSON.parse(segment(result,'recent').content);assert.deepEqual(recent.items,memory.recent);assert.match(recent.note,/reply 是你已经发出的原话/);assert.match(recent.note,/梗、口癖、开头、收尾和说法/);
  assert.equal((result.user.match(/我用过的口癖/g)??[]).length,1);assert.ok(!result.system.includes('我用过的口癖'));assert.equal(result.system,assembleReplyPrompt({...base,memory:{...memory,recent:[]},now:now+1000}).system);assert.equal(JSON.stringify(memory),before);
@@ -31,7 +32,7 @@ test('只有早晚安标识才加入帖子去重，不因旧设置开关或普�
  const normal=buildReplyHints(base),post=buildReplyHints({...base,postVariety:true});assert.ok(!normal.hints.some(h=>h.kind==='post-variety'));const hint=post.hints.find(h=>h.kind==='post-variety')!;assert.match(hint.text,/不要重复它们的开头、句式和切入点/);assert.match(hint.text,/不要把以前帖子里的事当成今天又发生一次/);assert.equal(post.hints.length,normal.hints.length+1);
 });
 test('真实记忆召回按人和渠道隔离，草稿不带已发回复，遗忘后近期为空且日志无原文',async()=>{
- const path=mkdtempSync(tmpdir()+'/style-prompt-'),previous=process.env.DATA_DIR;process.env.DATA_DIR=path;const store=new Store(path+'/db.sqlite'),config=structuredClone(exampleConfig) as Config;let calls=0;const generator={complete:async()=>{calls++;return {text:'{"action":"reply","text":"收到","reason":""}',input:1,output:1,cache:0};}};const memory=new MemoryService(store,generator,()=>config),persona=new PersonaService(store,generator,()=>config),now=Date.now();
+ const path=mkdtempSync(tmpdir()+'/style-prompt-'),previous=process.env.DATA_DIR;process.env.DATA_DIR=path;const store=new Store(path+'/db.sqlite'),config=structuredClone(exampleConfig) as Config;let calls=0;const generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>{calls++;return {text:'{"action":"reply","text":"收到","reason":""}',input:1,output:1,cache:0};}};const memory=new MemoryService(store,generator,()=>config),persona=new PersonaService(store,generator,()=>config),now=Date.now();
  try{
   const add=(id:string,userId:string,channel:'public'|'private',text:string,reply:string,status='confirmed')=>{const e:Event={id:'x:'+id,platformId:id,targetId:id,channel,userId,handle:userId,url:channel==='public'?'https://x.com/'+userId+'/status/'+id:'https://x.com/messages/1-2',conversationId:channel==='public'?id:'1-2',text,timestamp:now-1000,timestampReliable:true};assert.equal(store.ingest(e,'worker'),true);store.update(store.getMessage(e.id,'worker')!.id,status,{draft:{action:'reply',text:reply,reason:''}},'worker');};
   add('90101','alice','public','甲的入站独有','甲的已发原话独有');add('90102','bob','public','乙的公开入站独有','乙的已发原话独有');add('90103','bob','private','乙的私信入站独有','乙的私信回复独有');add('90104','bob','public','乙的草稿入站独有','乙的未发草稿独有','draft');

@@ -11,7 +11,7 @@ import { writeExampleConfig } from './config-fixture.js';
 
 const KEY = 'sk-test-123456789';
 const custom = (over: Record<string, unknown> = {}) => ({ provider: 'custom', baseUrl: 'http://mock.local/v1', api: 'openai-completions', id: 'my-model', reasoningLevel: 'off', maxTokens: 1024, timeoutMs: 60000, ...over });
-const okResult = (over: Partial<CompletionResult> = {}): CompletionResult => ({ text: 'MODEL_OK', input: 5, output: 2, cache: 0, stopReason: 'stop', latencyMs: 30, ...over });
+const okResult = (over: Partial<CompletionResult> = {}): CompletionResult => ({ text: 'MODEL_OK', input: 5, output: 2, cache: 0, stopReason: 'toolUse', latencyMs: 30,toolCalls:[{type:'toolCall',id:'check',name:'connection_check',arguments:{ok:true}}], ...over });
 
 function setup(opts: { run?: any; discover?: any } = {}) {
   const root = mkdtempSync(tmpdir() + '/role-routes-');
@@ -56,13 +56,13 @@ test('保存自定义模型和 Key：之后只返回末四位，任何响应都�
   } finally { await t.close(); }
 });
 
-test('保存时拒绝本机/元数据地址、超范围的长度上限和模型不支持的推理档位', async () => {
+test('保存时拒绝本机/元数据地址、旧参数被忽略，仍拒绝模型不支持的推理档位', async () => {
   const t = setup();
   try {
     for (const baseUrl of ['http://localhost:1/v1', 'http://169.254.169.254/']) {
       assert.equal((await t.req('PUT', '/api/model', { settings: custom({ baseUrl }), apiKey: KEY })).statusCode, 400, baseUrl);
     }
-    assert.equal((await t.req('PUT', '/api/model', { settings: custom({ maxTokens: 9000 }), apiKey: KEY })).statusCode, 400);
+    assert.equal((await t.req('PUT', '/api/model', { settings: custom({ maxTokens: 9000,timeoutMs:'ignored' }), apiKey: KEY })).statusCode, 200);
     const ds = { provider: 'deepseek', baseUrl: 'https://api.deepseek.com', id: 'deepseek-flash', reasoningLevel: 'medium', maxTokens: 1024, timeoutMs: 60000 };
     assert.equal((await t.req('PUT', '/api/model', { settings: ds, apiKey: KEY })).statusCode, 400);
     assert.equal((await t.req('PUT', '/api/model', { settings: { ...ds, reasoningLevel: 'high' }, apiKey: KEY })).statusCode, 200);
@@ -87,12 +87,12 @@ test('旧账号设置接口已移除', async () => {
   } finally { await t.close(); }
 });
 
-test('测试连接：length 算通过，异常算失败且不回显 Key，结果被记录', async () => {
+test('测试连接：length 不算通过，异常算失败且不回显 Key，结果被记录', async () => {
   let next: () => Promise<CompletionResult> = async () => okResult({ stopReason: 'length' });
   const t = setup({ run: () => next() });
   try {
     const pass = await t.req('POST', '/api/model/test', { settings: custom(), apiKey: KEY });
-    assert.equal(pass.json().ok, true);
+    assert.equal(pass.json().ok, false);
     next = async () => { throw new Error('bad ' + KEY); };
     const fail = await t.req('POST', '/api/model/test', { settings: custom(), apiKey: KEY });
     assert.equal(fail.json().ok, false);
@@ -103,12 +103,12 @@ test('测试连接：length 算通过，异常算失败且不回显 Key，结果
   } finally { await t.close(); }
 });
 
-test('测试连接用最小请求：能关推理就关、上限 16', async () => {
+test('测试连接用最小请求：能关推理就关、上限 256', async () => {
   const calls: any[] = [];
   const t = setup({ run: async (_m: any, _k: string, _s: string, _u: string, o: any) => { calls.push(o); return okResult(); } });
   try {
     await t.req('POST', '/api/model/test', { settings: custom(), apiKey: KEY });
-    assert.equal(calls[0].maxTokens, 16);
+    assert.equal(calls[0].maxTokens, 256);
     assert.equal(calls[0].reasoning, 'off');
   } finally { await t.close(); }
 });

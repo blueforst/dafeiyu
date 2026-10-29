@@ -1,3 +1,4 @@
+import {connectionCheck,modelKey} from './model.js';
 import { Store } from './store.js';
 import { PiGenerator } from './model.js';
 import { MemoryService } from './memory.js';
@@ -20,7 +21,7 @@ try{
   const account=s.get('activeAccount').trim().toLowerCase();if(!/^[a-z0-9_]{1,15}$/.test(account))throw Error('没有已确认的工作账号，不能把未知归属记录交给模型整理');
   const result=await memory.summarize(arg,arg2 as 'public'|'private',account,{force:true,source:'cli'});console.log(result.written?'摘要更新完成':'摘要未更新：'+('reason' in result?result.reason:'数据修订已变化'));
  }
- else if(command==='model-check'){const c=loadConfig();const r=await generator.complete(c,'你是接口验收助手。只输出 MODEL_OK。','请验证当前配置。',undefined,undefined,{purpose:'model-test',source:'cli'});console.log(JSON.stringify({ok:r.text.includes('MODEL_OK'),input:r.input,output:r.output,cache:r.cache,callId:r.callId,usage:r.usage,cost:r.cost,pricingStatus:r.pricingStatus}));}
+ else if(command==='model-check'){const c=loadConfig();const r=await connectionCheck(generator,c.model,modelKey(c.model),c.model.reasoning?c.model.reasoningLevel:'off',{purpose:'model-test',source:'cli'});console.log(JSON.stringify({ok:r.ok,error:r.errorMessage,input:r.input,output:r.output,cache:r.cache,callId:r.callId,usage:r.usage,cost:r.cost,pricingStatus:r.pricingStatus}));}
  else if(command==='backup'){
   mkdirSync(data+'/backups',{recursive:true});const path=data+'/backups/workflow-'+new Date().toISOString().replace(/[:.]/g,'-')+'.sqlite';
   s.db.exec("VACUUM INTO '"+path+"'");const copy=new DatabaseSync(path,{readOnly:true});console.log(JSON.stringify({path,integrity:copy.prepare('PRAGMA integrity_check').get()}));copy.close();

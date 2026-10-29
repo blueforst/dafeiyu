@@ -21,7 +21,7 @@ async function fixture(options:{status?:number;text?:string;finish?:string}={}){
   });
  });
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
- const model:Config['model']={provider:'custom',api:'openai-completions',baseUrl:'http://127.0.0.1:'+(server.address() as any).port+'/v1',id:'json-format-fixture',reasoning:false,reasoningLevel:'off',vision:false,maxTokens:128,timeoutMs:5000};
+ const model:Config['model']={provider:'custom',api:'openai-completions',baseUrl:'http://127.0.0.1:'+(server.address() as any).port+'/v1',id:'json-format-fixture',reasoning:false,reasoningLevel:'off',vision:false};
  return {model,requests,close:()=>new Promise<void>(resolve=>server.close(()=>resolve()))};
 }
 
@@ -30,7 +30,7 @@ test('明确JSON对象意图通过真实Pi发出response_format并保留原消�
   const result=await runCompletion(f.model,'fixture-key-only','只返回JSON对象，保留原系统规则。','合成输入',{jsonObject:true});
   assert.equal(f.requests.length,1);assert.deepEqual(f.requests[0].response_format,{type:'json_object'});
   assert.ok(f.requests[0].messages.some((message:any)=>String(message.content).includes('保留原系统规则')));
-  assert.ok(f.requests[0].max_tokens===128||f.requests[0].max_completion_tokens===128);
+  assert.ok(f.requests[0].max_tokens===8192||f.requests[0].max_completion_tokens===8192);
   assert.equal(parseDraft(result.text).text,'合成回复');assert.equal(result.stopReason,'stop');
  }finally{await f.close();}
 });
@@ -59,7 +59,7 @@ test('显式执行hint优先于options并保留false，未指定时不自动启�
  const seen:CompletionOptions[]=[],service=new ModelService(undefined,async(_model,_key,_system,_user,options={})=>{
   seen.push(options);return {text:'MODEL_OK',input:1,output:1,cache:0,stopReason:'stop',latencyMs:1};
  });
- const model:Config['model']={provider:'custom',api:'openai-completions',baseUrl:'https://fixture.invalid/v1',id:'fixture',reasoning:false,reasoningLevel:'off',vision:false,maxTokens:64,timeoutMs:1000};
+ const model:Config['model']={provider:'custom',api:'openai-completions',baseUrl:'https://fixture.invalid/v1',id:'fixture',reasoning:false,reasoningLevel:'off',vision:false};
  await service.request(model,'fixture-key-only','系统','合成输入',{jsonObject:false},{jsonObject:true});
  await service.request(model,'fixture-key-only','系统','合成输入',{jsonObject:true},{jsonObject:false});
  await service.request(model,'fixture-key-only','系统','合成输入',{jsonObject:true});
@@ -72,7 +72,7 @@ test('其他协议不带Chat格式字段，所有请求显式关闭供应商自�
  const resolved={model,pricingKnown:false,models:{completeSimple:async(_model:any,_context:any,options:any)=>{
   captured.push(options);return {content:[{type:'text',text:'MODEL_OK'}],usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:'stop',model:'fixture'};
  }}} as unknown as ResolvedCompletionModel;
- const config:Config['model']={provider:'custom',api:'anthropic-messages',baseUrl:'https://fixture.invalid',id:'fixture',reasoning:false,reasoningLevel:'off',vision:false,maxTokens:64,timeoutMs:1000};
+ const config:Config['model']={provider:'custom',api:'anthropic-messages',baseUrl:'https://fixture.invalid',id:'fixture',reasoning:false,reasoningLevel:'off',vision:false};
  await runCompletion(config,'fixture-key-only','系统','合成输入',{jsonObject:true,resolvedModel:resolved});
  assert.equal(captured[0].onPayload,undefined);assert.equal(captured[0].maxRetries,0);
  model.api='openai-completions';await runCompletion({...config,api:'openai-completions'},'fixture-key-only','系统','合成输入',{jsonObject:true,resolvedModel:resolved});

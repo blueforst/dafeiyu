@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -10,7 +11,7 @@ import { exampleConfig } from './config-fixture.js';
 function fixture(text='普通口语'){
  const dir=mkdtempSync(tmpdir()+'/style-preview-'),previous=process.env.DATA_DIR;process.env.DATA_DIR=dir;
  const store=new Store(dir+'/workflow.sqlite'),requests:Array<{system:string;user:string}>=[];
- const generator={complete:async(_c:any,system:string,user:string)=>{requests.push({system,user});return {text:JSON.stringify({action:'reply',text,reason:''}),input:1,output:1,cache:0};}};
+ const generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async(_c:any,system:string,user:string)=>{requests.push({system,user});return {text:JSON.stringify({action:'reply',text,reason:''}),input:1,output:1,cache:0};}};
  const persona=new PersonaService(store,generator,()=>structuredClone(exampleConfig) as Config);
  return {store,persona,requests,close(){store.db.close();rmSync(dir,{recursive:true,force:true});if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;}};
 }

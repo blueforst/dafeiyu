@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -16,7 +17,7 @@ function fixture(){
  const directory=mkdtempSync(join(tmpdir(),'chat-retry-robustness-')),previous=process.env.DATA_DIR;process.env.DATA_DIR=directory;
  const store=new Store(join(directory,'workflow.sqlite')),ledger=new LlmStore(store),config=structuredClone(exampleConfig) as Config;
  const calls:Array<{message:string;interactionId?:string;callId:string}>=[];let failNext=true;
- const generator:Generator={async complete(c,_system,user,_signal,_session,meta={}){
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,_system,user,_signal,_session,meta={}){
   const marker='【本次消息】\n',message=JSON.parse(user.slice(user.indexOf(marker)+marker.length).split('\n\n【')[0]).message;
   const callId=ledger.start(c.model,meta);calls.push({message,interactionId:meta.interactionId,callId});
   if(failNext){failNext=false;ledger.finish(callId,'failed',{pricingStatus:'unknown'});throw new Error('隔离模型首次失败，原消息需要重试');}

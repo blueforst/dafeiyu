@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { Config } from './types.js';
 
 export type ReasoningLevel = 'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max';
-export type PanelModel = { provider:string; baseUrl:string; api?:'openai-completions'|'openai-responses'|'anthropic-messages'; id:string; reasoningLevel:ReasoningLevel; maxTokens:number; timeoutMs:number; custom?:{contextWindow:number;reasoning:boolean} };
+export type PanelModel = { provider:string; baseUrl:string; api?:'openai-completions'|'openai-responses'|'anthropic-messages'; id:string; reasoningLevel:ReasoningLevel; custom?:{contextWindow:number;reasoning:boolean} };
 export type SettingsSection = 'model'|'modelLibrary'|'persona'|'personaLibrary'|'tasks'|'memory'|'program'|'promptHints'|'triage'|'health';
 export type PanelSettings = { model?:PanelModel; modelLibrary?:import('./model-library.js').ModelLibrary; personaLibrary?:import('./persona-library.js').PersonaLibrary; promptHints?:Record<string,any>; triage?:Record<string,any>; health?:Record<string,any>; persona?:Record<string,any>; tasks?:Record<string,any>; memory?:Record<string,any>; program?:Record<string,any>; revisions?:Partial<Record<SettingsSection,number>> };
 export class SettingsConflictError extends Error { statusCode=409; constructor(public section:SettingsSection,public revision:number){super('设置已被其他操作修改，请重新读取后保存');} }
@@ -19,6 +19,8 @@ function writeAtomic(file:string, data:string) {
   try { writeFileSync(tmp, data, { mode: 0o600 }); chmodSync(tmp, 0o600); renameSync(tmp, file); }
   finally { try { unlinkSync(tmp); } catch {} }
 }
+/** 仅供启动时已备份的人设升级，保留其他设置的原始字段。 */
+export function commitPersonaUpgrade(settings:PanelSettings):void {writeAtomic(panelDir()+'/settings.json',JSON.stringify(settings,null,2));}
 
 function readObject(file:string):Record<string,any>|undefined {
   let raw:string;
@@ -28,7 +30,12 @@ function readObject(file:string):Record<string,any>|undefined {
 
 export function readPanelSettings(opts:{tolerant?:boolean} = {}):PanelSettings {
   const v = readObject(panelDir() + '/settings.json');
-  if (v) return v as PanelSettings;
+  if (v) {
+    // 兼容旧设置；只保留仍生效的参数，下一次原子保存自然移除旧字段。
+    if(v.model){delete v.model.maxTokens;delete v.model.timeoutMs;}
+    for(const provider of v.modelLibrary?.providers??[])for(const model of provider.models??[])if(model.params){delete model.params.maxTokens;delete model.params.timeoutMs;}
+    return v as PanelSettings;
+  }
   if (opts.tolerant) return {};
   throw new Error('面板设置文件损坏');
 }
@@ -114,11 +121,12 @@ export function checkBaseUrl(raw:string):URL {
 }
 
 export function toConfigModel(p:PanelModel):Config['model'] {
-  return { provider: p.provider, api: p.api ?? '', baseUrl: p.baseUrl, id: p.id, reasoning: p.reasoningLevel !== 'off', reasoningLevel: p.reasoningLevel, vision: false, maxTokens: p.maxTokens, timeoutMs: p.timeoutMs, source: 'panel', custom: p.custom };
+  return { provider: p.provider, api: p.api ?? '', baseUrl: p.baseUrl, id: p.id, reasoning: p.reasoningLevel !== 'off', reasoningLevel: p.reasoningLevel, vision: false, source: 'panel', custom: p.custom };
 }
 
 export function mergePanel(c:Config, p:PanelSettings):Config {
-  c.model = p.model ? toConfigModel(p.model) : { ...c.model, source: 'config' };
+  const {maxTokens: _oldCap,timeoutMs: _oldTimeout,...configModel}=c.model as Config['model']&Record<string,unknown>;
+  c.model = p.model ? toConfigModel(p.model) : { ...configModel, source: 'config' };
   for(const field of ['mode','maxAgeHours','maxPerRound','publicPerHour','privatePerHour','publicPerDay','privatePerDay','replyHours'] as const)if(p.program?.[field]!==undefined)(c as any)[field]=p.program[field];
   if(p.tasks?.plans?.main?.intervalSeconds!==undefined)c.pollSeconds=p.tasks.plans.main.intervalSeconds;
   c.memoryPolicy={recentCount:p.memory?.recentCount??3,recentDays:p.memory?.recentDays??7,retentionDays:p.memory?.retentionDays??c.retentionDays};

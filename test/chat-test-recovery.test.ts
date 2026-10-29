@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -20,7 +21,7 @@ function fixture(){
  const store=new Store(join(root,'workflow.sqlite')),ledger=new LlmStore(store),config=structuredClone(exampleConfig) as Config;
  let at=Date.parse('2026-10-28T12:00:00+08:00'),requests=0;
  const charge=(interactionId:string,purpose='chat-test',pricingStatus:PricingStatus='priced',cost=.002)=>{const id=ledger.start(config.model,{purpose,source:'chat-test:reply',accountId:'real_bot',channel:'public',interactionId},++at);ledger.finish(id,'completed',{usage:{input:5,output:3,cacheRead:0,cacheWrite:0,totalTokens:8},pricingStatus,cost:pricingStatus==='priced'?{input:cost,output:0,cacheRead:0,cacheWrite:0,total:cost}:null},at+1);return id;};
- const generator:Generator={async complete(c,_system,_user,_signal,_session,meta={}){requests++;const callId=charge(meta.interactionId!,String(meta.purpose));return {text:JSON.stringify({action:'reply',text:'继续聊你的项目吧。',reason:'回应'}),input:5,output:3,cache:0,callId,pricingStatus:'priced',cost:{input:.002,output:0,cacheRead:0,cacheWrite:0,total:.002}};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,_system,_user,_signal,_session,meta={}){requests++;const callId=charge(meta.interactionId!,String(meta.purpose));return {text:JSON.stringify({action:'reply',text:'继续聊你的项目吧。',reason:'回应'}),input:5,output:3,cache:0,callId,pricingStatus:'priced',cost:{input:.002,output:0,cacheRead:0,cacheWrite:0,total:.002}};}};
  new MemoryService(store,generator,()=>config,()=>at);new Outbox(store);new ReplyTriage(store);const persona=new PersonaService(store,generator,()=>config);persona.save(legacyPersona('明确自己是AI，简短回应当前话题。'),0);store.set('activeAccount','real_bot');store.set('control','manual');
  const deps={dataDir:root,store,generator,persona,config:()=>config,now:()=>at};let service=new ChatTestService(deps);
  const snapshot=()=>JSON.stringify(Object.fromEntries((store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'llm_calls' ORDER BY name").all() as {name:string}[]).map(({name})=>[name,store.db.prepare('SELECT * FROM "'+name+'" ORDER BY rowid').all()])));

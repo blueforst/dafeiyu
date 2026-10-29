@@ -88,7 +88,7 @@ export class Workflow {
  }
  private async stage<T>(name:string,roundId:string,fn:()=>Promise<T>,event?:Event):Promise<T>{
   try{const value=this.services.program?await this.services.program.run(name,{roundId,messageId:event?.id,channel:event?.channel,accountId:this.accountId()},fn,this.abort?.signal):await fn();const result=value as any;if(result?.callId)this.roundCalls.add(result.callId);for(const call of result?.calls??[])if(call.callId)this.roundCalls.add(call.callId);if(result?.state?.interactionId===this.roundId&&result.state.callId)this.roundCalls.add(result.state.callId);return value;}
-  catch(error){if(typeof (error as any)?.callId==='string')this.roundCalls.add((error as any).callId);throw error;}
+  catch(error){for(const callId of (error as any)?.callIds??[])this.roundCalls.add(callId);if(typeof (error as any)?.callId==='string')this.roundCalls.add((error as any).callId);throw error;}
  }
  private async reconcile(handle:string,roundId:string){
   for(const row of this.store.unknown(handle)){

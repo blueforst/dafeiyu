@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -24,7 +25,7 @@ function fixture(){
  const store=new Store(root+'/workflow.sqlite'),outbox=new Outbox(store),ledger=new LlmStore(store);
  const config={...structuredClone(exampleConfig),mode:'auto',privatePerDay:400,replyHours:{enabled:false,closeDelayMinutes:30}} as Config;
  let events:Event[]=[],calls=0,sends=0,lookups=0,posts=0;
- const generator:Generator={complete:async(c,_s,_u,_a,_session,meta={})=>{calls++;const callId=ledger.start(c.model,meta);ledger.finish(callId,'completed',{usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2},pricingStatus:'unknown'});return {text:JSON.stringify({action:'reply',text:'收到，我们可以接着聊。',reason:''}),input:1,output:1,cache:0,callId};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async(c,_s,_u,_a,_session,meta={})=>{calls++;const callId=ledger.start(c.model,meta);ledger.finish(callId,'completed',{usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2},pricingStatus:'unknown'});return {text:JSON.stringify({action:'reply',text:'收到，我们可以接着聊。',reason:''}),input:1,output:1,cache:0,callId};}};
  const transport:Transport={identity:async()=>({handle:account,loggedIn:true,needsHuman:false}),control:async()=>{},collect:async()=>({events,warnings:[]}),context:async()=>({messages:[]}),send:async e=>{sends++;return {status:'confirmed',id:'sent-'+e.platformId};},lookup:async e=>{lookups++;return {status:'confirmed',id:'looked-up-'+e.platformId};},post:async()=>{posts++;return {status:'confirmed',id:'post-'+posts};},lookupPost:async()=>({status:'unknown'})};
  const triage=new ReplyTriage(store,undefined,()=>Date.now()),workflow=new Workflow(store,transport,generator,()=>config);
  workflow.services={outbox,triage};store.set('activeAccount',account);

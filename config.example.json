@@ -13,9 +13,7 @@
     "id": "",
     "reasoning": false,
     "reasoningLevel": "low",
-    "vision": false,
-    "maxTokens": 4096,
-    "timeoutMs": 60000
+    "vision": false
   },
   "retentionDays": 30
 }

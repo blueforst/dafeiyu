@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -15,7 +16,7 @@ function fixture(){
  const store=new Store(path+'/workflow.sqlite');
  let at=Date.now(),calls=0,produce:(system:string,user:string)=>any=(_system,user)=>{const r=JSON.parse(user);return {items:r.incoming.map((x:any)=>({type:'fact',text:'事实'+x.id,sourceIds:[x.id]}))};};
  const metadata:any[]=[];
- const generator:Generator={complete:async(_c,system,user,_signal,_session,meta)=>{calls++;metadata.push(meta);return {text:JSON.stringify(await produce(system,user)),input:10,output:5,cache:0};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async(_c,system,user,_signal,_session,meta)=>{calls++;metadata.push(meta);return {text:JSON.stringify(await produce(system,user)),input:10,output:5,cache:0};}};
  const memory=new MemoryService(store,generator,()=>exampleConfig as Config,()=>at);
  const add=(n:number,over:Partial<Event>={},accountId='work',status='confirmed')=>{
   const e:Event={id:'x:'+n,platformId:String(n),channel:'public',userId:'x:alice',handle:'alice',text:'用户自述'+n,url:'https://x.com/alice/status/'+n,conversationId:String(n),timestamp:at,...over};

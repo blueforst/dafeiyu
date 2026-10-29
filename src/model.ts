@@ -1,4 +1,4 @@
-import type { Api, Model, Context } from '@earendil-works/pi-ai';
+import type { Api, Model, Context, Tool, ToolCall, AssistantMessage } from '@earendil-works/pi-ai';
 import { randomUUID } from 'node:crypto';
 import { readSecret } from './config.js';
 import { keySlot, readModelKey } from './settings.js';
@@ -26,7 +26,11 @@ export function parseDraft(raw:string,options:{channel?:Channel}={}):Draft {
 }
 export function publicLengthOK(text:string){return validatePostingText(text,'reply').allowed;}
 export type GenerationResult={text:string;input:number;output:number;cache:number;callId?:string;usage?:FullUsage|null;cost?:CostSnapshot|null;pricingStatus?:PricingStatus;latencyMs?:number};
-export interface Generator { complete(c:Config,system:string,user:string,signal?:AbortSignal,sessionId?:string,metadata?:CallMetadata):Promise<GenerationResult>; }
+export type ConversationResult=GenerationResult&{toolCalls:ToolCall[];assistant:AssistantMessage;stopReason:string;errorMessage?:string};
+export interface Generator {
+ complete(c:Config,system:string,user:string,signal?:AbortSignal,sessionId?:string,metadata?:CallMetadata):Promise<GenerationResult>;
+ converse(c:Config,system:string,messages:Context['messages'],tools:Tool[],signal?:AbortSignal,sessionId?:string,metadata?:CallMetadata,options?:{toolChoice?:'auto'|'none'}):Promise<ConversationResult>;
+}
 
 // Thinking budget added on top of the visible-reply cap. Budget-based APIs get it from pi itself.
 export const THINKING_BUDGET:Record<string,number> = { minimal: 1024, low: 2048, medium: 4096, high: 8192, xhigh: 16384, max: 16384 };
@@ -37,18 +41,22 @@ export function requestMaxTokens(cap:number, model:Model<Api>, level:string):num
  return Math.min(cap + extra, model.maxTokens);
 }
 
-export type CompletionResult = GenerationResult & { stopReason:string; errorMessage?:string; latencyMs:number; actualModel?:string };
+export type CompletionResult = GenerationResult & { stopReason:string; errorMessage?:string; latencyMs:number; actualModel?:string;toolCalls?:ToolCall[];assistant?:AssistantMessage };
 export type ResolvedCompletionModel=Awaited<ReturnType<typeof resolveRuntimeModel>>;
-export type CompletionOptions = {signal?:AbortSignal; maxTokens?:number; reasoning?:string; sessionId?:string;resolvedModel?:ResolvedCompletionModel;jsonObject?:boolean};
+export const MODEL_REQUEST_TIMEOUT_MS = 180000;
+/** 上下文估算预留 1024 token；已超长输入由供应商返回原始错误。 */
+export function inputEstimate(context:Context):number {return Math.ceil(Buffer.byteLength(JSON.stringify(context),'utf8')/2);}
+export function fitContext(cap:number,window:number,input:number):number {return input>=window?cap:Math.min(cap,Math.max(256,window-input-1024));}
+export type CompletionOptions = {signal?:AbortSignal; maxTokens?:number; reasoning?:string; sessionId?:string;resolvedModel?:ResolvedCompletionModel;jsonObject?:boolean;context?:Context;toolChoice?:'auto'|'none'};
 /** 内部回放冻结目录模型与真实 Pi 价格；Models 仅在内存使用，绝不序列化到配置。 */
 export async function freezeCompletionModel(model:Config['model']):Promise<ResolvedCompletionModel>{const resolved=await resolveRuntimeModel(model);return {...resolved,model:structuredClone(resolved.model)};}
 
 export async function runCompletion(m:Config['model'], key:string, system:string, user:string, opts:CompletionOptions = {}):Promise<CompletionResult> {
  const { model, models,pricingKnown } = opts.resolvedModel??await resolveRuntimeModel(m);
  const level = opts.reasoning ?? (m.reasoning ? m.reasoningLevel : 'off');
- const maxTokens = requestMaxTokens(opts.maxTokens ?? m.maxTokens, model, level);
- const timeout = AbortSignal.timeout(m.timeoutMs);
- const context:Context = { systemPrompt: system, messages: [{ role: 'user', content: user, timestamp: Date.now() }] };
+ const context:Context = opts.context??{ systemPrompt: system, messages: [{ role: 'user', content: user, timestamp: Date.now() }] };
+ const maxTokens = fitContext(requestMaxTokens(opts.maxTokens ?? model.maxTokens, model, level),model.contextWindow,inputEstimate(context));
+ const timeout = AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS);
  const started = Date.now();
  // 只有调用方明确要求对象JSON、且协议为Chat Completions时才使用原生格式约束。
  // 其他协议保持已有行为；Chat端点拒绝参数时正常失败，不降级或重发。
@@ -57,13 +65,14 @@ export async function runCompletion(m:Config['model'], key:string, system:string
   return {...payload,response_format:{type:'json_object'}};
  }:undefined;
  // 工作流传入稳定会话；独立连接测试使用新会话。pi 按服务商和地址添加对应会话头。
- const r = await models.completeSimple(model, context, { apiKey: key, sessionId: opts.sessionId || 'role-workflow-' + randomUUID(), identity: { userAgent: { custom: 'role-workflow/0.1' } }, headers: m.provider === 'commandcode' ? { Authorization: 'Bearer ' + key } : undefined, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,onPayload,maxRetries:0 });
+ const r = await models.completeSimple(model, context, { apiKey: key, sessionId: opts.sessionId || 'role-workflow-' + randomUUID(), identity: { userAgent: { custom: 'role-workflow/0.1' } }, headers: m.provider === 'commandcode' ? { Authorization: 'Bearer ' + key } : undefined, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,onPayload,maxRetries:0,...(opts.toolChoice?{toolChoice:opts.toolChoice}:{}) });
  // Pi 的错误占位 usage 可能全为零；没有实际返回的用量不视为免费。
  const meaningful=Object.entries(r.usage||{}).some(([k,v])=>k!=='cost'&&typeof v==='number'&&v>0);
  // Pi 在成功但上游没有 usage 时也保留初始化零值，无法以 stopReason 证明返回过用量。
  const usage=usageSnapshot(r.usage,meaningful);
  const cost=pricingKnown&&usage?costSnapshot(r.usage.cost):null;
- return { text: r.content.filter(x => x.type === 'text').map(x => (x as any).text).join(''), input: usage?.input??0, output: usage?.output??0, cache: usage?.cacheRead??0, usage,cost,pricingStatus:!usage?'unknown':pricingKnown?(cost?'priced':'unknown'):'unpriced',actualModel:r.responseModel||r.model,stopReason: r.stopReason, errorMessage: r.errorMessage, latencyMs: Date.now() - started };
+ const timedOut=timeout.aborted&&!opts.signal?.aborted;
+ return { text: r.content.filter(x => x.type === 'text').map(x => (x as any).text).join(''), toolCalls:r.content.filter((x):x is ToolCall=>x.type==='toolCall'),assistant:r,input: usage?.input??0, output: usage?.output??0, cache: usage?.cacheRead??0, usage,cost,pricingStatus:!usage?'unknown':pricingKnown?(cost?'priced':'unknown'):'unpriced',actualModel:r.responseModel||r.model,stopReason: timedOut?'error':r.stopReason, errorMessage: timedOut?'模型请求超时（180 秒）':r.errorMessage, latencyMs: Date.now() - started };
 }
 
 export function modelKey(m:Config['model']):string {
@@ -98,14 +107,24 @@ export class ModelService implements Generator {
   }
  }
  async complete(c:Config,system:string,user:string,signal?:AbortSignal,sessionId?:string,metadata:CallMetadata={}){
-  const key = modelKey(c.model);
-  if(!key||!c.model.id||!c.model.baseUrl)throw new Error('模型未配置：请在面板的模型页填写服务商、模型和 API Key');
-  const r = await this.request(c.model, key, system, user, { signal, sessionId },metadata);
+  const r = await this.converse(c,system,[{role:'user',content:user,timestamp:Date.now()}],[],signal,sessionId,metadata);
   if(['error','aborted','length','toolUse','deferred','pending'].includes(r.stopReason)){
    const error=new Error(r.errorMessage||'模型返回不完整或不支持的响应：'+r.stopReason) as Error&{callId?:string;usage?:FullUsage|null;cost?:CostSnapshot|null};
    error.callId=r.callId;error.usage=r.usage;error.cost=r.cost;throw error;
   }
   return r;
  }
+ async converse(c:Config,system:string,messages:Context['messages'],tools:Tool[],signal?:AbortSignal,sessionId?:string,metadata:CallMetadata={},options:{toolChoice?:'auto'|'none'}={}):Promise<ConversationResult>{
+  const key=modelKey(c.model);if(!key||!c.model.id||!c.model.baseUrl)throw new Error('模型未配置：请在面板的模型页填写服务商、模型和 API Key');
+  const r=await this.request(c.model,key,system,typeof messages[0]?.content==='string'?messages[0].content:'',{signal,sessionId,context:{systemPrompt:system,messages,tools},...options},metadata);
+  if(['error','aborted','length','deferred','pending'].includes(r.stopReason))throw Object.assign(new Error(r.errorMessage||'模型返回不完整或不支持的响应：'+r.stopReason),{callId:r.callId,usage:r.usage,cost:r.cost});
+  return {...r,toolCalls:r.toolCalls??[],assistant:r.assistant!};
+ }
 }
 export class PiGenerator extends ModelService {}
+export async function connectionCheck(service:ModelService,model:Config['model'],key:string,level:string,metadata:CallMetadata={}){
+ const system='你是接口验收助手。调用 connection_check 工具，参数 ok 填 true。',user='请验证当前配置。';
+ const r=await service.request(model,key,system,user,{maxTokens:level==='off'?256:2048,reasoning:level,jsonObject:false,context:{systemPrompt:system,messages:[{role:'user',content:user,timestamp:Date.now()}],tools:[{name:'connection_check',description:'验证模型能使用工具调用。',parameters:{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false} as Tool['parameters']}] }},metadata);
+ const ok=!['error','aborted','length','deferred','pending'].includes(r.stopReason)&&!!r.toolCalls?.some(c=>c.name==='connection_check'&&!c.argumentsError&&c.arguments.ok===true);
+ return {...r,ok,...(ok?{}:{errorMessage:r.errorMessage||'未完成工具调用'})};
+}

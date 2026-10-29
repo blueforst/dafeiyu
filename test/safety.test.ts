@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,mkdirSync,writeFileSync,rmSync } from 'node:fs';
@@ -10,7 +11,7 @@ import { safeEvent,Serial,browserProxy } from '../src/browser.js';
 import type { Config,Event,Receipt } from '../src/types.js';
 import type { Transport } from '../src/transport.js';
 // 本组验证工作流安全边界，作息由独立测试覆盖；避免夜间运行绕过生成与接管断言。
-const config:Config={mode:'draft',pollSeconds:60,maxAgeHours:6,maxPerRound:2,publicPerHour:10,privatePerHour:30,replyHours:{enabled:false,closeDelayMinutes:30},retentionDays:30,persona:'测试 AI',dailyState:'无',model:{provider:'custom',api:'openai-completions',baseUrl:'',id:'',reasoning:false,reasoningLevel:'low',vision:false,maxTokens:1000,timeoutMs:1000}};
+const config:Config={mode:'draft',pollSeconds:60,maxAgeHours:6,maxPerRound:2,publicPerHour:10,privatePerHour:30,replyHours:{enabled:false,closeDelayMinutes:30},retentionDays:30,persona:'测试 AI',dailyState:'无',model:{provider:'custom',api:'openai-completions',baseUrl:'',id:'',reasoning:false,reasoningLevel:'low',vision:false}};
 const event:Event={id:'x:123',channel:'public',userId:'x:alice',handle:'alice',text:'你好',url:'https://x.com/alice/status/123',conversationId:'123',timestamp:Date.now()};
 function nativeMessage(platformId:string,over:Partial<Event>={}):Event{
  const channel=over.channel??event.channel,handle=over.handle??event.handle,conversationId=channel==='private'?'100-200':platformId;
@@ -25,7 +26,7 @@ function fixture(c:Config=structuredClone(config)){
  const path=mkdtempSync(tmpdir()+'/role-test-'),store=new Store(path+'/db.sqlite');
  let sends=0;let received:Event[]=[event];let receipt:Receipt={status:'confirmed',id:'x:124'};
  const t:Transport={identity:async()=>({loggedIn:true,needsHuman:false,handle:'tester'}),collect:async()=>({events:received,warnings:[]}),context:async()=>event.text,send:async()=>{sends++;return receipt;},lookup:async()=>({status:'unknown'}),control:async()=>{}};
- const generator={complete:async()=>({text:'{"action":"reply","text":"你好呀","reason":""}',input:10,output:10,cache:0})};
+ const generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async()=>({text:'{"action":"reply","text":"你好呀","reason":""}',input:10,output:10,cache:0})};
  const workflow=new Workflow(store,t,generator,()=>c);store.set('control','running');
  return {store,t,generator,workflow,c,sends:()=>sends,setReceipt:(r:Receipt)=>receipt=r,setReceived:(r:Event[])=>received=r,close:()=>{store.db.close();rmSync(path,{recursive:true,force:true});}};
 }

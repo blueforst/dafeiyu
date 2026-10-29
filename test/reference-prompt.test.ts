@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -16,16 +17,16 @@ const CARD={domain:'example.test',title:'卡片标题'};
 function fixture(){
  const directory=mkdtempSync(tmpdir()+'/role-reference-prompt-'),previous=process.env.DATA_DIR;process.env.DATA_DIR=directory;
  const store=new Store(directory+'/workflow.sqlite'),requests:any[]=[],config=structuredClone(exampleConfig) as Config;
- const generator:Generator={async complete(c,system,user,signal,session,meta){requests.push({system,user,meta});return {text:meta?.purpose==='memory-summary'?'{"items":[]}':'{"action":"reply","text":"收到。","reason":"回应"}',input:2,output:3,cache:0};}};
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,system,user,signal,session,meta){requests.push({system,user,meta});return {text:meta?.purpose==='memory-summary'?'{"items":[]}':'{"action":"reply","text":"收到。","reason":"回应"}',input:2,output:3,cache:0};}};
  const persona=new PersonaService(store,generator,()=>config);
  return {store,config,generator,persona,requests,close(){store.db.close();if(previous===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=previous;rmSync(directory,{recursive:true,force:true});}};
 }
 
 test('v4固定约束说明不可见资料，已提供引用与卡片仍在独立消息字段中可用',()=>{
- assert.equal(REPLY_PROMPT_VERSION,'reply-context-v5');assert.ok(FIXED_SYSTEM_RULES.includes('被要求忘掉对方、删除聊天记录或记忆时，不说已经忘了或删了；如实说明自己做不到，记录由运营者管理。'));assert.ok(FIXED_SYSTEM_RULES.includes('看不到对方主页、历史帖子、关注关系和链接网页正文'));assert.ok(FIXED_SYSTEM_RULES.includes('本次提供的消息、对话、引用与卡片摘要'));
+ assert.equal(REPLY_PROMPT_VERSION,'reply-context-v6');assert.ok(FIXED_SYSTEM_RULES.includes('被要求忘掉对方、删除聊天记录或记忆时，不说已经忘了或删了；如实说明自己做不到，记录由运营者管理。'));assert.ok(FIXED_SYSTEM_RULES.includes('看不到对方主页、历史帖子、关注关系和链接网页正文'));assert.ok(FIXED_SYSTEM_RULES.includes('本次提供的消息、对话、引用与卡片摘要'));
  const result=assembleReplyPrompt({staticText:'虚构角色',message:'听听这位作者的意见',channel:'public',accountId:'a',quote:QUOTE,card:CARD});
  const message=JSON.parse(result.segments.find(s=>s.kind==='message')!.content);assert.equal(message.message,'听听这位作者的意见');assert.equal(message.quote.text,QUOTE.text);assert.equal(message.quote.platformId,QUOTE.platformId);assert.equal(message.quote.media,true);assert.equal(message.card.domain,CARD.domain);assert.equal(message.card.title,CARD.title);assert.ok(message.quote.note.includes('不能视为对方本人的陈述'));assert.ok(message.card.note.includes('没有打开'));
- assert.ok(!result.system.includes(QUOTE.text));assert.equal(result.meta.promptVersion,'reply-context-v5');
+ assert.ok(!result.system.includes(QUOTE.text));assert.equal(result.meta.promptVersion,'reply-context-v6');
 });
 
 test('引用及卡片不可读时显式说明，嵌套上下文保留标记且提示目标定位不完整或更早省略',()=>{
@@ -64,7 +65,7 @@ test('提示词防御性限制引用和卡片长度并标注截断，外部指�
 test('试聊实际请求与预览分段包含当前和历史引用，无额外请求也不写真实消息',async()=>{
  const f=fixture();try{
   const result=await f.persona.preview({persona:legacyPersona('测试角色'),channel:'public',messages:[{role:'user',text:'前一条消息',quote:QUOTE},{role:'assistant',text:'收到'},{role:'user',text:'这一条附卡片',quote:{unreadable:true},card:CARD}]});
-  assert.equal(f.requests.length,1);assert.equal(result.meta.promptVersion,'reply-context-v5');const current=JSON.parse(result.segments.find(s=>s.kind==='message')!.content),context=JSON.parse(result.segments.find(s=>s.kind==='conversation')!.content);assert.equal(current.card.title,CARD.title);assert.ok(current.quote.note.includes('当前不可读'));assert.equal(context[0].quote.text,QUOTE.text);assert.equal(f.requests[0].user,result.segments.filter(s=>s.role==='user').map(s=>'【'+s.title+'】\n'+s.content).join('\n\n'));assert.equal((f.store.db.prepare('SELECT count(*) AS n FROM messages').get() as any).n,0);
+  assert.equal(f.requests.length,1);assert.equal(result.meta.promptVersion,'reply-context-v6');const current=JSON.parse(result.segments.find(s=>s.kind==='message')!.content),context=JSON.parse(result.segments.find(s=>s.kind==='conversation')!.content);assert.equal(current.card.title,CARD.title);assert.ok(current.quote.note.includes('当前不可读'));assert.equal(context[0].quote.text,QUOTE.text);assert.equal(f.requests[0].user,result.segments.filter(s=>s.role==='user').map(s=>'【'+s.title+'】\n'+s.content).join('\n\n'));assert.equal((f.store.db.prepare('SELECT count(*) AS n FROM messages').get() as any).n,0);
  }finally{f.close();}
 });
 

@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -20,7 +21,7 @@ function fixture(){
  const production=new Store(join(root,'workflow.sqlite')),ledger=new LlmStore(production),config=structuredClone(exampleConfig) as Config;
  production.set('activeAccount','robust_bot');production.set('control','manual');
  let skip=false,holdSummary=false,respectAbort=true;const pending=new Set<()=>void>(),requests:Array<{metadata:CallMetadata;user:string}>=[];
- const generator:Generator={async complete(c,_system,user,signal,_session,metadata={}){
+ const generator:Generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},async complete(c,_system,user,signal,_session,metadata={}){
   const callId=ledger.start(c.model,metadata);requests.push({metadata,user});
   try{
    let output:any;

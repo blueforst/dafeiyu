@@ -1,3 +1,4 @@
+import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';
@@ -21,7 +22,7 @@ function fixture(mode:'draft'|'auto'='draft'){
  let output=JSON.stringify({action:'reply',text:'新的回复',reason:''});const sentIds:string[]=[];
  const transport:Transport={identity:async()=>identity,control:async()=>{},collect:async()=>({events:received,warnings:[]}),context:async()=> '对话资料',send:async e=>{sends++;sentIds.push(e.id);return sent;},lookup:async()=>{lookups++;return lookedUp;}};
  const callMetadata:any[]=[];
- const generator={complete:async(_c:any,_system:string,_user:string,_signal?:AbortSignal,_session?:string,meta?:any)=>{generations++;callMetadata.push(meta);return {text:output,input:10,output:8,cache:0};}};
+ const generator={async converse(...args:any[]){return fakeConverse(this,...args as [any,string,any[],any[]]);},complete:async(_c:any,_system:string,_user:string,_signal?:AbortSignal,_session?:string,meta?:any)=>{generations++;callMetadata.push(meta);return {text:output,input:10,output:8,cache:0};}};
  const workflow=new Workflow(store,transport,generator,()=>c),outbox=new Outbox(store),memory=new MemoryService(store,generator,()=>c);
  workflow.services={outbox,memory};store.set('activeAccount','worker');
  const feed=new ActivityFeed(store,()=>workflow.accountId(),()=>c.maxAgeHours);
@@ -47,7 +48,7 @@ test('旧记忆摘要 fallback 保留普通文本，不继承同用途的新 JSO
 test('未遗忘用户的遗忘措辞走普通分级和生成，不改变遗忘状态',async()=>{
  for(const text of ['忘了我吧','忘记我吧','忘我吧','忘了我吧。！','@worker 忘了我吧']){
   const f=fixture();try{await f.workflow.resume();f.workflow.services.triage=new ReplyTriage(f.store);const event=f.event('901',{text}),epoch=f.store.epoch(event.userId,'worker');f.setEvents([event]);
-   await f.workflow.tick();assert.equal(f.store.forgotten(event.userId,'worker'),false,text);assert.equal(f.store.epoch(event.userId,'worker'),epoch,text);const row=f.store.getMessage(event.id,'worker');assert.ok(row,text);assert.equal(row.status,'draft',text);assert.equal(row.tier,'priority');assert.equal(JSON.parse(row.draft).text,'新的回复');assert.equal(f.counts().generations,1);assert.equal(f.callMetadata[0].jsonObject,true);assert.equal(f.counts().sends,0);
+   await f.workflow.tick();assert.equal(f.store.forgotten(event.userId,'worker'),false,text);assert.equal(f.store.epoch(event.userId,'worker'),epoch,text);const row=f.store.getMessage(event.id,'worker');assert.ok(row,text);assert.equal(row.status,'draft',text);assert.equal(row.tier,'priority');assert.equal(JSON.parse(row.draft).text,'新的回复');assert.equal(f.counts().generations,1);assert.equal(f.callMetadata[0].jsonObject,false);assert.equal(f.counts().sends,0);
   }finally{f.close();}
  }
 });
