@@ -17,7 +17,8 @@
 - `openspec/specs/` 只记录现有行为；尚未实现的需求保留在 change 的增量规格中，不能因规划完成就提前同步或归档。
 - Codex 项目技能位于 `.agents/skills/openspec-*/`。提案整理与业务实施分别记录，任务只有完成验证后才能勾选。
 
-- 正式 app／browser 为 0.1.26，schema 14；导航为动态、人设、设置三页。发布时恢复管理员原 running／auto，随后管理员多次接管、释放，目前为 paused／auto。每次操作读取实时状态，不用历史记录覆盖用户后续控制。已取得正式构建（693/693）、隔离全套 UI 验收、生产只读（8/8）和有限真实试聊证据；跨夜开放与既有平台收发边界看 README 和发布记录，不能把部署等同于所有真实业务验收。
+- 当前正式 app／browser 为 **0.1.27.1**，schema 14，来源 `00e6016`，成对 healthy。新 Chat 可靠入站及请求处理已实现；实际只读取得五条消息和一个 Other 请求，接受与回复尚未执行。709 项单元、原生 DOM 六项、既有 Chat DOM 41 项、相关 UI 46 项通过；生产状态保持管理员最新 paused／auto，不能恢复旧 running。OpenSpec `complete-xchat-private-workflow` 的真实收发 3.3 仍留空，未同步主规格或归档。详见 `docs/发布记录/2026-10-30-0.1.27.1.md`。
+- 0.1.26 发布时，正式 app／browser 为 0.1.26，schema 14；导航为动态、人设、设置三页。发布时恢复管理员原 running／auto，随后管理员多次接管、释放，目前为 paused／auto。每次操作读取实时状态，不用历史记录覆盖用户后续控制。已取得正式构建（693/693）、隔离全套 UI 验收、生产只读（8/8）和有限真实试聊证据；跨夜开放与既有平台收发边界看 README 和发布记录，不能把部署等同于所有真实业务验收。
 - 本轮五项已部署功能为 `add-private-daily-limit`、`add-reply-hours`、`add-persona-workspace`、`redesign-settings-workspace`、`redesign-feed-workspace`。采用动态、人设、设置三页，人设库与独立正常流程试聊均按相应增量规格实现；一个试聊会话模拟一个用户，公开消息保留各自线程 ID，不跨线程合并。
 - 新版界面总回归入口为 `dev/workspace-ui-test.sh`；保留原验收脚本的业务断言，迁移到新位置，不能以新冒烟用例取代原覆盖。真实模型效果与生产发布需要独立证据，未满足的任务继续留空。
 - 后续提案隔离验证使用 `dev/proposals-sync.sh` 与 `dev/proposals-test.sh`，目标为 `/srv/role-workflow-proposals`，不得覆盖已有七页开发副本或生产目录。验收结束清理本轮临时容器、镜像与工作目录，保留最终证据。
