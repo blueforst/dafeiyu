@@ -7,14 +7,12 @@ import type {Store} from './store.js';
 
 export type PrivateRequestCandidate={event:Event;source:'requests'|'other';url:string};
 export type PrivateRequestResult={status:'accepted'|'unknown'|'not_submitted'|'blocked';reason:string;events?:Event[]};
-export type PrivateRequestReason='eligible'|'invalid-evidence'|'not-running'|'draft-mode'|'reply-hours-closed'|'private-channel-wait'|'forgotten'|'harassment-cooldown'|'advertising'|'expired';
-export function privateRequestDecision(candidate:PrivateRequestCandidate,input:{accountId:string;config:Config;control:string;replyHoursOpen:boolean;channelWait:boolean;forgotten:boolean;ignored:boolean;age:number}):PrivateRequestReason{
+export type PrivateRequestReason='eligible'|'invalid-evidence'|'not-running'|'draft-mode'|'forgotten'|'harassment-cooldown'|'advertising';
+export function privateRequestDecision(candidate:PrivateRequestCandidate,input:{accountId:string;config:Config;control:string;forgotten:boolean;ignored:boolean}):PrivateRequestReason{
  const e=candidate?.event,c=input.config;
  if(!e||e.channel!=='private'||e.privateContract!=='xchat-native-v2'||e.accountId!==input.accountId||e.userId!=='dm:'+e.conversationId||!/^\d+-\d+$/.test(e.conversationId)||!e.platformId||e.id!=='dm:'+e.conversationId+':'+e.platformId||e.timestampReliable!==true||!Number.isSafeInteger(e.timestamp)||e.timestamp<=0||!e.text?.trim()||e.text.length>30000||!/^\d{1,25}$/.test(e.nativeSequence??'')||!e.conversationId.split('-').includes(e.senderId??'')||!['requests','other'].includes(candidate.source))return 'invalid-evidence';
  if(input.control!=='running')return 'not-running';if(c.mode!=='auto')return 'draft-mode';
- if(!input.replyHoursOpen)return 'reply-hours-closed';if(input.channelWait)return 'private-channel-wait';
  if(input.forgotten)return 'forgotten';if(input.ignored)return 'harassment-cooldown';
- if(!Number.isFinite(input.age)||input.age<0||input.age>c.maxAgeHours*3600000)return 'expired';
  if(classify(e,{totalCount:0,processedCount:0,recentOtherConversation:false},normalizeTriageSettings(c.triage)).tier==='filtered')return 'advertising';
  return 'eligible';
 }

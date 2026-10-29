@@ -148,7 +148,9 @@ export class Store {
   const body={...e,id,accountId,...(platformId?{platformId}:{} )};const ingestedAt=this.nextTimestamp();
   if(accountId)this.db.prepare('INSERT OR IGNORE INTO account_users(account_id,id) VALUES(?,?)').run(accountId,e.userId);
   else this.db.prepare('INSERT OR IGNORE INTO users(id) VALUES(?)').run(e.userId);
-  return this.db.prepare('INSERT OR IGNORE INTO messages(id,account_id,source_id,platform_id,target_id,channel,user_id,body,created_at,updated_at,ingested_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(id,accountId,sourceId,platformId,e.targetId??'',e.channel,e.userId,JSON.stringify(body),e.timestamp,Date.now(),ingestedAt).changes>0;
+  // 同批私信历史保留在动态中，由最新入站统一触发回复，避免补采后逐条补发。
+  const history=e.channel==='private'&&e.privateContract==='xchat-native-v2'&&!!e.privateHistoryOf&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(e.privateHistoryOf)&&e.privateHistoryOf!==platformId;
+  return this.db.prepare('INSERT OR IGNORE INTO messages(id,account_id,source_id,platform_id,target_id,channel,user_id,body,created_at,updated_at,ingested_at,status,error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,accountId,sourceId,platformId,e.targetId??'',e.channel,e.userId,JSON.stringify(body),e.timestamp,Date.now(),ingestedAt,history?'merged':'queued',history?'已采集同会话历史，由最新消息统一处理':null).changes>0;
  }
  pending(limit=2,accountId?:string){return this.db.prepare("SELECT * FROM messages WHERE status='queued'"+(accountId===undefined?'':' AND account_id=?')+" ORDER BY CASE WHEN json_valid(draft) AND json_extract(draft,'$.review')=1 THEN 0 ELSE 1 END,created_at DESC LIMIT ?").all(...(accountId===undefined?[limit]:[accountId,limit])) as any[];}
  unknown(accountId?:string){return this.db.prepare("SELECT * FROM messages WHERE status='unknown'"+(accountId===undefined?'':' AND account_id=?')+' ORDER BY created_at LIMIT 10').all(...(accountId===undefined?[]:[accountId])) as any[];}

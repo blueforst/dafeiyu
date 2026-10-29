@@ -141,9 +141,9 @@ export class Workflow {
   for(const candidate of (result.requests??[]).slice(0,6)){
    if(!canContinue()||this.control()!=='running'||this.abort?.signal.aborted)break;
    const event=candidate.event,previous=event?privateRequestState(this.store,handle,event.conversationId):null,c=this.config(),lookupOnly=previous?.status==='unknown';
-   const decision=privateRequestDecision(candidate,{accountId:handle,config:c,control:this.control(),replyHoursOpen:this.replyHours().open,channelWait:!!this.channelWaitReason('private',c,true),forgotten:!!event&&this.store.forgotten(event.userId,handle),ignored:!!event&&!!this.services.triage?.ignored(event.userId,'private',handle),age:event?this.replyAge(event.timestamp):NaN});
+   const decision=privateRequestDecision(candidate,{accountId:handle,config:c,control:this.control(),forgotten:!!event&&this.store.forgotten(event.userId,handle),ignored:!!event&&!!this.services.triage?.ignored(event.userId,'private',handle)});
    if(!event||decision==='invalid-evidence')continue;
-   if(decision!=='eligible'&&!lookupOnly){const status=decision==='advertising'?'filtered':['forgotten','harassment-cooldown'].includes(decision)?'ignored':decision==='expired'?'expired':'waiting';recordPrivateRequestState(this.store,candidate,status,decision);continue;}
+   if(decision!=='eligible'&&!lookupOnly){const status=decision==='advertising'?'filtered':['forgotten','harassment-cooldown'].includes(decision)?'ignored':'waiting';recordPrivateRequestState(this.store,candidate,status,decision);continue;}
    if(!this.transport.acceptPrivateRequest||Date.now()>=deadline){if(!lookupOnly)recordPrivateRequestState(this.store,candidate,'waiting',this.transport.acceptPrivateRequest?'collection-budget':'adapter-unavailable');continue;}
    recordPrivateRequestState(this.store,candidate,'unknown',lookupOnly?previous!.reason:'acceptance-submitting');
    try{

@@ -137,7 +137,7 @@ export async function collectNativePrivate(input:PrivateCollectionInput&{selfUse
    const prompt=await readNativeRequestPrompt(page,link.conversationId);diagnostics.push(...read.diagnostics.map(row=>prompt.state==='pending'?{...row,eventCount:0}:row));
    const reliable=active()?read.events.map(event=>({...event,accountId:handle.toLowerCase(),...(prompt.peerHandle?{peerHandle:prompt.peerHandle}:{})})):[];
    let queueable=0;const composer=await readNativeComposer(page,link.conversationId);
-   if(prompt.state==='pending')for(const event of reliable)requests.push({event,source:link.kind==='other'?'other':'requests',url:link.url});
+   if(prompt.state==='pending'){const event=reliable.at(-1);if(event)requests.push({event,source:link.kind==='other'?'other':'requests',url:link.url});}
    else if(read.contract==='xchat-native-v2'&&composer.state==='ready'&&read.all.some(row=>row.timestampReliable&&row.direction!=='unknown')){
     input.confirmAccepted?.(link.conversationId);privateAcceptances.push({conversationId:link.conversationId,status:'accepted'});events.push(...reliable);queueable=reliable.length;
    }

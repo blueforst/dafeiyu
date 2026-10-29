@@ -93,6 +93,9 @@ export function promoteNativeInspection(observed:ChatInspection,snapshot:XChatMo
  const codes=[...new Set(all.flatMap(row=>row.blockedCodes))];if(!binding&&!codes.includes('chat-native-model-unverified'))codes.push('chat-native-model-unverified');
  const diagnostics:ChatDiagnostic[]=codes.map(code=>({channel:'private',source:'conversation',status:'unsupported',code,eventCount:0}));
  if(!codes.length&&all.length)diagnostics.push({channel:'private',source:'conversation',status:'ok',code:'chat-native-readable',eventCount:safe?1:0});
- const events=safe?[{id:'dm:'+observed.conversationId+':'+latest.id,platformId:latest.id,targetId:observed.conversationId,channel:'private' as const,userId:'dm:'+observed.conversationId,handle:'',text:latest.text,url:'https://x.com/i/chat/'+observed.conversationId,conversationId:observed.conversationId,timestamp:latest.timestamp,timestampReliable:true,mediaUnavailable:latest.media,privateContract:XCHAT_NATIVE_CONTRACT,senderId:latest.senderId,nativeSequence:latest.nativeSequence}]:[];
+ // 采集连续可靠入站的历史，只有最后一条进入回复候选；不跨过出站或未知消息回捞。
+ const batch=safe?all.slice(all.findLastIndex(row=>row.direction!=='in'||!row.timestampReliable)+1):[];
+ const events=batch.map(row=>({id:'dm:'+observed.conversationId+':'+row.id,platformId:row.id,targetId:observed.conversationId,channel:'private' as const,userId:'dm:'+observed.conversationId,handle:'',text:row.text,url:'https://x.com/i/chat/'+observed.conversationId,conversationId:observed.conversationId,timestamp:row.timestamp,timestampReliable:true,mediaUnavailable:row.media,privateContract:XCHAT_NATIVE_CONTRACT,senderId:row.senderId,nativeSequence:row.nativeSequence,...(row.id!==latest!.id?{privateHistoryOf:latest!.id}:{})}));
+ for(const report of diagnostics)if(report.code==='chat-native-readable')report.eventCount=events.length;
  return {...observed,contract:XCHAT_NATIVE_CONTRACT,all,events,diagnostics,warnings:codes.map(code=>code==='chat-native-model-unverified'?'新 Chat 的账号、会话与原生消息模型尚未可靠绑定。':code==='chat-native-sequence-unverified'?'新 Chat 消息尚无平台序号，未进入自动处理。':'新 Chat 消息证据不完整，未进入自动处理。')};
 }

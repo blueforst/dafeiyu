@@ -34,3 +34,10 @@ test('最新一条证据不足时不回退较早入站，诊断不泄漏正文�
  const observed=inspectNativeChatRows([row(),row({nativeId:other,testId:'message-'+other,focusTarget:other+':content',contentTestId:'message-text-'+other,text:'机密正文'})],'111-222','https://x.com/i/chat/111-222');
  const result=promoteNativeInspection(observed,snapshot([proof()]),'222',now);assert.equal(result.events.length,0);assert.ok(!JSON.stringify(result.diagnostics).includes('机密'));assert.ok(!result.warnings.join().includes('合成用户'));
 });
+test('连续可靠历史全部采集，历史只展示，由最新消息触发回复；不跨出站回捞',()=>{
+ const second='22222222-2222-4222-8222-222222222222',last='33333333-3333-4333-8333-333333333333';
+ const rows=[row(),row({nativeId:second,testId:'message-'+second,focusTarget:second+':content',contentTestId:'message-text-'+second}),row({nativeId:last,testId:'message-'+last,focusTarget:last+':content',contentTestId:'message-text-'+last})];
+ const observed=inspectNativeChatRows(rows,'111-222','https://x.com/i/chat/111-222'),proofs=[proof(),proof({rowId:second,id:second}),proof({rowId:last,id:last})];
+ const read=promoteNativeInspection(observed,snapshot(proofs),'222',now);assert.equal(read.events.length,3);assert.deepEqual(read.events.map(e=>e.privateHistoryOf),[last,last,undefined]);
+ const outgoing=inspectNativeChatRows([rows[0],{...rows[1],sender:'You'},rows[2]],'111-222','https://x.com/i/chat/111-222');const after=promoteNativeInspection(outgoing,snapshot([proofs[0],{...proofs[1],contentType:'SentMessageTextOnly',senderId:'222'},proofs[2]]),'222',now);assert.equal(after.events.length,1);assert.equal(after.events[0].platformId,last);
+});
