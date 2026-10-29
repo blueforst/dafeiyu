@@ -159,6 +159,21 @@
 - **消息时效合并：** 取消优先／普通两档时效，合并为单一 `maxAgeHours`（默认 3 小时，范围 1–48），在“消息分级与过滤”的高级设置中维护，启动一次性迁移并生成备份。
 - **十一项设置页重排：** 运行与发送（三卡首屏＋2×2 额度表）、定时任务（24 小时“今天的安排”时间轴＋紧凑表）、消息分级与过滤（统计条＋标签输入＋高级设置）、记忆（双视图切换＋策略弹窗＋身份详情三标签＋登记经历弹窗）、计费（页头范围切换＋堆叠柱状图与模型占比并排＋紧凑热力图＋收起流水）、浏览器接管与采集来源、健康与日报（需关注置顶＋六组状态胶囊＋日报紧凑表）、日志阶段与队列（事件摘要表＋按日分隔＋300ms 自动筛选）、任务执行历史（按任务计数胶囊＋连续成功合并 `groupRuns`）。
 
+## 人设编辑区目录加编辑：规划中
+
+[提案](changes/redesign-persona-editor/proposal.md) · [设计](changes/redesign-persona-editor/design.md) · [任务](changes/redesign-persona-editor/tasks.md) · [增量规格](changes/redesign-persona-editor/specs/) · [草图](changes/redesign-persona-editor/mockups/persona-editor.html)
+
+2026-10-29，管理员选定这一版草图。当前完成 **1/20** 项，2026-10-29 管理员已授权继续实施；视觉确认和本提案发布尚未完成。
+
+本提案只改人设模式下“我的人设”和内置预设的编辑区：
+
+- **版式：** 主区分为左侧段落目录和右侧单项编辑区，取代原来的两列卡片和 5 行小框。
+- **目录：** 分“始终生效／触发卡／只读”三组，每项写字数和开头两行，项与项之间有分隔线，不加占比条。
+- **编辑：** 分区正文用一个撑满的输入框；触发卡用卡名、什么时候用、内容三个输入框。
+- **只读：** 能改的一律是白底带边框的输入框；固定规则、建议简介和内置预设用灰底只读区，并标“只读”。
+
+不改的部分：后端、接口、数据格式、日程、试聊、动态提醒和回放。
+
 ## 依赖与维护规则
 
 - `redesign-conversation-layout` 修改的 `chat-test`“本轮诊断”以 `convert-trigger-cards-to-skills` 修改后的文字为基础，`activity-feed` 两项修改以 `redesign-feed-workspace` 为基础，`panel-design-system` 新增在 `add-persona-workspace` 之上；应在这三份之后归档。实施时不得回退触发卡提案对读取卡片和工具调用的展示。
@@ -170,6 +185,7 @@
 - `add-private-daily-limit` 应在 `add-reply-triage` 之后；`add-reply-hours` 应在分级、健康及私信日额度提案之后。两项都修改分级能力，并行实施时需协调共享源码与设置入口。
 - 面板改版三份提案按 `add-persona-workspace` → `redesign-settings-workspace` → `redesign-feed-workspace` 的顺序实施和归档。三份都排在七页基线、五页面板、运行／接管分离、人设预设、人设回放和参考补齐之后。`add-reply-hours`、`add-private-daily-limit` 新增的时段和额度检查只能放在生产路径，不能影响试聊。
 - `refine-settings-memory-timezone` 修改面板改版三份提案、七页基线的记忆可见范围和回复提示词提案中的能力，归档应在这些来源提案之后；它改写了试聊“公开与私信记忆分开”的场景，实施时以本提案为准。
+- `redesign-persona-editor` 新增的 `persona-management` 三项要求建立在 `convert-trigger-cards-to-skills`（触发卡字段）、`add-persona-presets`（预设只读与建议简介）和 `add-persona-workspace`（工作区版式、离开确认）之上，应在这三份之后归档；实施时不得改动日程、试聊、动态提醒和回放页面。
 - 未完成任务不得归档。同步主规格前核对实际行为和全部验收证据；CLI 显示规划产物完成只表示可进入实施。
 - 修改需求时同步提案、规格、设计和任务；任务只在完整验收条件通过后勾选。构建、自动化测试、批量模型及界面验收只在服务器独立环境运行，不使用生产 profile 跑模拟测试。
 
