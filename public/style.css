@@ -471,3 +471,5 @@ body.workspace .notice{pointer-events:none;top:calc(var(--ws-top-height,57px) + 
 @media(prefers-reduced-motion:reduce){.ws-stat{transition:none}.chat-working i{animation:none}}
 @media(max-width:860px){.ws-thread{padding-left:8px;padding-right:8px}.chat-dock{padding:8px 12px}.chat-dock .ws-box{padding:10px 11px}.chat-persona{max-width:50%}.chat-dock .ws-box-bar{gap:5px}.ws-thread .ws-turn-user .ws-bubble{max-width:88%}}
 @media(max-width:420px){.chat-caption{padding-left:0;padding-right:0}.chat-persona{max-width:45%}.chat-dock .ws-box-bar .grow{display:none}.chat-dock .chat-send{margin-left:auto}.chat-dock #chat-test-process{font-size:10px;padding:3px 6px}}
+/* .ws-shell .input 的旧背景优先级较高，圆角框内部必须显式透明。 */
+.ws-box textarea.input,.ws-box textarea.input:focus{background:transparent;border:0;box-shadow:none;border-radius:0;outline:none;padding:2px 0 9px}
