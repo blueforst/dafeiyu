@@ -44,7 +44,7 @@
 
 .feed-links{font-size:10.5px;gap:12px;flex-wrap:wrap}
 .feed-note:empty,.feed-format:empty,.feed-links:empty{display:none}
-.feed-new-messages{position:sticky;bottom:8px;left:50%;z-index:3;box-shadow:0 2px 10px var(--ws-border);transform:translateX(-50%)}
+.feed-new-anchor{position:sticky;bottom:8px;height:0;z-index:3;pointer-events:none}.feed-new-messages{position:absolute;bottom:0;left:50%;box-shadow:0 2px 10px var(--ws-border);transform:translateX(-50%);pointer-events:auto;white-space:nowrap}
 .feed-attention-view,.feed-import-view{max-width:860px;margin:0 auto}
 .feed-attention-view{display:flex;flex-direction:column;gap:14px}
 .feed-attention-card{display:flex;flex-direction:column;gap:12px;border:1px solid var(--ws-border)}
