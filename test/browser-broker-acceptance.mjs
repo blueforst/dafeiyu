@@ -29,14 +29,15 @@ const resources=[];
 function persist(){writeFileSync(OUT+'/browser-broker-acceptance.json',JSON.stringify({...report,passed:report.checks.length,failed:report.errors.length},null,2));}
 async function check(name,fn){console.log('[开始] '+name);const started=Date.now();try{const detail=await fn();report.checks.push({name,durationMs:Date.now()-started,...(detail?{detail}:{})});console.log('[通过] '+name);}catch(error){report.errors.push({name,error:error.stack||String(error)});console.log('[失败] '+name+'：'+String(error));}finally{persist();}}
 async function screenshot(name){const page=broker.context.pages().find(page=>!/^https:\/\/x\.com\/(?:messages|i\/chat)(?:\/|$)/.test(page.url()));assert.ok(page);await page.setViewportSize({width:1440,height:900});const path=OUT+'/'+name+'.png';await page.screenshot({path,fullPage:true});report.screenshots.push(path);}
-function setScenario(id,handle,{deleted=false,unknown=false,nativeDelay=800,hasQuote=false,missingDuringContext=false}={}){
- const timestamp=Date.now(),event={id:'x:'+id,platformId:id,targetId:id,channel:'public',userId:'x:'+handle,handle,text:'@'+actor+' 合成新问题 '+id,url:'https://x.com/'+handle+'/status/'+id,conversationId:id,timestamp,timestampReliable:true};
- scenario={event,deleted,unknown,nativeDelay,hasQuote,missingDuringContext,generated:0,clicks:0};return scenario;
+function setScenario(id,handle,{deleted=false,unknown=false,nativeDelay=800,hasQuote=false,missingDuringContext=false,unrelated=false}={}){
+ const timestamp=Date.now(),event={id:'x:'+id,platformId:id,targetId:id,channel:'public',userId:'x:'+handle,handle,text:(unrelated?'没有账号提及的推荐内容 ':'@'+actor+' 合成新问题 ')+id,url:'https://x.com/'+handle+'/status/'+id,conversationId:id,timestamp,timestampReliable:true};
+ scenario={event,deleted,unknown,nativeDelay,hasQuote,missingDuringContext,unrelated,generated:0,clicks:0};return scenario;
 }
 function article(event,reply=false,extras=''){
  return '<article data-testid="tweet"><a href="/'+event.handle+'/status/'+event.platformId+'"><time datetime="'+new Date(event.timestamp).toISOString()+'"></time></a><div data-testid="tweetText">'+esc(event.text)+'</div>'+extras+(reply?'<button data-testid="reply" onclick="openReply()">回复</button>':'')+'</article>';
 }
-function rootEvent(){return {handle:actor,platformId:'900',timestamp:Date.now()-60000,text:'合成主帖'};}
+function rootEvent(){return {handle:actor,platformId:'900',timestamp:(scenario?.event.timestamp??Date.now())-60000,text:'合成主帖'};}
+function relation(event,root,parent=null,parentHandle){return {rest_id:event.platformId,legacy:{conversation_id_str:root,in_reply_to_status_id_str:parent,...(parentHandle?{in_reply_to_screen_name:parentHandle}:{}),created_at:new Date(event.timestamp).toISOString()},core:{user_results:{result:{legacy:{screen_name:event.handle}}}}};}
 function shell(body,script=''){
  return '<!doctype html><html><body><nav><a data-testid="AppTabBar_Profile_Link" href="/'+actor+'">个人主页</a></nav><main>'+body+'</main><script>'+script+'</script></body></html>';
 }
@@ -67,7 +68,7 @@ try{
   await context.route('**/*',async route=>{
    const request=route.request(),url=new URL(request.url());
    if(url.origin!=='https://x.com'){if(!['about:','data:'].includes(url.protocol))report.externalRequests.push({origin:url.origin,path:url.pathname});await route.abort();return;}
-   if(url.pathname==='/i/api/graphql/fixture/TweetDetail'){report.nativeReads++;await delay(scenario?.nativeDelay??0);await route.fulfill({status:200,json:{ready:true}});return;}
+   if(url.pathname==='/i/api/graphql/fixture/TweetDetail'){report.nativeReads++;const data=[relation(rootEvent(),'900'),...(scenario?[scenario.unrelated?relation(scenario.event,scenario.event.platformId):relation(scenario.event,'900','900',actor)]:[])];await delay(scenario?.nativeDelay??0);await route.fulfill({status:200,json:{ready:true,data}});return;}
    if(url.pathname==='/i/api/graphql/fixture/CreateTweet'){
     report.submitClicks++;scenario.clicks++;const body=request.postDataJSON();if(body.target!==scenario.event.platformId){report.errors.push({name:'合成submit目标绑定',error:'fixture-target-mismatch'});await route.fulfill({status:400,json:{error:'fixture-target-mismatch'}});return;}
     const payload=scenario.unknown?{acknowledged:true}:{data:{create_tweet:{tweet_results:{result:{rest_id:String(7000+report.submitClicks),legacy:{full_text:body.text,created_at:new Date().toUTCString(),in_reply_to_status_id_str:body.target,truncated:false},core:{user_results:{result:{legacy:{screen_name:actor}}}}}}}}};
@@ -97,6 +98,10 @@ try{
  });
  await check('task外层控制预检失败也形成持久not_submitted，恢复后仅回查终态',async()=>{
   const s=setScenario('107','visitor_eta'),before=report.nativeReads;await transport.control('paused');const receipt=await transport.send(s.event,'合成暂停测试',actor);assert.equal(receipt.status,'not_submitted');assert.equal(receipt.browserPaused,true);assert.equal(receipt.diagnostic.code,'control-unavailable');assert.equal(receipt.diagnostic.stage,'control');assert.equal(preflight()[s.event.id].receipt.status,'not_submitted');assert.equal(journal()[s.event.id],undefined);assert.equal(report.nativeReads,before);await transport.control('auto');assert.equal((await transport.lookup(s.event,'合成暂停测试',actor)).status,'not_submitted');return {diagnostic:receipt.diagnostic,browserPaused:true};
+ });
+ await check('无关旧队列即使目标前有工作账号帖子仍在intent之前拒绝，补录不伪造祖先',async()=>{
+  const s=setScenario('110','visitor_other',{unrelated:true}),before=report.submitClicks;const inspected=await transport.inspectPost(s.event.url,actor);assert.deepEqual(inspected.context.ancestorHandles,[]);assert.deepEqual(inspected.context.messages.map(e=>e.platformId),['110']);
+  const receipt=await transport.send(s.event,'不应该提交的合成正文',actor);assert.equal(receipt.status,'not_submitted');assert.equal(receipt.diagnostic.code,'public-target-unrelated');assert.equal(report.submitClicks,before);assert.equal(journal()[s.event.id],undefined);assert.equal(preflight()[s.event.id].receipt.status,'not_submitted');return {clicks:0,intentSaved:false,code:receipt.diagnostic.code};
  });
  await check('Workflow经HTTP采集不同actor的新消息，无账号白名单并各提交一次',async()=>{
   const f=workflowFixture();for(const [id,handle] of [['102','visitor_beta'],['103','visitor_gamma']]){

@@ -1,4 +1,5 @@
 import { h, set, fmtTime } from './dom.js';
+export { fmtUsd, fmtUsdText, advanced, advancedDialog, rowActions, emptyLine, tagInput } from './view-utils.js';
 
 let serial = 0;
 const stored = (key, value) => { try { if (value === undefined) return localStorage.getItem(key) === '1'; localStorage.setItem(key, value ? '1' : '0'); } catch { return false; } };

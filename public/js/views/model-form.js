@@ -5,9 +5,10 @@ export const API_LABEL = {
   'google-generative-ai': 'Google', 'mistral-conversations': 'Mistral',
 };
 export const CUSTOM_APIS = [
-  { value: 'openai-completions', title: 'OpenAI Chat', hint: '多数中转站、国产模型' },
-  { value: 'openai-responses', title: 'OpenAI Responses', hint: 'OpenAI 新接口' },
-  { value: 'anthropic-messages', title: 'Anthropic', hint: 'Claude 及兼容接口' },
+  { value: 'openai-completions', title: 'OpenAI Chat (openai-completions)', hint: '多数中转站、国产模型' },
+  { value: 'openai-responses', title: 'OpenAI Responses (openai-responses)', hint: 'OpenAI 新接口' },
+  { value: 'anthropic-messages', title: 'Anthropic (anthropic-messages)', hint: 'Claude 及兼容接口' },
+  { value: 'google-generative-ai', title: 'Google (google-generative-ai)', hint: 'Gemini 兼容接口' },
 ];
 export const LEVEL_LABEL = { off: '关' };
 const CUSTOM_REASONING_LEVELS = ['off', 'low', 'medium', 'high'];

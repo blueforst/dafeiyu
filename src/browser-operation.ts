@@ -1,6 +1,6 @@
 // 浏览器错误仅暴露有限代码和阶段，绝不把 DOM、正文、URL 或上游原始错误写入诊断。
 export const BROWSER_OPERATION_STAGES=['request','control','resource','identity','target-navigation','target-ready','target-validate','reply-open','reply-fill','editor-validate','intent-save','submit-click','receipt-read','lookup','post-open','post-fill','dm-validate'] as const;
-export const BROWSER_OPERATION_CODES=['invalid-request','control-unavailable','identity-unavailable','account-restricted','browser-recovery-failed','browser-resource-pressure','private-contract-unverified','public-target-timeout','public-target-unavailable','public-target-ambiguous','public-target-mismatch','public-context-incomplete','editor-unavailable','pre-submit-failed','operation-timeout','preflight-persistence-failed','submission-incomplete','unknown-error'] as const;
+export const BROWSER_OPERATION_CODES=['invalid-request','control-unavailable','identity-unavailable','account-restricted','browser-recovery-failed','browser-resource-pressure','private-contract-unverified','public-target-timeout','public-target-unavailable','public-target-ambiguous','public-target-mismatch','public-target-unrelated','public-context-incomplete','editor-unavailable','pre-submit-failed','operation-timeout','preflight-persistence-failed','submission-incomplete','unknown-error'] as const;
 export type BrowserOperationStage=typeof BROWSER_OPERATION_STAGES[number];
 export type BrowserOperationCode=typeof BROWSER_OPERATION_CODES[number];
 export type BrowserDiagnostic={code:BrowserOperationCode;stage:BrowserOperationStage};
@@ -16,6 +16,7 @@ const REASONS:Record<BrowserOperationCode,string>={
  'public-target-unavailable':'目标公开消息已删除或当前不可用',
  'public-target-ambiguous':'页面存在多个无法唯一确认的目标消息',
  'public-target-mismatch':'当前公开目标的身份、时间或正文与采集记录不符',
+ 'public-target-unrelated':'当前公开目标没有提及工作账号或可确认的回复关系，未提交',
  'public-context-incomplete':'公开目标缺少可验证的正文或媒体上下文',
  'editor-unavailable':'编辑器未允许提交',
  'pre-submit-failed':'浏览器在提交意图之前执行失败',

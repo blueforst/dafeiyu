@@ -148,6 +148,17 @@
 - **动态：** 状态放在人设名旁，“已发送”最安静，其余上色并写原因；草稿改为圆角编辑框，按钮在框内；其他操作进入下方操作行；左栏状态改为彩色文字。
 - **不改：** 处理流程、接口、数据、计费、草稿规则和状态名称。
 
+## 设置页紧凑排版与高级设置收起：候选已实现
+
+[提案](changes/compact-settings-pages/proposal.md) · [设计](changes/compact-settings-pages/design.md) · [任务](changes/compact-settings-pages/tasks.md) · [增量规格](changes/compact-settings-pages/specs/) · [草图目录](changes/compact-settings-pages/mockups/)
+
+2026-10-29 根据管理员选定的五份设置页草图整理实施，共 **32/33** 项隔离实施与验收完成（仅 14.3 生产发布待授权）：
+
+- **共用组件与紧凑版式：** 新增 `.ws-cols`、`.ws-card`、`.ws-num`、`.ws-time`、`.ws-switch`、`.ws-stats`、`.ws-row-actions`、`.ws-empty-line`、`advanced()`、`advancedDialog()`、`fmtUsd()`、`rowActions()`、`tagInput()`。
+- **模型与服务商：** 左栏只列已添加服务商并配 `✎` 编辑弹窗；接口协议改为模型属性（`LibraryModel.api`），自定义服务商拉取自动依次探测 OpenAI／Anthropic 兼容端点；新增星标（`PUT /api/model/library/:key/stars`，支持拖拽与 `Alt+↑/↓` 排序）、近 30 天最近使用（`lastUsedAt`）、四项缓存价格提示与手动模型删除（`DELETE /api/model/library/:key/models/:id`）。
+- **消息时效合并：** 取消优先／普通两档时效，合并为单一 `maxAgeHours`（默认 3 小时，范围 1–48），在“消息分级与过滤”的高级设置中维护，启动一次性迁移并生成备份。
+- **十一项设置页重排：** 运行与发送（三卡首屏＋2×2 额度表）、定时任务（24 小时“今天的安排”时间轴＋紧凑表）、消息分级与过滤（统计条＋标签输入＋高级设置）、记忆（双视图切换＋策略弹窗＋身份详情三标签＋登记经历弹窗）、计费（页头范围切换＋堆叠柱状图与模型占比并排＋紧凑热力图＋收起流水）、浏览器接管与采集来源、健康与日报（需关注置顶＋六组状态胶囊＋日报紧凑表）、日志阶段与队列（事件摘要表＋按日分隔＋300ms 自动筛选）、任务执行历史（按任务计数胶囊＋连续成功合并 `groupRuns`）。
+
 ## 依赖与维护规则
 
 - `redesign-conversation-layout` 修改的 `chat-test`“本轮诊断”以 `convert-trigger-cards-to-skills` 修改后的文字为基础，`activity-feed` 两项修改以 `redesign-feed-workspace` 为基础，`panel-design-system` 新增在 `add-persona-workspace` 之上；应在这三份之后归档。实施时不得回退触发卡提案对读取卡片和工具调用的展示。

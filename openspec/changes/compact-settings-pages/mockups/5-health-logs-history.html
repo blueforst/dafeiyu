@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>设置 · 排查三页</title>
+<style>
+:root{--bg:#fff;--page:#eef0f3;--side:#f9fafb;--hover:rgba(38,49,72,.05);--active:#ebeef2;--t1:#0f1115;--t2:#61666b;--t3:#81858c;--cap:#adb2b8;--b1:rgba(0,0,0,.08);--b2:rgba(0,0,0,.12);--brand:#4176e6;--brand-soft:#e4edfd;--ok:#15803d;--ok-soft:#e6faed;--warn:#aa6416;--warn-soft:#fef5e7;--fill:#f3f4f6;--card:#fafbfc;--note:#fff8db;--note-b:#f1d675}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151517;--page:#0c0c0d;--side:#1b1b1c;--hover:rgba(255,255,255,.05);--active:#2c2c2e;--t1:#f9fafb;--t2:#adb2b8;--t3:#81858c;--cap:#61666b;--b1:rgba(255,255,255,.08);--b2:rgba(255,255,255,.16);--brand:#7aaaff;--brand-soft:#28314a;--ok:#4ade80;--ok-soft:#233c2c;--warn:#fbbf24;--warn-soft:#27241f;--fill:#232326;--card:#1b1b1d;--note:#2d2814;--note-b:#6b5a1c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--t1);font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.intro,.opt,.note{max-width:1472px;margin:0 auto;padding:0 16px}
+.intro{padding-top:22px}
+.intro h1{font-size:19px;margin:0 0 6px}
+.intro p,.intro li{color:var(--t2);font-size:13.5px}
+.intro p{margin:0 0 4px}.intro ul{margin:6px 0 0;padding-left:18px}
+.opt{margin-top:22px;margin-bottom:8px}
+.opt-head{display:flex;align-items:center;gap:12px;margin-bottom:10px;padding:6px 10px}
+.opt-head .letter{width:28px;height:28px;border-radius:50%;background:var(--t1);color:var(--bg);display:grid;place-items:center;font-weight:600;font-size:13px;flex:none}
+.opt-head h2{font-size:16px;margin:0}.opt-head p{margin:0;color:var(--t2);font-size:13px}
+.fit{position:relative}
+.app{width:1440px;height:868px;transform-origin:0 0;background:var(--bg);border:1px solid var(--b2);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.06)}
+.top{height:56px;flex:none;display:flex;align-items:center;gap:6px;padding:0 20px;border-bottom:1px solid var(--b1)}
+.top .brand{font-weight:600;font-size:15px;margin-right:18px}
+.top .nav{padding:6px 12px;border-radius:8px;color:var(--t2)}
+.top .nav.on{background:var(--active);color:var(--t1);font-weight:600}
+.sp{flex:1}
+.pill{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--warn-soft);color:var(--warn)}
+.btn{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--b2);background:var(--bg);color:var(--t1);font:inherit;font-size:13px;white-space:nowrap}
+.btn.dark{background:var(--t1);color:var(--bg);border-color:var(--t1)}
+.btn.sm{height:26px;padding:0 9px;font-size:12.5px}
+.btn.ghost{border-color:transparent;color:var(--t2)}
+.fee{font-size:10.5px;border:1px solid var(--b2);border-radius:4px;padding:0 3px;color:var(--t3);line-height:15px}
+.body{flex:1;display:grid;grid-template-columns:232px minmax(0,1fr);min-height:0}
+.snav{background:var(--side);border-right:1px solid var(--b1);padding:10px}
+.snav .h{display:flex;justify-content:space-between;padding:10px 4px 14px;font-weight:600}
+.snav .g{font-size:11.5px;color:var(--t3);padding:12px 12px 6px}
+.snav .i{padding:7px 12px;border-radius:8px;font-size:13.5px;display:flex;align-items:center}
+.snav .i.on{background:var(--active)}
+.snav .dotw{width:6px;height:6px;border-radius:50%;background:var(--warn);margin-left:auto}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.mh{height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--b1)}
+.mh b{font-size:14px}.mh small{color:var(--t3);font-size:12.5px}
+.cnt{flex:1;min-height:0;overflow:hidden;padding:20px 28px;display:flex;flex-direction:column;gap:16px}
+.cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.card{border:1px solid var(--b1);border-radius:12px;padding:14px 18px;background:var(--bg)}
+.ch{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+.ch b{font-size:14px}.ch small{color:var(--t3);font-size:12px}
+.muted{color:var(--t3)}.cap{color:var(--cap)}
+.num{width:64px;height:30px;border:1px solid var(--b2);border-radius:7px;display:inline-flex;align-items:center;padding:0 8px;font-variant-numeric:tabular-nums;font-size:13px;background:var(--bg)}
+.num.w{width:78px}
+.unit{color:var(--t3);font-size:12.5px;margin-left:5px}
+.switch{width:34px;height:20px;border-radius:99px;background:var(--brand);position:relative;flex:none;display:inline-block;vertical-align:middle}
+.switch:after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:2px;left:16px;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch.off{background:var(--b2)}.switch.off:after{left:2px}
+.switch.ro{opacity:.45}
+/* run */
+.modes{display:flex;gap:10px;align-items:center}
+.mode{display:flex;align-items:center;gap:10px;border:1px solid var(--b2);border-radius:10px;padding:9px 14px;width:330px}
+.mode.on{border-color:var(--brand);background:var(--brand-soft)}
+.radio{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--b2);flex:none}
+.mode.on .radio{border:4.5px solid var(--brand)}
+.mode b{font-size:13.5px}.mode small{display:block;color:var(--t3);font-size:12px}
+.lim{width:100%;border-collapse:collapse;font-size:13px}
+.lim th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 10px 6px 0}
+.lim td{padding:6px 10px 6px 0;border-top:1px solid var(--b1);white-space:nowrap}
+.lim td:first-child{font-weight:500;width:84px}
+.use{color:var(--t3);font-size:12.5px}
+.bar{display:inline-block;width:70px;height:5px;border-radius:9px;background:var(--fill);vertical-align:middle;margin-right:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok);border-radius:9px}
+.row{display:flex;align-items:center;gap:10px;min-height:34px}
+.big{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:1px 9px;border-radius:99px;background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.adv{border:1px solid var(--b1);border-radius:12px;background:var(--card)}
+.adv-h{display:flex;align-items:center;gap:10px;padding:11px 18px;font-size:13.5px}
+.adv-h b{font-weight:600}.adv-h small{color:var(--t3);font-size:12px}
+.adv-h .chev{color:var(--t3);font-size:11px;width:12px}
+.adv-b{border-top:1px solid var(--b1);padding:12px 18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 32px}
+.f{display:flex;align-items:center;gap:10px;font-size:13px}
+.f .l{min-width:118px;color:var(--t2)}
+.f .h{color:var(--cap);font-size:12px}
+/* triage */
+.stats{display:flex;border:1px solid var(--b1);border-radius:12px;padding:12px 6px;align-items:center}
+.stat{flex:1;padding:0 16px;border-right:1px solid var(--b1)}
+.stat:last-of-type{border-right:0}
+.stat small{display:block;color:var(--t3);font-size:12px}
+.stat b{font-size:19px;font-variant-numeric:tabular-nums}
+.stat b span{font-size:13px;color:var(--t3);font-weight:400}
+.refresh{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--t3);margin-right:6px}
+.lbl{font-size:12.5px;color:var(--t2);margin:2px 0 6px;display:flex;gap:6px;align-items:baseline}
+.lbl small{color:var(--cap)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tg{font-size:12.5px;padding:2px 9px;border-radius:7px;background:var(--fill);color:var(--t1)}
+.tg.add{background:none;border:1px dashed var(--b2);color:var(--t3)}
+.empty-in{height:30px;border:1px dashed var(--b2);border-radius:8px;display:flex;align-items:center;padding:0 10px;color:var(--cap);font-size:12.5px;margin-bottom:12px}
+.line{display:flex;gap:22px;font-size:13px;color:var(--t2);align-items:center}
+.line .okc{color:var(--ok)}
+/* tasks */
+.tl{position:relative;height:92px;margin:2px 8px 0}
+.tl .axis{position:absolute;left:0;right:0;top:56px;height:4px;background:var(--fill);border-radius:9px}
+.tl .closed{position:absolute;top:50px;height:16px;background:repeating-linear-gradient(135deg,var(--warn-soft),var(--warn-soft) 5px,transparent 5px,transparent 9px);border:1px solid rgba(170,100,22,.25);border-radius:5px;font-size:10.5px;color:var(--warn);line-height:14px;padding-left:6px;white-space:nowrap;overflow:hidden}
+.tl .tick{position:absolute;top:72px;font-size:11px;color:var(--cap);transform:translateX(-50%);white-space:nowrap}
+.tl .ev{position:absolute;transform:translateX(-50%);font-size:11.5px;white-space:nowrap;text-align:center}
+.tl .ev.a{top:0}.tl .ev.b{top:20px}
+.tl .ev .stem{position:absolute;left:50%;width:1px;background:var(--b2)}
+.tl .ev.a .stem{top:17px;height:37px}.tl .ev.b .stem{top:17px;height:17px}
+.tl .d{position:absolute;top:52px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--brand);border:2px solid var(--bg)}
+.tl .d.off{background:var(--bg);border:1.5px solid var(--cap)}
+.tl .ev.off{color:var(--cap)}
+.tl .now{position:absolute;top:44px;height:28px;width:2px;background:var(--t1);border-radius:2px}
+.tl .nowl{position:absolute;top:28px;font-size:10.5px;transform:translateX(-50%);white-space:nowrap;font-weight:600}
+table.tk{width:100%;border-collapse:collapse;font-size:13px}
+.tk th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 10px 8px;border-bottom:1px solid var(--b1)}
+.tk td{padding:0 10px;height:42px;border-bottom:1px solid var(--b1);white-space:nowrap}
+.tk td.nm{font-weight:500}
+.tk td.act{width:100%;text-align:right}
+.tk td.act .btn{visibility:hidden}
+.tk tr.hov td{background:var(--hover)}
+.tk tr.hov td.act .btn{visibility:visible}
+.tk tr.offr td.nm,.tk tr.offr td.t{color:var(--t3)}
+.xw{font-size:11px;padding:0 6px;border-radius:5px;background:var(--warn-soft);color:var(--warn);margin-left:8px;font-weight:400}
+.tm{width:74px;height:28px;border:1px solid var(--b2);border-radius:7px;display:inline-flex;align-items:center;padding:0 8px;font-variant-numeric:tabular-nums}
+.foot{font-size:12.5px;color:var(--t3);display:flex;gap:14px}
+.foot a{color:var(--brand);text-decoration:none}
+.note div{background:var(--note);border:1px solid var(--note-b);border-radius:10px;padding:10px 14px;font-size:13px;margin-top:10px}
+.tagnote{display:inline-block;font-size:11px;color:var(--brand);background:var(--brand-soft);border-radius:5px;padding:0 6px;margin-left:8px}
+
+.seg{display:inline-flex;gap:1px;padding:2px;background:var(--active);border-radius:8px}
+.seg span{padding:2px 10px;border-radius:6px;font-size:12.5px;color:var(--t3);white-space:nowrap}
+.seg span.on{background:var(--bg);color:var(--t1);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.attn{border:1px solid rgba(170,100,22,.3);background:var(--warn-soft);border-radius:12px;padding:12px 18px}
+.attn .ch b{color:var(--warn)}
+.arow{display:flex;align-items:center;gap:12px;font-size:13px;padding:6px 0;border-top:1px solid rgba(170,100,22,.15)}
+.arow b{min-width:110px;font-weight:600}.arow span{color:var(--t2)}.arow a{margin-left:auto;color:var(--brand);font-size:12.5px;text-decoration:none}
+.mgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 16px}
+.mg{border:1px solid var(--b1);border-radius:10px;padding:10px 14px}
+.mg h5{margin:0 0 8px;font-size:12px;color:var(--t3);font-weight:500;display:flex}
+.mg h5 span{margin-left:auto;color:var(--ok)}
+.mg h5 span.w{color:var(--warn)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.mc{font-size:12.5px;padding:2px 9px 2px 7px;border-radius:7px;background:var(--fill);display:inline-flex;align-items:center;gap:6px}
+.mc i{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.mc.w{background:var(--warn-soft);color:var(--warn)}.mc.w i{background:var(--warn)}
+.rep{width:100%;border-collapse:collapse;font-size:12.5px}
+.rep th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 10px 6px;border-bottom:1px solid var(--b1);white-space:nowrap}
+.rep td{padding:0 10px;height:34px;border-bottom:1px solid var(--b1);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tb{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.sel{height:30px;border:1px solid var(--b2);border-radius:8px;display:inline-flex;align-items:center;padding:0 10px;font-size:12.5px;color:var(--t2);gap:6px;white-space:nowrap}
+.srch2{height:30px;border-radius:8px;background:var(--fill);display:inline-flex;align-items:center;padding:0 10px;color:var(--cap);font-size:12.5px;width:240px}
+.logs{width:100%;border-collapse:collapse;font-size:12.5px}
+.logs td{padding:0 10px;height:31px;border-bottom:1px solid var(--b1);white-space:nowrap}
+.logs td.tm2{color:var(--t3);width:70px;font-variant-numeric:tabular-nums}
+.logs td.ty{width:150px}
+.logs td.msg{width:100%;color:var(--t1)}
+.logs td.raw{color:var(--cap);font-size:11.5px}
+.lt{font-size:11.5px;padding:1px 7px;border-radius:5px;background:var(--fill);color:var(--t2)}
+.lt.b{background:var(--brand-soft);color:var(--brand)}.lt.w{background:var(--warn-soft);color:var(--warn)}
+.day td{height:30px;font-size:12px;color:var(--t3);font-weight:600;background:var(--card)}
+.hist{width:100%;border-collapse:collapse;font-size:13px}
+.hist th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 10px 8px;border-bottom:1px solid var(--b1)}
+.hist td{padding:0 10px;height:38px;border-bottom:1px solid var(--b1);white-space:nowrap;font-variant-numeric:tabular-nums}
+.hist td.c{width:100%}
+.hist tr.grp td{background:var(--card)}
+.okt{color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="intro">
+  <h1>设置 · 排查类三页（健康与日报 / 日志阶段与队列 / 任务执行历史）</h1>
+  <p>按 1440×868 画，数据取自你面板里现在的内容。</p>
+  <ul>
+    <li>健康：需要处理的项单独放最上面；正常的指标只剩“绿点 + 名字”，说明放到鼠标悬停里，不再满屏“正常 · xx 正常”。</li>
+    <li>日志：每行先显示一句人话（原来的 JSON 放到行尾变浅，点开才看完整内容）；按天加分隔行；5 个筛选框压成一行，改了就生效，不用再点“筛选日志”。</li>
+    <li>任务历史：连续重复的“宿主健康检查”合并成一行（×30），其他任务不再被淹没；改成表格，费用“未知”显示为“—”。</li>
+  </ul>
+</div>
+<div class="opt"><div class="opt-head"><div class="letter">1</div><div><h2>健康与日报</h2><p>告警历史默认收起；“健康与披露配置”收进高级设置。</p></div></div><div class="fit" data-frame="health"></div></div>
+<div class="opt"><div class="opt-head"><div class="letter">2</div><div><h2>日志阶段与队列 · 日志</h2><p>“阶段”“队列”两个标签页同样改成一行一条的表格。</p></div></div><div class="fit" data-frame="logs"></div></div>
+<div class="opt"><div class="opt-head"><div class="letter">3</div><div><h2>任务执行历史</h2><p>顶部按任务筛选（带次数）；点一行展开看详情和关联调用。<span class="sample" style="margin-left:6px;font-size:11px;color:var(--warn);background:var(--warn-soft);border-radius:5px;padding:0 6px">次数、耗时为示例</span></p></div></div><div class="fit" data-frame="history"></div></div>
+<div class="note"><div><b>说明</b>：日志里“人话”是按事件类型翻译的（例如 browser-restart → 浏览器进程重启），没翻译到的类型直接显示原名。合并的重复行点开能看到每一次。</div></div>
+<div style="height:40px"></div>
+<script>
+const NAV=[['运行',[['run','运行与发送'],['model','模型'],['tasks','定时任务'],['triage','消息分级与过滤']]],['数据',[['memory','记忆'],['billing','计费']]],['浏览器与采集',[['browser','浏览器接管'],['sources','采集来源']]],['排查',[['health','健康与日报'],['logs','日志阶段与队列'],['history','任务执行历史']]]];
+function shell(id,title,desc,actions,body){
+  const nav='<div class="h"><span>设置</span><span class="muted">≡</span></div>'+NAV.map(([g,items])=>'<div class="g">'+g+'</div>'+items.map(([k,t])=>'<div class="i'+(k===id?' on':'')+'">'+t+(k==='health'?'<span class="dotw"></span>':'')+'</div>').join('')).join('');
+  return '<div class="app"><div class="top"><span class="brand">角色互动工作流</span><span class="nav">动态</span><span class="nav">人设</span><span class="nav on">设置</span><span class="sp"></span><span class="pill">● 已暂停</span>&nbsp;<span class="btn dark">启动</span></div><div class="body"><div class="snav">'+nav+'</div><div class="main"><div class="mh"><b>'+title+'</b><small>'+desc+'</small><span class="sp"></span>'+actions+'</div><div class="cnt">'+body+'</div></div></div></div>';
+}
+
+const G=[['运行',[['发送进度',0,'发送进展正常'],['回复时段',0,'回复时段已开放'],['轮次运行',0,'主循环失败次数未达阈值'],['调度看门狗',0,'主循环调度正常']]],['采集',[['公开采集',0,''],['私信采集',0,''],['采集告警',0,'']]],['发送',[['公开发送退避',0,''],['私信发送退避',0,''],['公开自动化拦截',0,''],['私信自动化拦截',0,'']]],['浏览器',[['人工处理',0,''],['浏览器恢复',0,''],['浏览器资源',0,'']]],['账号',[['简介披露',1,''],['自动化账号标签',1,''],['通知质量过滤',1,''],['账号状态',0,'']]],['基础设施',[['数据库备份',0,''],['证书有效期',0,'']]]];
+const HEALTH=`
+<div class="attn">
+ <div class="ch"><b>需关注 3 项</b><small>采样 10/29 16:05 · 都在“账号”组，需要你在 X 账号设置里人工处理</small></div>
+ <div class="arow"><b>简介披露</b><span>简介披露不完整：AI</span><a href="#">去处理 →</a></div>
+ <div class="arow"><b>自动化账号标签</b><span>未标注自动化账号，请在账号设置中人工检查</span><a href="#">去处理 →</a></div>
+ <div class="arow"><b>通知质量过滤</b><span>通知质量过滤已开启，可能有部分提及收不到</span><a href="#">去处理 →</a></div>
+</div>
+<div class="mgrid">${G.map(([g,ms])=>{const w=ms.filter(m=>m[1]).length;return `<div class="mg"><h5>${g}<span class="${w?'w':''}">${w?w+' 项需关注':'全部正常'}</span></h5><div class="chips">${ms.map(([n,a])=>`<span class="mc${a?' w':''}"><i></i>${n}</span>`).join('')}</div></div>`}).join('')}</div>
+<div class="card" style="padding:12px 8px 4px">
+ <div class="ch" style="padding:0 10px"><b>每日日报</b><small>北京时间每天 09:00 归档</small></div>
+ <table class="rep"><tr><th>日期</th><th>调用</th><th>token</th><th>费用</th><th>公开 入 / 回 / 失败</th><th>私信 入 / 回 / 失败</th><th>响应 中位 / P90</th><th>告警</th></tr>
+ <tr><td>10/28</td><td>2</td><td>3,107</td><td>$0.0014</td><td>1 / 0 / 0</td><td>0 / 0 / 0</td><td class="muted">—</td><td>12</td></tr>
+ <tr><td>10/27</td><td>0</td><td>0</td><td class="muted">—</td><td>0 / 0 / 0</td><td>0 / 0 / 0</td><td class="muted">—</td><td>0</td></tr></table>
+</div>
+<div class="adv"><div class="adv-h"><span class="chev">▸</span><b>告警历史</b><small>近 7 天 12 条</small></div></div>
+<div class="adv"><div class="adv-h"><span class="chev">▸</span><b>高级设置</b><small>健康阈值与账号披露检查配置</small></div></div>`;
+document.querySelector('[data-frame=health]').innerHTML=shell('health','健康与日报','健康指标、账号检查与每日归档','<span class="refresh" title="刷新">↻</span>',HEALTH);
+const L=[['day','今天 · 10/29'],['15:30:09','模型','b','opencode-go 模型列表已刷新',''],['15:00:10','浏览器','w','浏览器进程重启','{"count":1,"reason":"browser-process-restart"…}'],['14:59:30','人设','','人设升级，已自动备份','{"ids":["current"],"changed":1,"backup":"persona-upgrade-2026…'],['14:59:30','服务','','服务启动，保持暂停；发送中的任务已转为待回查',''],['14:16:50','人设','','删除人设「大肥鱼」','关联 eea37034…'],['05:11:01','浏览器','w','浏览器进程重启','{"count":1,"reason":"browser-process-restart"…}'],['05:10:19','服务','','服务启动，保持暂停',''],['05:10:01','控制','','自动处理已暂停',''],['05:10:01','健康','','健康控制：暂停','{"control":"paused"}'],['04:04:44','浏览器','w','浏览器进程重启','{"count":1,"reason":"browser-process-restart"…}'],['04:00:35','接管','','人工连接已关闭，等待显式恢复',''],['04:00:29','接管','','已移交人工：自动任务停止',''],['03:53:19','人设','','保存人设「大肥鱼」（第 2 版）','关联 eea37034…'],['day','昨天 · 10/28'],['20:11:49','浏览器','w','浏览器进程重启','{"count":1,"reason":"browser-process-restart"…}'],['19:24:21','账号','','账号合规检查：披露缺失、未标注自动化、质量过滤开启','{"disclosure":"missing","automatedLabel":"missing"…}'],['19:06:23','接管','','人工连接已关闭，等待显式恢复','']];
+const LOGS=`
+<div class="tb"><span class="sel">全部级别 ▾</span><span class="sel">全部渠道 ▾</span><span class="srch2">搜索内容或关联 ID…</span><span class="sel">📅 最近 3 天 ▾</span><span class="sp"></span><span class="muted" style="font-size:12.5px">回复时段已开放</span><span class="btn sm">暂停实时日志</span></div>
+<div class="card" style="padding:4px 8px;flex:1;min-height:0;overflow:hidden"><table class="logs">${L.map(r=>r[0]==='day'?`<tr class="day"><td colspan="4">${r[1]}</td></tr>`:`<tr><td class="tm2">${r[0]}</td><td class="ty"><span class="lt ${r[2]}">${r[1]}</span></td><td class="msg">${r[3]}</td><td class="raw">${r[4]}</td></tr>`).join('')}</table></div>`;
+document.querySelector('[data-frame=logs]').innerHTML=shell('logs','日志阶段与队列','运行事件与排查信息','<span class="seg"><span class="on">日志</span><span>阶段</span><span>队列</span></span>',LOGS);
+const H=[['宿主健康检查','完成 ×85','10/29 09:05 – 16:05','自动','平均 450 ms','—',1],['每日日报','完成','10/29 09:00','自动','1.2 s','—'],['宿主健康检查','完成 ×163','10/28 19:29 – 10/29 08:55','自动','平均 430 ms','—',1],['账号合规检查','完成','10/28 19:24','自动','8.4 s','—'],['主循环','完成','10/28 13:41','自动','3.1 s','$0.0011'],['记忆补整理','完成','10/28 13:32','手动','12.0 s','$0.0004'],['虚构日程','完成','10/28 13:32','手动','6.5 s','$0.0003']];
+const HIST=`
+<div class="tb"><span class="seg"><span class="on">全部 253</span><span>宿主健康检查 248</span><span>每日日报 1</span><span>账号合规检查 1</span><span>主循环 1</span><span>记忆补整理 1</span><span>虚构日程 1</span></span><span class="sp"></span><span class="sel">只看失败</span></div>
+<div class="card" style="padding:12px 8px 4px"><table class="hist"><tr><th>任务</th><th>结果</th><th>时间</th><th>触发</th><th>耗时</th><th>费用</th><th></th></tr>
+${H.map(([n,s,t,tr,d,c,g])=>`<tr class="${g?'grp':''}"><td>${g?'▸ ':''}${n}</td><td class="okt">✓ ${s}</td><td class="muted">${t}</td><td class="muted">${tr}</td><td>${d}</td><td class="${c==='—'?'muted':''}">${c}</td><td class="c"></td></tr>`).join('')}
+</table><div class="muted" style="font-size:12.5px;padding:10px">加载更早的记录</div></div>`;
+document.querySelector('[data-frame=history]').innerHTML=shell('history','任务执行历史','执行状态、耗时与关联调用','',HIST);
+function fit(){document.querySelectorAll('.fit').forEach(f=>{const k=Math.min(1,f.clientWidth/1440);const a=f.firstElementChild;if(!a)return;a.style.transform='scale('+k+')';f.style.height=(868*k)+'px';});}
+addEventListener('resize',fit);fit();
+</script>
+</body>
+</html>

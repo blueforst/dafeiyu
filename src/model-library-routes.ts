@@ -13,7 +13,9 @@ export function registerModelLibraryRoutes(app:FastifyInstance,library:ModelLibr
  app.put('/api/model/library/:key',handle(req=>library.update(String(req.params.key),req.body||{}),true));
  app.delete('/api/model/library/:key',handle(req=>library.remove(String(req.params.key),req.body?.revision??req.query?.revision),true));
  app.post('/api/model/library/:key/refresh',handle(req=>library.refresh(String(req.params.key),req.body?.revision),true));
+ app.put('/api/model/library/:key/stars',handle(req=>library.stars(String(req.params.key),req.body||{}),true));
  app.put('/api/model/library/:key/models/:id',handle(req=>library.updateModel(String(req.params.key),String(req.params.id),req.body||{}),true));
+ app.delete('/api/model/library/:key/models/:id',handle(req=>library.removeModel(String(req.params.key),String(req.params.id),req.body?.revision??req.query?.revision),true));
  app.post('/api/model/library/:key/models/:id/test',handle(req=>library.test(String(req.params.key),String(req.params.id),req.body?.revision),true));
  app.put('/api/model/active',handle(req=>library.activate(req.body||{}),true));
 }

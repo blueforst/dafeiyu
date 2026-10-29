@@ -1,13 +1,13 @@
 // Panel-managed settings (expected handle, model) and per-slot model keys.
 // Stored under the writable data volume; config.json stays read-only.
-import { readFileSync, writeFileSync, renameSync, mkdirSync, chmodSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, chmodSync, unlinkSync, existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { Config } from './types.js';
 
 export type ReasoningLevel = 'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max';
 export type PanelModel = { provider:string; baseUrl:string; api?:'openai-completions'|'openai-responses'|'anthropic-messages'; id:string; reasoningLevel:ReasoningLevel; custom?:{contextWindow:number;reasoning:boolean} };
 export type SettingsSection = 'model'|'modelLibrary'|'persona'|'personaLibrary'|'tasks'|'memory'|'program'|'promptHints'|'triage'|'health';
-export type PanelSettings = { model?:PanelModel; modelLibrary?:import('./model-library.js').ModelLibrary; personaLibrary?:import('./persona-library.js').PersonaLibrary; promptHints?:Record<string,any>; triage?:Record<string,any>; health?:Record<string,any>; persona?:Record<string,any>; tasks?:Record<string,any>; memory?:Record<string,any>; program?:Record<string,any>; revisions?:Partial<Record<SettingsSection,number>> };
+export type PanelSettings = { model?:PanelModel; modelLibrary?:import('./model-library.js').ModelLibrary; personaLibrary?:import('./persona-library.js').PersonaLibrary; promptHints?:Record<string,any>; triage?:Record<string,any>; health?:Record<string,any>; persona?:Record<string,any>; tasks?:Record<string,any>; memory?:Record<string,any>; program?:Record<string,any>; migrations?:Record<string,number>; revisions?:Partial<Record<SettingsSection,number>> };
 export class SettingsConflictError extends Error { statusCode=409; constructor(public section:SettingsSection,public revision:number){super('设置已被其他操作修改，请重新读取后保存');} }
 
 
@@ -33,7 +33,13 @@ export function readPanelSettings(opts:{tolerant?:boolean} = {}):PanelSettings {
   if (v) {
     // 兼容旧设置；只保留仍生效的参数，下一次原子保存自然移除旧字段。
     if(v.model){delete v.model.maxTokens;delete v.model.timeoutMs;}
-    for(const provider of v.modelLibrary?.providers??[])for(const model of provider.models??[])if(model.params){delete model.params.maxTokens;delete model.params.timeoutMs;}
+    for(const provider of v.modelLibrary?.providers??[]){
+      const fallbackApi=provider.provider==='custom'?(provider.api||'openai-completions'):undefined;
+      for(const model of provider.models??[]){
+        if(model.params){delete model.params.maxTokens;delete model.params.timeoutMs;}
+        if(fallbackApi&&!model.api)model.api=fallbackApi;
+      }
+    }
     return v as PanelSettings;
   }
   if (opts.tolerant) return {};
@@ -148,4 +154,42 @@ export function commitModelLibrary(library:import('./model-library.js').ModelLib
  const revisions={...current.revisions,modelLibrary:revision+1,...(model?{model:(current.revisions?.model??0)+1}:{})};
  const next:PanelSettings={...current,modelLibrary:structuredClone(library),...(model?{model:structuredClone(model)}:{}),revisions};
  writeAtomic(panelDir()+'/settings.json',JSON.stringify(next,null,2));return {settings:next,revision:revision+1};
+}
+
+/** 分流规则与统一消息时效 maxAgeHours 同一次原子写入，同时递增 triage 与 program 修订号。 */
+export function commitTriageSettings(triage:Record<string,any>,opts:{maxAgeHours?:number;expectedRevision?:number;expectedProgramRevision?:number}={}):{settings:PanelSettings;revision:number;programRevision:number} {
+ const current=readPanelSettings(),revision=current.revisions?.triage??0,programRevision=current.revisions?.program??0;
+ if(opts.expectedRevision!==undefined&&(!Number.isSafeInteger(opts.expectedRevision)||opts.expectedRevision!==revision))throw new SettingsConflictError('triage',revision);
+ if(opts.expectedProgramRevision!==undefined&&(!Number.isSafeInteger(opts.expectedProgramRevision)||opts.expectedProgramRevision!==programRevision))throw new SettingsConflictError('program',programRevision);
+ if(opts.maxAgeHours!==undefined&&(!Number.isInteger(opts.maxAgeHours)||opts.maxAgeHours<1||opts.maxAgeHours>48))throw new Error('maxAgeHours 超出范围');
+ const nextTriage=mergeFields(current.triage,triage);
+ const nextProgram=opts.maxAgeHours!==undefined?mergeFields(current.program,{maxAgeHours:opts.maxAgeHours}):current.program;
+ const next:PanelSettings={...current,triage:nextTriage,...(nextProgram!==undefined?{program:nextProgram}:{}),revisions:{...current.revisions,triage:revision+1,program:programRevision+1}};
+ writeAtomic(panelDir()+'/settings.json',JSON.stringify(next,null,2));
+ return {settings:next,revision:revision+1,programRevision:programRevision+1};
+}
+
+/** 启动时一次性将旧版 normalMaxAgeHours / program.maxAgeHours 合并为统一 maxAgeHours，并备份原 settings.json。 */
+export function upgradeMessageAgeSettings(store?:{log(event:string,detail:string,level?:'info'|'warn'|'error'):void},configMaxAgeHours?:number,now=Date.now()):{upgraded:boolean;maxAgeHours?:number;backupPath?:string} {
+ const file=panelDir()+'/settings.json';
+ if(!existsSync(file))return {upgraded:false};
+ const current=readPanelSettings();
+ if(current.migrations?.messageAge)return {upgraded:false};
+ const rawText=readFileSync(file,'utf8');
+ let cfgAge=configMaxAgeHours;
+ if(cfgAge===undefined){try{cfgAge=(JSON.parse(readFileSync(process.env.CONFIG_PATH||'/config/config.json','utf8')) as any)?.maxAgeHours;}catch{}}
+ const normalAge=current.triage?.normalMaxAgeHours;
+ const fallback=Math.min(3,Number.isInteger(current.program?.maxAgeHours)?current.program!.maxAgeHours:(Number.isInteger(cfgAge)?cfgAge!:6));
+ const maxAgeHours=Number.isInteger(normalAge)&&normalAge>=1&&normalAge<=48?normalAge:Math.max(1,Math.min(48,fallback));
+ const backupPath=`${file}.bak-message-age-${now}`;
+ writeAtomic(backupPath,rawText);
+ const next:PanelSettings={
+  ...current,
+  program:{...(current.program??{}),maxAgeHours},
+  migrations:{...(current.migrations??{}),messageAge:1},
+  revisions:{...(current.revisions??{}),program:(current.revisions?.program??0)+1,triage:(current.revisions?.triage??0)+1},
+ };
+ writeAtomic(file,JSON.stringify(next,null,2));
+ store?.log('settings-upgrade',`消息时效已合并为 maxAgeHours=${maxAgeHours}h，已备份 ${backupPath}`);
+ return {upgraded:true,maxAgeHours,backupPath};
 }

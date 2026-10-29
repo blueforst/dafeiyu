@@ -8,7 +8,7 @@ import type { Config } from './types.js';
 import { commandCodeProvider, commandCodeApi, COMMANDCODE_BASE } from './commandcode.js';
 
 export type ProviderInfo = { id:string; name:string; group:'cn'|'intl'; baseUrl:string; apis:string[]; modelCount:number; available:boolean; reason:string; source:'pi'|'preset' };
-export type ModelInfo = { id:string; name:string; api:string; baseUrl:string; contextWindow:number; maxTokens:number; reasoning:boolean; levels:string[]; vision:boolean; cost:{input:number;output:number}; costKnown:boolean };
+export type ModelInfo = { id:string; name:string; api:string; baseUrl:string; contextWindow:number; maxTokens:number; reasoning:boolean; levels:string[]; vision:boolean; cost:{input:number;output:number;cacheRead:number;cacheWrite:number}; costKnown:boolean };
 
 const CN = new Set(['deepseek', 'moonshotai-cn', 'zai-coding-cn', 'qwen-token-plan-cn', 'minimax-cn', 'xiaomi', 'xiaomi-token-plan-cn', 'ant-ling']);
 const UNKNOWN_DEFAULTS = { contextWindow: 128000, maxTokens: 8192 };
@@ -28,7 +28,7 @@ function toInfo(m:Model<Api>):ModelInfo {
     contextWindow: m.contextWindow, maxTokens: m.maxTokens, reasoning: !!m.reasoning,
     levels: m.reasoning ? getSupportedThinkingLevels(m) : ['off'],
     vision: m.input.includes('image'),
-    cost: { input: m.cost?.input ?? 0, output: m.cost?.output ?? 0 },
+    cost: { input: m.cost?.input ?? 0, output: m.cost?.output ?? 0, cacheRead: m.cost?.cacheRead ?? 0, cacheWrite: m.cost?.cacheWrite ?? 0 },
     costKnown: m.provider !== 'commandcode',
   };
 }
@@ -123,33 +123,64 @@ function discoveryRequest(api:string, baseUrl:string, key:string):{url:string; h
   return { url: base + '/models', headers: { authorization: 'Bearer ' + key } };
 }
 
+function isModelListBody(body:any):boolean {
+  return Array.isArray(body) || Array.isArray(body?.data) || Array.isArray(body?.models);
+}
+
 function idsFrom(body:any):string[] {
   const list = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : Array.isArray(body?.models) ? body.models : [];
   return list.map((x:any) => typeof x === 'string' ? x : String(x?.id ?? x?.name ?? '')).map((id:string) => id.replace(/^models\//, '')).filter(Boolean);
 }
 
-export async function discoverModels(input:DiscoverInput, fetchImpl:typeof fetch = fetch):Promise<{models:DiscoveredModel[]; total:number}> {
-  const builtin = input.provider !== 'custom';
-  const api = builtin ? await primaryApi(input.provider) : String(input.api ?? '');
-  const mixedGateway = ['opencode', 'opencode-go', 'commandcode'].includes(input.provider);
-  const { url, headers } = input.provider === 'radius'
-    ? { url: new URL('/v1/config', input.baseUrl).href, headers: { authorization: 'Bearer ' + input.apiKey } }
-    : mixedGateway
-    ? { url: input.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') + '/v1/models', headers: { authorization: 'Bearer ' + input.apiKey } }
-    : discoveryRequest(api, input.baseUrl, input.apiKey);
+async function fetchDiscoveredIds(req:{url:string; headers:Record<string,string>}, fetchImpl:typeof fetch, timeoutMs:number):Promise<string[]> {
   let response:Response;
-  try { response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(DISCOVER_TIMEOUT_MS) }); }
+  try { response = await fetchImpl(req.url, { headers: req.headers, signal: AbortSignal.timeout(timeoutMs) }); }
   catch (e:any) { throw new Error(e?.name === 'TimeoutError' ? '拉取失败：超时' : '拉取失败：无法连接'); }
   if (!response.ok) throw new Error('拉取失败：HTTP ' + response.status);
   let body:any;
   try { body = await response.json(); } catch { throw new Error('拉取失败：返回的不是 JSON'); }
-  const ids = [...new Set(idsFrom(body))];
+  if (!isModelListBody(body)) throw new Error('拉取失败：返回的不是模型列表');
+  return [...new Set(idsFrom(body))];
+}
+
+export async function discoverModels(input:DiscoverInput, fetchImpl:typeof fetch = fetch):Promise<{models:DiscoveredModel[]; total:number; api?:'openai-completions'|'anthropic-messages'}> {
+  const builtin = input.provider !== 'custom';
+  let ids:string[];
+  let detectedApi:'openai-completions'|'anthropic-messages'|undefined;
+  if (!builtin && !input.api) {
+    const started = Date.now(), budget = 25000;
+    try {
+      ids = await fetchDiscoveredIds(discoveryRequest('openai-completions', input.baseUrl, input.apiKey), fetchImpl, DISCOVER_TIMEOUT_MS);
+      detectedApi = 'openai-completions';
+    } catch (firstErr:any) {
+      const remaining = budget - (Date.now() - started);
+      const firstReason = String(firstErr?.message ?? firstErr).replace(/^拉取失败：/, '');
+      if (remaining <= 0) throw new Error(`拉取失败：OpenAI 兼容接口（${firstReason}）；Anthropic 兼容接口（超时）`);
+      try {
+        ids = await fetchDiscoveredIds(discoveryRequest('anthropic-messages', input.baseUrl, input.apiKey), fetchImpl, Math.min(DISCOVER_TIMEOUT_MS, remaining));
+        detectedApi = 'anthropic-messages';
+      } catch (secondErr:any) {
+        const secondReason = String(secondErr?.message ?? secondErr).replace(/^拉取失败：/, '');
+        throw new Error(`拉取失败：OpenAI 兼容接口（${firstReason}）；Anthropic 兼容接口（${secondReason}）`);
+      }
+    }
+  } else {
+    const api = builtin ? await primaryApi(input.provider) : input.api!;
+    const mixedGateway = ['opencode', 'opencode-go', 'commandcode'].includes(input.provider);
+    const req = input.provider === 'radius'
+      ? { url: new URL('/v1/config', input.baseUrl).href, headers: { authorization: 'Bearer ' + input.apiKey } }
+      : mixedGateway
+      ? { url: input.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') + '/v1/models', headers: { authorization: 'Bearer ' + input.apiKey } }
+      : discoveryRequest(api, input.baseUrl, input.apiKey);
+    ids = await fetchDiscoveredIds(req, fetchImpl, DISCOVER_TIMEOUT_MS);
+    if (!builtin && (api === 'openai-completions' || api === 'anthropic-messages')) detectedApi = api;
+  }
   const own = builtin ? new Map((await listModels(input.provider)).map(m => [m.id, m])) : undefined;
   const models:DiscoveredModel[] = [];
   for (const id of ids.slice(0, DISCOVER_LIMIT)) {
     const match = own ? own.get(id) : await findCatalogModel(id);
-    const info = !own&&match ? {...match,cost:{input:0,output:0},costKnown:false}:match;
+    const info = !own&&match ? {...match,cost:{input:0,output:0,cacheRead:0,cacheWrite:0},costKnown:false}:match;
     models.push(info ? { id, known: true, info } : { id, known: false });
   }
-  return { models, total: ids.length };
+  return { models, total: ids.length, ...(detectedApi ? { api: detectedApi } : {}) };
 }

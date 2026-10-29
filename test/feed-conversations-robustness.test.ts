@@ -14,7 +14,7 @@ const initial=Date.parse('2026-10-28T12:00:00+08:00');
 function fixture(){
  const dir=mkdtempSync(tmpdir()+'/feed-robustness-'),store=new Store(dir+'/workflow.sqlite');let clock=initial,account='alpha',sequence=800000;
  new Outbox(store);new TaskScheduler(store,{account:()=>account,control:()=> 'paused',execute:async()=>{}});
- const triage=new ReplyTriage(store,undefined,()=>clock),feed=new ActivityFeed(store,()=>account,()=>6,undefined,triage);
+ const triage=new ReplyTriage(store,undefined,()=>clock),feed=new ActivityFeed(store,()=>account,()=>3,undefined,triage);
  const message=(userId='x:alice',status='confirmed',receivedAt=clock,sortAt=clock,acct=account)=>{
   const platformId=String(++sequence),channel=userId.startsWith('dm:')?'private':'public';
   const event:Event={id:'x:'+platformId,platformId,userId,channel,handle:channel==='public'?userId.slice(2):'',text:acct+' 原话 '+platformId,timestamp:receivedAt,timestampReliable:true,conversationId:channel==='private'?userId.slice(3):platformId};
@@ -28,7 +28,7 @@ function fixture(){
 
 test('普通筛选的会话增量包含自然过期的草稿徽标与优先状态变化',t=>{
  const f=fixture();t.mock.method(Date,'now',f.now);try{
-  f.message('x:alice','draft',initial-6*3600000+1000,initial-100);f.message('x:alice','confirmed',initial,initial-10);
+  f.message('x:alice','draft',initial-3*3600000+1000,initial-100);f.message('x:alice','confirmed',initial,initial-10);
   const first=f.feed.conversations();assert.equal(first.items[0].status,'draft');assert.equal(first.items[0].pending,1);const changes=f.changes();
   f.setTime(initial+2000);const delta=f.feed.conversations({filter:'all',changedSince:first.serverTime});
   assert.equal(delta.items.length,1,'没有写入updated_at，刚过期的会话也必须增量更新');assert.equal(delta.items[0].key,'x:alice');assert.equal(delta.items[0].status,'confirmed');assert.equal(delta.items[0].pending,0);assert.equal(f.changes(),changes);

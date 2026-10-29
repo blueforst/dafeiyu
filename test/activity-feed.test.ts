@@ -147,7 +147,7 @@ test('动态路由沿用鉴权与控制标记，冲突可读且只有成功操�
 test('接入分级后动态待处理复用优先/普通资格，排除各级过期、忽略、遗忘与外账号且纯只读',()=>{
  const f=fixture(true);try{
   const priority=f.message('priority-four-hours','public','queued',f.now-4*3600000),normal=f.message('normal-two-hours','private','queued',f.now-2*3600000);
-  f.message('normal-expired','public','queued',f.now-4*3600000);
+  f.message('normal-expired','public','queued',f.now-7*3600000);
   const priorityExpired=f.message('priority-expired','public','queued',f.now-7*3600000),ignored=f.message('ignored-fresh','public','queued'),forgotten=f.message('forgotten-fresh','private','queued');
   const globalForgotten=f.message('global-forgotten','public','queued'),foreign=f.message('foreign-priority','public','queued',f.now,'b');
   for(const row of [priority,priorityExpired,foreign])f.store.db.prepare("UPDATE messages SET tier='priority' WHERE id=?").run(row.id);
@@ -168,7 +168,7 @@ test('分级待处理的双表游标与计数一致，新排队消息只出现�
  const f=fixture(true);try{
   const a=f.message('queued-a','public','queued',f.now-1000),b=f.message('queued-b','private','queued',f.now-1000),old=f.message('queued-old','public','queued',f.now-2000);
   f.store.db.prepare("UPDATE messages SET tier='priority' WHERE id IN (?,?)").run(a.id,old.id);f.store.db.prepare("UPDATE messages SET tier='normal' WHERE id=?").run(b.id);
-  f.post('pending-post',f.now-1000,'unknown');f.message('excluded-stale','public','queued',f.now-4*3600000);f.message('excluded-other','private','queued',f.now,'b');
+  f.post('pending-post',f.now-1000,'unknown');f.message('excluded-stale','public','queued',f.now-7*3600000);f.message('excluded-other','private','queued',f.now,'b');
   const expected=f.feed.list({filter:'pending',limit:100}).items.map(r=>r.id),first=f.feed.list({filter:'pending',limit:2}),seen=first.items.map(r=>r.id);
   assert.equal(first.pending,expected.length);assert.equal(expected.length,4);
   const arrival=f.message('queued-arrival','public','queued',f.now);f.store.db.prepare("UPDATE messages SET tier='normal' WHERE id=?").run(arrival.id);

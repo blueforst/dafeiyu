@@ -106,3 +106,58 @@ test('按模型库接口文档完成添加、参数、测试计费、启用及�
   for(const response of [initial,added,edited,tested,activated,read])assert.ok(!response.body.includes(KEY));
  }finally{await t.close();}
 });
+
+test('自定义服务商无协议双探拉取、协议迁移、星标排序、单模型删除与30天最近使用',async()=>{
+ const {discoverModels,listModels}=await import('../src/model-catalog.js');
+ const deepseekModels=await listModels('deepseek');
+ assert.equal(typeof deepseekModels[0].cost.cacheRead,'number');
+ assert.equal(typeof deepseekModels[0].cost.cacheWrite,'number');
+
+ const urls:string[]=[];
+ const fallbackResult=await discoverModels({provider:'custom',baseUrl:'https://mix.example',apiKey:'k'},async(url:any)=>{
+  urls.push(String(url));
+  if(String(url).endsWith('/v1/models'))return new Response(JSON.stringify({data:[{id:'claude-mix'}]}),{status:200});
+  return new Response('nope',{status:404});
+ });
+ assert.equal(fallbackResult.api,'anthropic-messages');
+ assert.deepEqual(fallbackResult.models.map(m=>m.id),['claude-mix']);
+ assert.equal(urls.length,2);
+
+ await assert.rejects(()=>discoverModels({provider:'custom',baseUrl:'https://fail.example',apiKey:'k'},async()=>new Response('err',{status:502})),/OpenAI 兼容接口.*Anthropic 兼容接口/);
+
+ const t=setup({discover:async()=>({models:[{id:'m-1',known:false},{id:'m-2',known:false}],total:2,api:'anthropic-messages'})});
+ try{
+  // 无 api 添加自定义服务商，默认协议落在模型上
+  let lib=await t.service.add({provider:'custom',name:'混合中转',baseUrl:'https://mix.example',apiKey:KEY,revision:t.service.read().revision});
+  const key=lib.providers[0].key;
+  assert.equal(lib.providers[0].models[0].api,'anthropic-messages');
+  // PUT /api/model/library/:key 忽略传入的 api
+  lib=await t.service.update(key,{name:'混合中转2',api:'openai-responses',revision:lib.revision});
+  assert.equal(lib.providers[0].name,'混合中转2');
+  // PUT /api/model/library/:key/models/:id 修改模型协议清空 lastTest
+  lib=await t.service.updateModel(key,'m-1',{revision:lib.revision,api:'anthropic-messages',custom:{contextWindow:128000,reasoning:false}});
+  const tested=await t.service.test(key,'m-1',lib.revision);
+  assert.equal(tested.library.providers[0].models.find(m=>m.id==='m-1')?.lastTest?.ok,true);
+  lib=await t.service.updateModel(key,'m-1',{revision:tested.library.revision,api:'openai-completions',custom:{contextWindow:128000,reasoning:false}});
+  assert.equal(lib.providers[0].models.find(m=>m.id==='m-1')?.api,'openai-completions');
+  assert.equal(lib.providers[0].models.find(m=>m.id==='m-1')?.lastTest,undefined);
+
+  // 星标去重、过滤未知 ID、保持顺序
+  const starsRes=await t.app.inject({method:'PUT',url:`/api/model/library/${key}/stars`,payload:{revision:lib.revision,ids:['m-2','unknown-id','m-1','m-2']}});
+  assert.equal(starsRes.statusCode,200,starsRes.body);
+  assert.deepEqual(starsRes.json().providers[0].starred,['m-2','m-1']);
+
+  // 启用 m-1 后不能删除 m-1，可删除 m-2 并自动清理 starred
+  const actRes=await t.service.activate({key,modelId:'m-1',revision:starsRes.json().revision,confirmUntested:true});
+  const delActive=await t.app.inject({method:'DELETE',url:`/api/model/library/${key}/models/m-1`,payload:{revision:actRes.revision}});
+  assert.equal(delActive.statusCode,409);
+  const delOther=await t.app.inject({method:'DELETE',url:`/api/model/library/${key}/models/m-2`,payload:{revision:actRes.revision}});
+  assert.equal(delOther.statusCode,200,delOther.body);
+  assert.deepEqual(delOther.json().providers[0].starred,['m-1']);
+  assert.equal(delOther.json().providers[0].models.some((m:any)=>m.id==='m-2'),false);
+
+  // 30 天内 llm_calls 聚合出 lastUsedAt
+  const view=await t.service.view();
+  assert.equal(typeof view.providers[0].models.find(m=>m.id==='m-1')?.lastUsedAt,'number');
+ }finally{await t.close();}
+});

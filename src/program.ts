@@ -38,8 +38,9 @@ export function registerProgramRoutes(app:FastifyInstance,deps:{store:Store;prog
   return {control:workflow.control(),busy:workflow.busy,stage:stages.find(x=>x.status==='running')??{name:Object.values(cooldown).some(v=>v>Date.now())?'cooldown':'waiting',status:workflow.control(),startedAt:Number(store.get('lastTick','0'))||Date.now(),durationMs:0},stages,queue:{items,counts:store.db.prepare('SELECT channel,status,count(*) AS count FROM messages WHERE account_id=? GROUP BY channel,status').all(accountId)},lastTick:Number(store.get('lastTick','0')),nextTick:workflow.nextTick,cooldown,settings:c,replyHours,revision:readPanelSettings().revisions?.program??0,limits:{public:{used:workflow.sentCount('public'),limit:c.publicPerHour},private:{used:workflow.sentCount('private'),limit:c.privatePerHour}}};
  });
  app.put('/api/program/settings',async(req:any,reply)=>{
-  const b=req.body??{},value=b.settings;
-  if(!value||typeof value!=='object'||Array.isArray(value))return reply.code(400).send({error:'运行设置无效'});
+  const b=req.body??{},rawValue=b.settings;
+  if(!rawValue||typeof rawValue!=='object'||Array.isArray(rawValue))return reply.code(400).send({error:'运行设置无效'});
+  const {normalMaxAgeHours:_ignoredNormalAge,...value}=rawValue;
   const allowed=['mode','maxAgeHours','maxPerRound','publicPerHour','privatePerHour','publicPerDay','privatePerDay','replyHours'];
   if(Object.keys(value).some(k=>!allowed.includes(k)))return reply.code(400).send({error:'运行设置包含不支持字段；轮询间隔请到定时任务页设置'});
   if(value.mode!==undefined&&!['draft','auto'].includes(value.mode))return reply.code(400).send({error:'运行模式无效'});

@@ -1,11 +1,12 @@
 // 公开采集的就绪契约。只读页面，始终受调用者的同一采集截止时间约束。
 import type {Page} from 'playwright-core';
 import type {Event} from './types.js';
+import {PublicRelations,repliesToPost,relevantPublicMessage,hasPublicRelation} from './public-relations.js';
 
 export const PUBLIC_COLLECTION_CODES=[
  'public-ready','public-confirmed-empty','public-budget-exhausted','public-page-timeout',
  'public-page-error','public-target-unavailable','public-target-missing','public-wrong-location',
- 'public-parser-unready','public-profile-unready','public-navigation-failed','public-pin-unrecognized',
+ 'public-parser-unready','public-profile-unready','public-navigation-failed','public-pin-unrecognized','public-relation-unverified',
 ] as const;
 export type PublicCollectionCode=typeof PUBLIC_COLLECTION_CODES[number];
 export type PublicSource='mentions'|'search'|'own-post-replies';
@@ -20,6 +21,7 @@ export type PublicReadinessInput={
  pendingRequests?:()=>number;
  failedRequests?:()=>number;
  readPinStates?:(page:Page)=>Promise<PublicPinState[]>;
+ relations?:PublicRelations;
  intervalMs?:number;stableMs?:number;minimumObserveMs?:number;pageTimeoutMs?:number;
 };
 
@@ -71,14 +73,20 @@ function reliable(event:Event,allowUnknownTime=false):boolean{
 function finite(value:number|undefined,fallback:number,min:number,max:number){return typeof value==='number'&&Number.isFinite(value)?Math.max(min,Math.min(max,value)):fallback;}
 
 /** 只旁观页面自己发起的原生读取；不读取认证头、不构造或重放平台接口。 */
-export function observeNativeReads(page:Page):{count:()=>number;failures:()=>number;reset:()=>void;dispose:()=>void}{
- const requests=new Set<unknown>();let failures=0;if(typeof page.on!=='function'||typeof page.off!=='function')return {count:()=>0,failures:()=>0,reset:()=>{},dispose:()=>{}};
+export function observeNativeReads(page:Page,relations=new PublicRelations()){
+ const requests=new Set<unknown>(),parsing=new Set<object>();let failures=0,generation=0,responses=0;
  const started=(request:any)=>{try{const url=new URL(request.url());if(url.origin==='https://x.com'&&/^\/i\/api\/(?:graphql\/|2\/)/.test(url.pathname)&&['fetch','xhr'].includes(request.resourceType()))requests.add(request);}catch{}};
  const finished=(request:unknown)=>requests.delete(request);
  const failed=(request:unknown)=>{if(requests.delete(request))failures++;};
- const response=(value:any)=>{try{if(requests.has(value.request())&&value.status()>=400)failures++;}catch{}};
- page.on('request',started);page.on('requestfinished',finished);page.on('requestfailed',failed);page.on('response',response);
- return {count:()=>requests.size,failures:()=>failures,reset:()=>{requests.clear();failures=0;},dispose:()=>{page.off('request',started);page.off('requestfinished',finished);page.off('requestfailed',failed);page.off('response',response);}};
+ const response=(value:any)=>{try{
+  if(!requests.has(value.request()))return;if(value.status()>=400){failures++;return;}if(responses++>=80)return;
+  const token={},observedGeneration=generation;parsing.add(token);
+  void Promise.resolve().then(()=>value.json()).then(data=>{if(observedGeneration===generation)relations.observe(data);}).catch(()=>{}).finally(()=>parsing.delete(token));
+ }catch{}};
+ const enabled=typeof page.on==='function'&&typeof page.off==='function';
+ if(enabled){page.on('request',started);page.on('requestfinished',finished);page.on('requestfailed',failed);page.on('response',response);}
+ const reset=()=>{generation++;requests.clear();parsing.clear();relations.clear();failures=0;responses=0;};
+ return {relations,count:()=>requests.size+parsing.size,failures:()=>failures,reset,dispose:()=>{reset();if(enabled){page.off('request',started);page.off('requestfinished',finished);page.off('requestfailed',failed);page.off('response',response);}}};
 }
 
 /**
@@ -111,7 +119,7 @@ export async function waitForPublicTimeline(input:PublicReadinessInput,expected:
   }else{lastError='';errorSince=at;}
   if(here&&last.mainPresent&&!last.loading&&!networkPending&&!last.error&&stableNow){
    if(expected.kind==='thread'){
-    const target=valid.find(event=>event.platformId===expected.targetId),foreign=valid.some(event=>event.platformId!==expected.targetId&&event.handle.toLowerCase()!==input.handle.toLowerCase());
+    const target=valid.find(event=>event.platformId===expected.targetId),foreign=target&&valid.some(event=>event.handle.toLowerCase()!==input.handle.toLowerCase()&&repliesToPost(event,target,valid));
     if(target&&foreign)return result('ready','public-ready');
     if(target&&last.empty==='replies')return result('empty','public-confirmed-empty');
    }else{
@@ -134,10 +142,10 @@ export type ReadyPublicCollectionInput=PublicReadinessInput&{source:number;navig
 const warning=(code:PublicCollectionCode)=>`公开采集未完成（${code}）`;
 /** 三种来源继续由外层轮换；自己的两条可读帖子逐条等待评论列表，单条失败不吞掉其他已读来源。 */
 export async function collectReadyPublic(input:ReadyPublicCollectionInput):Promise<{events:Event[];warnings:string[];diagnostics:PublicCollectionDiagnostic[]}>{
- const native=observeNativeReads(input.page),readiness={...input,pendingRequests:()=>native.count()+(input.pendingRequests?.()??0),failedRequests:()=>native.failures()+(input.failedRequests?.()??0)};
+ const native=observeNativeReads(input.page,input.relations),readiness={...input,readTweets:async(page:Page)=>native.relations.enrich(await input.readTweets(page)),pendingRequests:()=>native.count()+(input.pendingRequests?.()??0),failedRequests:()=>native.failures()+(input.failedRequests?.()??0)};
  try{
  const now=input.now??Date.now,source:PublicSource=input.source===0?'mentions':input.source===1?'search':'own-post-replies',events:Event[]=[],warnings:string[]=[],codes:PublicCollectionCode[]=[];
- let readyPages=0,failedPages=0,emptyPages=0,threadPages=0,emptyThreads=0,initialEmpty=false,pinUnknown=false;
+ let readyPages=0,failedPages=0,emptyPages=0,threadPages=0,emptyThreads=0,initialEmpty=false,pinUnknown=false,relationUnknown=false;
  const consume=(page:ReadyPublicPage)=>{codes.push(page.code);if(page.state==='ready'||page.state==='empty'){readyPages++;if(page.state==='empty')emptyPages++;}else if(page.code!=='public-budget-exhausted')failedPages++;if(page.state==='partial'||page.state==='failed')warnings.push(warning(page.code));};
  const navigate=async(url:string)=>{
   if(now()>=input.deadline){codes.push('public-budget-exhausted');warnings.push(warning('public-budget-exhausted'));return false;}
@@ -153,14 +161,24 @@ export async function collectReadyPublic(input:ReadyPublicCollectionInput):Promi
     if(!await navigate(post.url)){if(now()>=input.deadline)break;continue;}
     threadPages++;const thread=await waitForPublicTimeline(readiness,{url:post.url,kind:'thread',targetId:post.platformId});consume(thread);if(thread.state==='empty')emptyThreads++;
     // 没有看见自己目标帖的页面可能仍显示前一页，不能把推荐或旧页面当成回复来源。
-    if(thread.targetSeen)events.push(...thread.events.filter(event=>event.handle.toLowerCase()!==input.handle.toLowerCase()));
+    if(thread.targetSeen){
+     const target=thread.events.find(event=>event.platformId===post.platformId)!;
+     const foreign=thread.events.filter(event=>event.handle.toLowerCase()!==input.handle.toLowerCase());
+     if(foreign.some(event=>!hasPublicRelation(event)))relationUnknown=true;
+     events.push(...foreign.filter(event=>repliesToPost(event,target,thread.events)));
+    }
     if(now()>=input.deadline)break;
    }
-  }else events.push(...initial.events.filter(event=>event.handle.toLowerCase()!==input.handle.toLowerCase()));
+  }else {
+   const foreign=initial.events.filter(event=>event.handle.toLowerCase()!==input.handle.toLowerCase());
+   if(foreign.some(event=>!hasPublicRelation(event)&&!relevantPublicMessage(event,input.handle,initial.events)))relationUnknown=true;
+   events.push(...foreign.filter(event=>relevantPublicMessage(event,input.handle,initial.events)));
+  }
  }
  const deduped=[...new Map(events.map(event=>[event.channel+':'+event.platformId,{...event,accountId:input.handle.toLowerCase()}])).values()];
- const budget=codes.includes('public-budget-exhausted'),failed=failedPages>0,status:PublicCollectionDiagnostic['status']=failed?(deduped.length?'partial':'failed'):budget||pinUnknown?'partial':initialEmpty||threadPages>0&&threadPages===emptyThreads?'empty':'ok';
- const code:PublicCollectionCode=failed?(codes.find(value=>!['public-ready','public-confirmed-empty','public-budget-exhausted','public-pin-unrecognized'].includes(value))??'public-parser-unready'):budget?'public-budget-exhausted':pinUnknown?'public-pin-unrecognized':status==='empty'?'public-confirmed-empty':'public-ready';
+ if(relationUnknown){codes.push('public-relation-unverified');warnings.push(warning('public-relation-unverified'));}
+ const budget=codes.includes('public-budget-exhausted'),failed=failedPages>0,status:PublicCollectionDiagnostic['status']=failed?(deduped.length?'partial':'failed'):budget||pinUnknown||relationUnknown?'partial':initialEmpty||threadPages>0&&threadPages===emptyThreads?'empty':'ok';
+ const code:PublicCollectionCode=failed?(codes.find(value=>!['public-ready','public-confirmed-empty','public-budget-exhausted','public-pin-unrecognized'].includes(value))??'public-parser-unready'):budget?'public-budget-exhausted':relationUnknown?'public-relation-unverified':pinUnknown?'public-pin-unrecognized':status==='empty'?'public-confirmed-empty':'public-ready';
  return {events:deduped,warnings:[...new Set(warnings)],diagnostics:[{channel:'public',source,status,code,eventCount:deduped.length,readyPages,failedPages,emptyPages}]};
  }finally{native.dispose();}
 }

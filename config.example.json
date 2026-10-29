@@ -1,7 +1,7 @@
 {
   "mode": "draft",
   "pollSeconds": 60,
-  "maxAgeHours": 6,
+  "maxAgeHours": 3,
   "maxPerRound": 2,
   "publicPerHour": 10,
   "privatePerHour": 30,

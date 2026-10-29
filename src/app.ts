@@ -32,7 +32,7 @@ import { registerHealthRoutes } from './health-routes.js';
 import { ReplayRunner } from './persona-replay.js';
 import { registerReplayRoutes } from './replay-routes.js';
 import { registerPromptHintsRoutes } from './reply-hints-routes.js';
-import { readPanelSettings,mergePanelSettings } from './settings.js';
+import { readPanelSettings,mergePanelSettings,commitTriageSettings,upgradeMessageAgeSettings } from './settings.js';
 import {ManualImportsService} from './manual-imports.js';
 import {registerManualImportRoutes} from './manual-import-routes.js';
 import {RoleExperienceService} from './role-experiences.js';
@@ -45,6 +45,7 @@ export async function startApp(){
  const app=Fastify({logger:false,bodyLimit:16384});const data=process.env.DATA_DIR||'/data';mkdirSync(data,{recursive:true});
  const store=new Store(data+'/workflow.sqlite');store.boot();
  upgradeSavedPersonas(store);
+ upgradeMessageAgeSettings(store);
  const ingress=readSecret('ingress_key');if(!ingress)throw new Error('缺少入口凭据');
  const transport=new BrowserTransport(process.env.BROWSER_ENDPOINT||'http://browser:3001',readSecret('browser_key'),()=>loadConfig().health??{});
  const generator=new PiGenerator(store),workflow=new Workflow(store,transport,generator);
@@ -107,7 +108,7 @@ export async function startApp(){
  registerTaskRoutes(app,{scheduler,workflow});
  registerFeedRoutes(app,{feed,wake:()=>workflow.wake()});
  registerPostingRoutes(app,{capabilities:posting,control:()=>workflow.control(),busy:()=>workflow.busy,refresh:()=>transport.capabilities(),operation:fn=>workflow.taskOperation('manual',fn)});
- registerTriageRoutes(app,{triage,accountId,publicPerDay:()=>loadConfig().publicPerDay??180,privatePerDay:()=>loadConfig().privatePerDay??400,maxAgeHours:()=>loadConfig().maxAgeHours,settings:()=>({settings:normalizeTriageSettings(readPanelSettings().triage,loadConfig().maxAgeHours),revision:readPanelSettings().revisions?.triage??0}),saveSettings:(settings,revision)=>{const saved=mergePanelSettings('triage',settings,revision);return {settings,revision:saved.revision};},wake:()=>workflow.wake()});
+ registerTriageRoutes(app,{triage,accountId,publicPerDay:()=>loadConfig().publicPerDay??180,privatePerDay:()=>loadConfig().privatePerDay??400,maxAgeHours:()=>loadConfig().maxAgeHours,settings:()=>{const p=readPanelSettings(),maxAgeHours=loadConfig().maxAgeHours;return {settings:normalizeTriageSettings(p.triage,maxAgeHours),maxAgeHours,revision:p.revisions?.triage??0,programRevision:p.revisions?.program??0};},saveSettings:(settings,revision,maxAgeHours,programRevision)=>{const saved=commitTriageSettings(settings,{maxAgeHours,expectedRevision:revision,expectedProgramRevision:programRevision});return {settings,maxAgeHours:loadConfig().maxAgeHours,revision:saved.revision,programRevision:saved.programRevision};},wake:()=>workflow.wake()});
  registerHealthRoutes(app,{health,accountId});
  registerReplayRoutes(app,{store,replay});
  registerPromptHintsRoutes(app,{store});

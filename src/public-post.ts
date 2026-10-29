@@ -50,5 +50,5 @@ export async function readPublicPosts(page:Page):Promise<Event[]> {
   }
   return [{id:'x:'+match[2],platformId:match[2],targetId:match[2],channel:'public' as const,userId:'x:'+match[1].toLowerCase(),handle:match[1],text,url:'https://x.com/'+match[1]+'/status/'+match[2],conversationId:match[2],timestamp:reliable?parsed:0,timestampReliable:reliable,mediaUnavailable:Array.from(article.querySelectorAll('[data-testid="tweetPhoto"],video')).some(owned),...(quoteData?{quote:quoteData}:{}),...(cardData?{card:cardData}:{})}];
  }));
- return rows.map(row=>({...row,...validatePublicExtras(row)}));
+ return rows.map(row=>({...row,conversationIdReliable:false,...validatePublicExtras(row)}));
 }

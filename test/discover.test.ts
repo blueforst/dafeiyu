@@ -91,3 +91,35 @@ test('非 2xx 响应只报状态码，不回显响应正文和 Key', async () =>
     );
   });
 });
+
+test('自定义服务商未指定协议时：优先尝试 OpenAI 兼容，失败再尝试 Anthropic 兼容，全失败同时说明两种原因', async () => {
+  const seen: Seen[] = [];
+  const server = createServer((req, res) => {
+    seen.push({ url: req.url ?? '', headers: req.headers });
+    if (req.headers['x-api-key'] === 'k1') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ data: [{ id: 'claude-3-7-sonnet' }] }));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('not openai');
+    }
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  try {
+    const base = 'http://127.0.0.1:' + (server.address() as any).port;
+    const r = await discoverModels({ provider: 'custom', baseUrl: base, apiKey: 'k1' });
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0].headers.authorization, 'Bearer k1');
+    assert.equal(seen[1].headers['x-api-key'], 'k1');
+    assert.equal(r.api, 'anthropic-messages');
+    assert.deepEqual(r.models.map(m => m.id), ['claude-3-7-sonnet']);
+  } finally {
+    await new Promise<void>(r => server.close(() => r()));
+  }
+  await mock(403, 'forbidden k1', async base => {
+    await assert.rejects(
+      discoverModels({ provider: 'custom', baseUrl: base, apiKey: 'k1' }),
+      (e: Error) => /OpenAI 兼容接口（HTTP 403）；Anthropic 兼容接口（HTTP 403）/.test(e.message) && !e.message.includes('k1'),
+    );
+  });
+});

@@ -7,11 +7,11 @@ import {effectiveAge,effectiveAgeSql,type ReplyAgeSource} from './reply-hours.js
 
 export type TriageTier='priority'|'normal'|'skip'|'filtered';
 export type SkipCategory='harassment'|'spam'|'no_reply'|'other';
-export type TriageSettings={normalMaxAgeHours:number;batchThreshold:number;advertisingKeywords:string[];greetings:string[];priorityPublicHandles:string[];priorityPrivateConversations:string[]};
+export type TriageSettings={batchThreshold:number;advertisingKeywords:string[];greetings:string[];priorityPublicHandles:string[];priorityPrivateConversations:string[]};
 export type TriageHistory={totalCount:number;processedCount:number;recentOtherConversation:boolean;batchCount?:number};
 export type TriageResult={tier:TriageTier;reason:string};
 export type TriageAgeOptions={ignoreAge?:boolean};
-export const DEFAULT_TRIAGE_SETTINGS:TriageSettings={normalMaxAgeHours:3,batchThreshold:3,advertisingKeywords:['返利','代理','空投','airdrop','giveaway','加v','互关涨粉'],greetings:['hi','hello','hey','在吗','在么','你好','嗨','哈喽','早','早安','晚上好','晚安'],priorityPublicHandles:[],priorityPrivateConversations:[]};
+export const DEFAULT_TRIAGE_SETTINGS:TriageSettings={batchThreshold:3,advertisingKeywords:['返利','代理','空投','airdrop','giveaway','加v','互关涨粉'],greetings:['hi','hello','hey','在吗','在么','你好','嗨','哈喽','早','早安','晚上好','晚安'],priorityPublicHandles:[],priorityPrivateConversations:[]};
 export const TRIAGE_MIGRATION=`
  ALTER TABLE messages ADD COLUMN tier TEXT;
  ALTER TABLE messages ADD COLUMN tier_reason TEXT;
@@ -30,10 +30,10 @@ const normalized=(text:string)=>stripMentions(text).replace(links,'').replace(/[
 export function normalizeBatchText(text:string):string{return normalized(text);}
 export function batchHash(text:string):string|null{const value=normalizeBatchText(text);return [...value].length<6?null:createHash('sha256').update(value).digest('hex').slice(0,32);}
 export function normalizeSkipCategory(value:unknown):SkipCategory{return ['harassment','spam','no_reply','other'].includes(String(value))?value as SkipCategory:'other';}
-export function normalizeTriageSettings(raw:Partial<TriageSettings>={},maxAgeHours=6):TriageSettings{
- const number=(key:'normalMaxAgeHours'|'batchThreshold',fallback:number,min:number,max:number)=>{const value=raw[key]??fallback;if(!Number.isInteger(value)||value<min||value>max)throw new Error('分级设置范围无效：'+key);return value;};
+export function normalizeTriageSettings(raw:Partial<TriageSettings>&Record<string,unknown>={},_maxAgeHours=3):TriageSettings{
+ const number=(key:'batchThreshold',fallback:number,min:number,max:number)=>{const value=raw[key]??fallback;if(!Number.isInteger(value)||(value as number)<min||(value as number)>max)throw new Error('分级设置范围无效：'+key);return value as number;};
  const list=(key:'advertisingKeywords'|'greetings'|'priorityPublicHandles'|'priorityPrivateConversations')=>{const value=raw[key]??DEFAULT_TRIAGE_SETTINGS[key];if(!Array.isArray(value)||value.length>500||value.some(v=>typeof v!=='string'||!v.trim()||v.length>200))throw new Error('分级词表无效：'+key);return [...new Set(value.map(v=>key==='priorityPublicHandles'?v.trim().replace(/^@/,'').toLowerCase():key==='priorityPrivateConversations'?v.trim():v.normalize('NFKC').trim().toLowerCase()))];};
- const result={normalMaxAgeHours:number('normalMaxAgeHours',Math.min(3,maxAgeHours),1,maxAgeHours),batchThreshold:number('batchThreshold',3,2,20),advertisingKeywords:list('advertisingKeywords'),greetings:list('greetings'),priorityPublicHandles:list('priorityPublicHandles'),priorityPrivateConversations:list('priorityPrivateConversations')};
+ const result={batchThreshold:number('batchThreshold',3,2,20),advertisingKeywords:list('advertisingKeywords'),greetings:list('greetings'),priorityPublicHandles:list('priorityPublicHandles'),priorityPrivateConversations:list('priorityPrivateConversations')};
  if(result.priorityPublicHandles.some(v=>!/^\w{1,15}$/.test(v)))throw new Error('重点公开账号 handle 无效');return result;
 }
 export function classify(event:Event,history:TriageHistory,settings:TriageSettings=DEFAULT_TRIAGE_SETTINGS):TriageResult{
@@ -86,7 +86,7 @@ export class ReplyTriage{
   this.store.db.prepare('INSERT OR IGNORE INTO triage_text_hits(account_id,hash,user_id,at,message_id) VALUES(?,?,?,?,?)').run(accountId,hash,event.userId,observedAt,event.id);
   const count=Number((this.store.db.prepare('SELECT count(DISTINCT h.user_id) n FROM triage_text_hits h JOIN messages m ON m.id=h.message_id AND m.account_id=h.account_id WHERE h.account_id=? AND h.hash=? AND h.at>=? AND m.channel=?').get(accountId,hash,this.now()-hour,event.channel) as any).n);return {hash,count};
  }
- private apply(row:any,maxAgeHours=6){
+ private apply(row:any,maxAgeHours=3){
   row=this.store.getMessage(row.id,row.account_id);if(!row||row.status!=='queued')return;
   const event=parseEvent(row),accountId=row.account_id;
   if(this.store.get(this.manualKey(row.id))==='1'||isReview(row)){
@@ -107,11 +107,11 @@ export class ReplyTriage{
    }
   }
  }
- ingest(event:Event,accountId=event.accountId??'',maxAgeHours=6):boolean{
+ ingest(event:Event,accountId=event.accountId??'',maxAgeHours=3):boolean{
   return this.transaction(()=>{if(!this.store.ingest(event,accountId))return false;const id=accountId?eventIdentity(accountId,event.channel,event.platformId||event.id):event.id;this.apply(this.store.getMessage(id,accountId),maxAgeHours);return true;});
  }
  /** 管理员补录与普通采集共用身份、遗忘和去重；优先标记与入库原子提交。 */
- ingestManual(event:Event,accountId=event.accountId??'',maxAgeHours=6):boolean{
+ ingestManual(event:Event,accountId=event.accountId??'',maxAgeHours=3):boolean{
   return this.transaction(()=>{
    if(event.channel!=='public'||!event.platformId||!/^\d+$/.test(event.platformId)||event.timestampReliable!==true||!Number.isFinite(event.timestamp)||event.timestamp<=0||event.timestamp>this.now()+60000||this.now()-event.timestamp>maxAgeHours*hour)return false;
    if(!this.store.ingest(event,accountId))return false;
@@ -121,28 +121,28 @@ export class ReplyTriage{
    return true;
   });
  }
- refreshQueued(accountId:string,maxAgeHours=6,_options:TriageAgeOptions={}){
+ refreshQueued(accountId:string,maxAgeHours=3,_options:TriageAgeOptions={}){
   // 先注册全部滑动窗口命中，再统一分类；旧库首轮与名单变动均可重新计算。
   this.transaction(()=>{const rows=this.store.db.prepare("SELECT * FROM messages WHERE status='queued' AND account_id=? ORDER BY created_at,id").all(accountId) as any[];for(const row of rows)this.hit(parseEvent(row),accountId,Math.min(this.now(),row.created_at));for(const row of rows)this.apply(row,maxAgeHours);});
  }
  private forgottenScopeSQL(){return "NOT EXISTS(SELECT 1 FROM account_users au WHERE au.account_id=m.account_id AND au.id=m.user_id AND au.forgot=1) AND (NOT EXISTS(SELECT 1 FROM users u WHERE u.id=m.user_id AND u.forgot=1) OR EXISTS(SELECT 1 FROM account_users au WHERE au.account_id=m.account_id AND au.id=m.user_id AND au.epoch>0 AND au.forgot=0))";}
- queuedEligibility(maxAgeHours:number,options:TriageAgeOptions={},at=this.now()){
-  const now=at,settings=normalizeTriageSettings(this.settings(),maxAgeHours),age=this.ageSql('m.created_at',now);
-  return {sql:"m.created_at>0 AND "+(options.ignoreAge?'':age.sql+"<=(CASE m.tier WHEN 'priority' THEN ? ELSE ? END) AND ")+"NOT EXISTS(SELECT 1 FROM triage_ignores i WHERE i.account_id=m.account_id AND i.user_id=m.user_id AND i.channel=m.channel AND i.until>? AND NOT EXISTS(SELECT 1 FROM runtime r WHERE r.key='triage:manual:'||m.id AND r.value='1') AND NOT (CASE WHEN json_valid(m.draft) THEN COALESCE(json_extract(m.draft,'$.review'),0) ELSE 0 END)) AND "+this.forgottenScopeSQL(),params:[...(options.ignoreAge?[]:[...age.params,maxAgeHours*hour,settings.normalMaxAgeHours*hour]),now]};
+ queuedEligibility(maxAgeHours=3,options:TriageAgeOptions={},at=this.now()){
+  const now=at,age=this.ageSql('m.created_at',now);
+  return {sql:"m.created_at>0 AND "+(options.ignoreAge?'':age.sql+"<=? AND ")+"NOT EXISTS(SELECT 1 FROM triage_ignores i WHERE i.account_id=m.account_id AND i.user_id=m.user_id AND i.channel=m.channel AND i.until>? AND NOT EXISTS(SELECT 1 FROM runtime r WHERE r.key='triage:manual:'||m.id AND r.value='1') AND NOT (CASE WHEN json_valid(m.draft) THEN COALESCE(json_extract(m.draft,'$.review'),0) ELSE 0 END)) AND "+this.forgottenScopeSQL(),params:[...(options.ignoreAge?[]:[...age.params,maxAgeHours*hour]),now]};
  }
  /** 健康观察只读相同可处理范围；不清理过期行、不重分级、不触发模型。 */
- healthQueue(accountId:string,maxAgeHours=6,options:TriageAgeOptions={}):Partial<Record<Channel,{count:number;oldestAt:number|null}>>{
+ healthQueue(accountId:string,maxAgeHours=3,options:TriageAgeOptions={}):Partial<Record<Channel,{count:number;oldestAt:number|null}>>{
   const eligible=this.queuedEligibility(maxAgeHours,options),age=this.ageSql();
   const rows=this.store.db.prepare("SELECT m.channel,COUNT(*) AS count,MIN(m.created_at) AS oldestAt FROM messages m WHERE m.account_id=? AND ((m.status='queued' AND "+eligible.sql+") OR (m.status='approved' AND m.created_at>0 AND "+(options.ignoreAge?'':age.sql+'<=? AND ')+this.forgottenScopeSQL()+")) GROUP BY m.channel").all(accountId,...eligible.params,...(options.ignoreAge?[]:[...age.params,maxAgeHours*hour])) as Array<{channel:Channel;count:number;oldestAt:number|null}>;
   const result:Partial<Record<Channel,{count:number;oldestAt:number|null}>>={};for(const row of rows)if(row.channel==='public'||row.channel==='private')result[row.channel]={count:row.count,oldestAt:row.oldestAt};return result;
  }
- pending(limit:number,accountId:string,channels:Channel[],maxAgeHours=6,options:TriageAgeOptions={}):any[]{
+ pending(limit:number,accountId:string,channels:Channel[],maxAgeHours=3,options:TriageAgeOptions={}):any[]{
   const selected=[...new Set(channels.filter(c=>c==='public'||c==='private'))];if(!selected.length||!Number.isFinite(limit)||limit<1)return [];
-  const settings=normalizeTriageSettings(this.settings(),maxAgeHours),cap=Math.min(100,Math.floor(limit)),now=this.now();
+  const cap=Math.min(100,Math.floor(limit)),now=this.now();
   const base="FROM messages m WHERE m.status='queued' AND m.account_id=? AND m.channel IN ("+selected.map(()=>'?').join(',')+")";
-  const age=this.ageSql('m.created_at',now),cutoff="(CASE m.tier WHEN 'priority' THEN ? ELSE ? END)",params=[accountId,...selected,...age.params,maxAgeHours*hour,settings.normalMaxAgeHours*hour];
+  const age=this.ageSql('m.created_at',now),params=[accountId,...selected,...age.params,maxAgeHours*hour];
   // 过期清理有界；查询直接排除全部过期条目，避免大量旧优先消息挡住有效普通消息。
-  const expired=options.ignoreAge?[]:this.store.db.prepare('SELECT m.* '+base+' AND (m.created_at<=0 OR '+age.sql+'>'+cutoff+') ORDER BY m.created_at,m.id LIMIT ?').all(...params,cap*9) as any[];
+  const expired=options.ignoreAge?[]:this.store.db.prepare('SELECT m.* '+base+' AND (m.created_at<=0 OR '+age.sql+'>?) ORDER BY m.created_at,m.id LIMIT ?').all(...params,cap*9) as any[];
   for(const row of expired)this.terminal(row,'skipped',row.tier==='priority'?'优先消息超过处理时效':'普通消息超过处理时效');
   const eligible=this.queuedEligibility(maxAgeHours,options);
   const rows=this.store.db.prepare('SELECT m.* '+base+' AND '+eligible.sql+" ORDER BY CASE WHEN json_valid(m.draft) THEN COALESCE(json_extract(m.draft,'$.review'),0) ELSE 0 END DESC,CASE m.tier WHEN 'priority' THEN 0 ELSE 1 END,m.created_at DESC,m.id DESC LIMIT ?").all(accountId,...selected,...eligible.params,cap) as any[];
@@ -152,9 +152,9 @@ export class ReplyTriage{
  merge(row:any,accountId:string):{row:any;context:Event[]}{
   row=this.store.getMessage(row.id,accountId)??row;
   if(row.channel!=='public'||row.status!=='queued'||isReview(row))return {row,context:[]};
-  const event=parseEvent(row);if(!event.conversationId||event.timestampReliable===false||!Number.isFinite(event.timestamp)||event.timestamp<=0)return {row,context:[]};
+  const event=parseEvent(row);if(!event.conversationId||event.conversationIdReliable===false||event.timestampReliable===false||!Number.isFinite(event.timestamp)||event.timestamp<=0)return {row,context:[]};
   return this.transaction(()=>{
-   const e=parseEvent(row),candidates=(this.store.db.prepare("SELECT * FROM messages WHERE account_id=? AND user_id=? AND channel='public' AND status='queued' AND created_at BETWEEN ? AND ? ORDER BY created_at DESC,id DESC").all(accountId,e.userId,e.timestamp-30*60000,e.timestamp+30*60000) as any[]).filter(r=>{const other=parseEvent(r);return !isReview(r)&&other.conversationId===e.conversationId&&other.timestampReliable!==false&&r.platform_id;});
+   const e=parseEvent(row),candidates=(this.store.db.prepare("SELECT * FROM messages WHERE account_id=? AND user_id=? AND channel='public' AND status='queued' AND created_at BETWEEN ? AND ? ORDER BY created_at DESC,id DESC").all(accountId,e.userId,e.timestamp-30*60000,e.timestamp+30*60000) as any[]).filter(r=>{const other=parseEvent(r);return !isReview(r)&&other.conversationIdReliable!==false&&other.conversationId===e.conversationId&&other.timestampReliable!==false&&r.platform_id;});
    if(!candidates.length)return {row,context:[]};const latest=candidates[0],windowStart=latest.created_at-30*60000,earlier=candidates.filter(r=>r.id!==latest.id&&r.created_at>=windowStart);
    for(const old of earlier)this.terminal(old,'merged','同会话多条消息已合并',{mergedInto:latest.id});
    return {row:latest,context:earlier.reverse().map(parseEvent)};

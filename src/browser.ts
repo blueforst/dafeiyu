@@ -17,6 +17,7 @@ import {BrowserOperationError,safeBrowserDiagnostic,browserOperationReason,type 
 import {SubmissionAttempt,type DiagnosticValidation} from './submission-boundary.js';
 import {waitForPublicTarget,publicConversationContext,inspectPublicPost,type PublicConversationContext} from './public-target.js';
 import {readPublicPosts,validatePublicExtras} from './public-post.js';
+import {relevantPublicMessage} from './public-relations.js';
 import {collectReadyPublic,observeNativeReads} from './public-collection.js';
 import {collectionSources} from './collection-sources.js';
 import {inspectPrivateConversation,collectPrivateWithDiagnostics,type ChatProtection} from './chat-dom.js';
@@ -258,8 +259,9 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
    try{await navigate(publicPage,e.url,deadline);}catch(error){if((error as any)?.restricted)throw error;throw new BrowserOperationError('public-target-timeout','target-navigation');}
    const actor=handle??attempt?.binding.handle;if(actor)try{await check(actor);}catch(error){throw Object.assign(new BrowserOperationError((error as any)?.restricted?'account-restricted':'identity-unavailable','identity'),(error as any)?.restricted?{restricted:(error as any).restricted}:{});}
    attempt?.setStage('target-ready');
-   const reading={page:publicPage,event:e,deadline,pendingRequests:native.count,failedRequests:native.failures},ready=attempt?await waitForPublicTarget(reading):null;
-   const conversation:PublicConversationContext=ready?{messages:ready.context,contextIncomplete:false,omittedEarlier:ready.omittedEarlier}:await publicConversationContext(reading);return JSON.stringify(conversation);
+   const reading={page:publicPage,event:e,deadline,pendingRequests:native.count,failedRequests:native.failures,relations:native.relations},ready=attempt?await waitForPublicTarget(reading):null;
+   if(ready&&actor&&!relevantPublicMessage(ready.target,actor,ready.context))throw new BrowserOperationError('public-target-unrelated','target-validate');
+   const conversation:PublicConversationContext=ready?{messages:ready.context,contextIncomplete:ready.contextIncomplete,omittedEarlier:ready.omittedEarlier}:await publicConversationContext(reading);return JSON.stringify(conversation);
    }finally{native.dispose();}
   }
   const p=await getDM();await navigate(p,e.url);return JSON.stringify((await readDM(p,e.conversationId)).all);

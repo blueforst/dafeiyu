@@ -36,6 +36,7 @@ export class Workflow {
  busy=false;abort?:AbortController;lastTick=0;nextTick=0;timer?:ReturnType<typeof setTimeout>;services:Services={};
  private startedAt=0;private watchdogTimer?:ReturnType<typeof setInterval>;private wakeRequested=false;
  private activeHandle='';private stopped=false;private schedulerActive=false;private roundCalls=new Set<string>();private roundId='';
+ private controlRevision=0;private browserControlTail:Promise<unknown>=Promise.resolve();
  constructor(public store:Store,public transport:Transport,public generator:Generator,public config:()=>Config=loadConfig){}
  accountId(){return this.activeHandle||this.store.get('activeAccount');}
  /** 只读任务计划与实例；不运行任务，也不访问浏览器。 */
@@ -59,22 +60,29 @@ export class Workflow {
  }
  wake(){if(this.control()!=='running'||this.stopped)return;if(this.busy){this.wakeRequested=true;return;}clearTimeout(this.timer);this.timer=undefined;this.nextTick=0;this.start();}
  configSafeInterval(){try{return this.config().pollSeconds*1000;}catch{return 60000;}}
- stop(){this.stopped=true;clearInterval(this.watchdogTimer);this.watchdogTimer=undefined;clearTimeout(this.timer);this.timer=undefined;this.services.scheduler?.cancelBusiness();this.abort?.abort();}
+ stop(){this.controlRevision++;this.stopped=true;clearInterval(this.watchdogTimer);this.watchdogTimer=undefined;clearTimeout(this.timer);this.timer=undefined;this.services.scheduler?.cancelBusiness();this.abort?.abort();}
  async waitIdle(){const until=Date.now()+100000;while(this.busy||this.services.scheduler?.busy){if(Date.now()>until)throw new Error('当前操作尚未结束，继续保持暂停');await new Promise(r=>setTimeout(r,100));}}
+ private assertControl(revision:number){if(revision!==this.controlRevision)throw new Error('控制请求已被较新的操作替代');}
+ /** 只串行实际控制RPC；不能持锁等待工作轮次，否则轮次内的安全暂停会死锁。 */
+ private browserControl(mode:'paused'|'manual'|'auto',revision:number){
+  const operation=this.browserControlTail.then(async()=>{this.assertControl(revision);await this.transport.control(mode);this.assertControl(revision);});
+  this.browserControlTail=operation.catch(()=>{});return operation;
+ }
  private async drain(target:'paused'|'manual'){
+  const revision=++this.controlRevision;
   this.store.set('control','draining');this.services.scheduler?.cancelBusiness();this.abort?.abort();
-  try{await this.waitIdle();await this.transport.control(target);this.store.set('control',target);this.services.health?.recordControl(target,this.accountId());}
-  catch(e){this.store.set('control','paused');await this.transport.control('paused').catch(()=>{});this.store.log('control-error','控制操作失败，已保持暂停，可重新尝试','error');throw e;}
+  try{await this.waitIdle();this.assertControl(revision);await this.browserControl(target,revision);this.assertControl(revision);this.store.set('control',target);this.services.health?.recordControl(target,this.accountId());}
+  catch(e){if(revision===this.controlRevision){this.store.set('control','paused');await this.browserControl('paused',revision).catch(()=>{});this.store.log('control-error','控制操作失败，已保持暂停，可重新尝试','error');}throw e;}
  }
  async pause(){await this.drain('paused');this.store.log('pause','自动处理已暂停');}
  async takeover(){await this.drain('manual');this.store.log('takeover','已移交人工；自动任务停止');}
- async release(){if(this.control()!=='manual')throw new Error('当前不处于人工接管');try{await this.transport.control('paused');}finally{this.store.set('control','paused');}this.services.posting?.invalidate('人工接管已释放，能力需重新确认');this.services.health?.recordControl('paused',this.accountId());this.store.log('release','人工连接已关闭，等待显式恢复');}
+ async release(){if(this.control()!=='manual')throw new Error('当前不处于人工接管');const revision=++this.controlRevision;try{await this.browserControl('paused',revision);this.assertControl(revision);}finally{if(revision===this.controlRevision)this.store.set('control','paused');}this.services.posting?.invalidate('人工接管已释放，能力需重新确认');this.services.health?.recordControl('paused',this.accountId());this.store.log('release','人工连接已关闭，等待显式恢复');}
  async resume(){
   if(this.control()==='manual')throw new Error('请先释放人工接管');if(this.control()==='draining')throw new Error('正在排空，请稍后重试');
-  await this.waitIdle();const c=this.config(),handle=loggedInHandle(await this.transport.identity());if(!handle)throw new Error('请先登录 X 并完成人工验证');
-  await this.transport.control('auto');this.store.set('watchdogFailure:'+handle,'0');this.activeHandle=handle;this.store.set('activeAccount',handle);this.store.set('control','running');this.services.health?.recordControl('running',handle);this.store.log('resume',JSON.stringify({accountId:handle,mode:c.mode}));
+  const revision=++this.controlRevision;await this.waitIdle();this.assertControl(revision);const c=this.config(),handle=loggedInHandle(await this.transport.identity());this.assertControl(revision);if(!handle)throw new Error('请先登录 X 并完成人工验证');
+  await this.browserControl('auto',revision);this.assertControl(revision);this.store.set('watchdogFailure:'+handle,'0');this.activeHandle=handle;this.store.set('activeAccount',handle);this.store.set('control','running');this.services.health?.recordControl('running',handle);this.store.log('resume',JSON.stringify({accountId:handle,mode:c.mode}));
  }
- async safetyPause(reason:string){this.store.set('control','paused');this.services.posting?.invalidate(reason);this.services.health?.recordControl('paused',this.accountId());await this.transport.control('paused').catch(()=>{});this.store.log('safety-pause',reason,'error');}
+ async safetyPause(reason:string){const revision=++this.controlRevision;this.store.set('control','paused');this.services.posting?.invalidate(reason);this.services.health?.recordControl('paused',this.accountId());await this.browserControl('paused',revision).catch(()=>{});if(revision===this.controlRevision)this.store.log('safety-pause',reason,'error');}
  cooldown(channel:Channel){return Number(this.store.get('cooldown:'+channel+':'+this.accountId(),this.store.get('cooldown:'+channel,'0')));}
  sentCount(channel:Channel){
   const account=this.accountId();if(!this.services.outbox)return this.store.sentCount(channel,account);

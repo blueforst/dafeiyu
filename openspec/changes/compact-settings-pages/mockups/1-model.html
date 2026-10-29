@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>模型页 · 第 3 版</title>
+<style>
+:root{--bg:#fff;--page:#eef0f3;--side:#f9fafb;--hover:rgba(38,49,72,.05);--active:#ebeef2;--t1:#0f1115;--t2:#61666b;--t3:#81858c;--cap:#adb2b8;--b1:rgba(0,0,0,.08);--b2:rgba(0,0,0,.12);--brand:#4176e6;--brand-soft:#e4edfd;--ok:#15803d;--ok-soft:#e6faed;--warn:#aa6416;--warn-soft:#fef5e7;--fill:#f3f4f6;--note:#fff8db;--note-b:#f1d675}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151517;--page:#0c0c0d;--side:#1b1b1c;--hover:rgba(255,255,255,.05);--active:#2c2c2e;--t1:#f9fafb;--t2:#adb2b8;--t3:#81858c;--cap:#61666b;--b1:rgba(255,255,255,.08);--b2:rgba(255,255,255,.16);--brand:#7aaaff;--brand-soft:#28314a;--ok:#4ade80;--ok-soft:#233c2c;--warn:#fbbf24;--warn-soft:#27241f;--fill:#232326;--note:#2d2814;--note-b:#6b5a1c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--t1);font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.intro{max-width:1472px;margin:0 auto;padding:22px 16px 6px}
+.intro h1{font-size:19px;margin:0 0 6px}
+.intro p{margin:0 0 4px;color:var(--t2);font-size:13.5px}
+.intro ul{margin:6px 0 0;padding-left:18px;color:var(--t2);font-size:13.5px}
+.opt{max-width:1472px;margin:18px auto 30px;padding:0 16px}
+.opt-head{display:flex;align-items:center;gap:12px;margin-bottom:10px;cursor:pointer;border-radius:10px;padding:8px 10px;border:2px solid transparent}
+.opt-head:hover{background:var(--bg)}
+.opt-head.selected{border-color:var(--brand);background:var(--brand-soft)}
+.opt-head .letter{width:28px;height:28px;border-radius:50%;background:var(--t1);color:var(--bg);display:grid;place-items:center;font-weight:600}
+.opt-head h2{font-size:16px;margin:0}
+.opt-head p{margin:0;color:var(--t2);font-size:13px}
+.opt-head .pick{margin-left:auto;font-size:12.5px;color:var(--t3)}
+.opt-head.selected .pick{color:var(--brand);font-weight:600}
+/* app frame */
+.fit{position:relative}
+.app{width:1440px;height:868px;transform-origin:0 0;background:var(--bg);border:1px solid var(--b2);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.06)}
+.top{height:56px;flex:none;display:flex;align-items:center;gap:6px;padding:0 20px;border-bottom:1px solid var(--b1)}
+.top .brand{font-weight:600;font-size:15px;margin-right:18px}
+.top .nav{padding:6px 12px;border-radius:8px;color:var(--t2)}
+.top .nav.on{background:var(--active);color:var(--t1);font-weight:600}
+.top .sp{flex:1}
+.pill{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--warn-soft);color:var(--warn)}
+.btn{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--b2);background:var(--bg);color:var(--t1);font:inherit;font-size:13px;white-space:nowrap}
+.btn.dark{background:var(--t1);color:var(--bg);border-color:var(--t1)}
+.btn.ghost{border-color:transparent;color:var(--t2)}
+.btn.sm{height:26px;padding:0 9px;font-size:12.5px}
+.fee{font-size:10.5px;border:1px solid var(--b2);border-radius:4px;padding:0 3px;color:var(--t3);line-height:15px}
+.body{flex:1;display:grid;grid-template-columns:232px minmax(0,1fr);min-height:0}
+.snav{background:var(--side);border-right:1px solid var(--b1);padding:10px 10px;overflow:hidden}
+.snav .h{display:flex;justify-content:space-between;padding:10px 4px 14px;font-weight:600}
+.snav .g{font-size:11.5px;color:var(--t3);padding:12px 12px 6px}
+.snav .i{padding:7px 12px;border-radius:8px;font-size:13.5px}
+.snav .i.on{background:var(--active)}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.mh{height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--b1)}
+.mh b{font-size:14px}.mh small{color:var(--t3);font-size:12.5px}.mh .sp{flex:1}
+.content{flex:1;min-height:0;display:grid;overflow:hidden}
+.pcol{border-right:1px solid var(--b1);padding:14px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.pcol .lab{font-size:11.5px;color:var(--t3);padding:2px 8px 6px;display:flex;align-items:center}
+.pcol .lab span{flex:1}
+.prow{display:flex;align-items:center;gap:8px;padding:8px 8px;border-radius:8px;font-size:13.5px;white-space:nowrap}
+.prow.on{background:var(--active)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.tag{font-size:11px;padding:0 6px;line-height:18px;border-radius:5px;background:var(--brand-soft);color:var(--brand);white-space:nowrap}
+.addp{margin-top:6px;color:var(--t2);font-size:13px;padding:7px 8px;border-radius:8px}
+.mcol{min-width:0;display:flex;flex-direction:column;min-height:0;padding:16px 24px 0}
+.phead{display:flex;align-items:center;gap:10px}
+.phead h3{margin:0;font-size:16px}
+.phead .ok{font-size:12px;color:var(--ok)}
+.kv{display:flex;flex-wrap:wrap;gap:6px 22px;margin:8px 0 2px;font-size:13px;color:var(--t2)}
+.kv i{font-style:normal;color:var(--t3);margin-right:6px}
+.kv code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--t1)}
+.tools{display:flex;align-items:center;gap:8px;padding:14px 0 10px}
+.search{width:240px;height:30px;border-radius:8px;background:var(--fill);border:0;padding:0 10px;color:var(--t3);font-size:13px;display:flex;align-items:center}
+.seg{display:inline-flex;gap:1px;padding:2px;background:var(--active);border-radius:8px}
+.seg span{padding:2px 9px;border-radius:6px;font-size:12.5px;color:var(--t3)}
+.seg span.on{background:var(--bg);color:var(--t1);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.tools .sp{flex:1}
+.tbl{flex:1;min-height:0;overflow:hidden;border-top:1px solid var(--b1)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 8px;height:32px;border-bottom:1px solid var(--b1);white-space:nowrap}
+td{padding:0 8px;height:37px;border-bottom:1px solid var(--b1);white-space:nowrap}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+td.name{font-weight:500}
+td.name .tag{margin-left:8px;font-weight:400}
+.yes{color:var(--t2)}.no{color:var(--cap)}
+.test-ok{color:var(--ok)}
+.muted{color:var(--cap)}
+tr.hov td{background:var(--hover)}
+td.act{text-align:right;width:224px;padding-right:0}
+td.act .btn{visibility:hidden}
+tr.hov td.act .btn{visibility:visible}
+.form{display:flex;flex-direction:column;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--b1)}
+.fl{font-size:12px;color:var(--t3);margin-bottom:4px}
+.inp{height:32px;border-radius:8px;border:1px solid var(--b2);padding:0 10px;display:flex;align-items:center;font-size:12.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--t1)}
+.inp.ro{background:var(--fill);border-color:transparent;color:var(--t2)}
+.hint{font-size:11.5px;color:var(--t3);margin-top:4px}
+tr.sec td{height:34px;padding-top:10px;font-size:12px;color:var(--t3);font-weight:500;border-bottom:1px solid var(--b1);background:var(--bg)}
+tr.sec td b{color:var(--t1);font-weight:600;font-size:12.5px;margin-right:6px}
+tr.sec td .hint{display:inline;margin-left:10px;font-size:11.5px;color:var(--cap)}
+td.star{width:26px;padding:0 0 0 6px;color:var(--cap);font-size:14px}
+td.star.on{color:#e0a100}
+td.grip{width:16px;padding:0;color:transparent;font-size:12px;letter-spacing:-2px}
+tr.hov td.grip.can{color:var(--t3)}
+tr.drag td{background:var(--brand-soft)!important}
+tr.drop td{border-bottom:2px solid var(--brand)}
+td.recent{color:var(--t2)}
+.band{display:flex;align-items:center;gap:10px;padding:2px 0 0;white-space:nowrap}
+.band .sp{flex:1}.band .ok,.mh .ok{font-size:12px;color:var(--ok)}
+.pname{font-size:15px}
+.kv1{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2);margin-left:12px;white-space:nowrap}
+.kv1 i{font-style:normal;color:var(--cap);margin-left:10px}
+.kv1 i:first-child{margin-left:0}
+.kv1 code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--t1)}
+.lnk{color:var(--brand);margin-left:14px;font-size:12.5px}
+.pedit{width:22px;height:22px;display:grid;place-items:center;font-size:13px;color:var(--t2);border-radius:6px;background:var(--bg);border:1px solid var(--b2);flex:none}
+.prow .tag{margin-left:auto}
+.dlgs{display:grid;grid-template-columns:repeat(2,minmax(0,460px));gap:24px;justify-content:center;padding:28px;background:rgba(15,17,21,.24);border-radius:12px}
+.dlg{background:var(--bg);border-radius:14px;padding:18px 20px 16px;box-shadow:0 12px 40px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:12px}
+.dh{display:flex;align-items:center}.dh b{flex:1;font-size:15px}.x{color:var(--t3)}
+.df{display:flex;align-items:center;gap:8px;margin-top:4px}.df .sp{flex:1}
+.danger{color:#dc2626;font-size:13px}
+.kvg{display:grid;grid-template-columns:72px 1fr;gap:8px 12px;font-size:13px;padding:10px 12px;background:var(--fill);border-radius:10px}
+.kvg span{color:var(--t3)}.kvg b{font-weight:500}.kvg small{color:var(--t3);font-weight:400;margin-left:4px}
+.inp.sel{justify-content:space-between}
+.tipcell{position:relative;text-decoration:underline dotted var(--t3);text-underline-offset:3px}
+.tip{position:absolute;right:0;top:32px;z-index:5;background:var(--t1);color:var(--bg);border-radius:8px;padding:8px 12px;font-size:12px;text-align:left;box-shadow:0 6px 20px rgba(0,0,0,.2);min-width:180px;text-decoration:none}
+.tip div{display:flex;justify-content:space-between;gap:16px;line-height:20px}.tip span{opacity:.65}.tip small{display:block;opacity:.55;margin-top:4px;font-size:11px}
+.caps{display:inline-flex;gap:5px;margin-left:8px;vertical-align:-2px;color:var(--cap)}
+.caps:empty{display:none}
+.caps svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+td.name{min-width:300px}
+td.act{width:100%!important}
+.note{max-width:1472px;margin:10px auto 0;padding:0 16px}
+.note div{background:var(--note);border:1px solid var(--note-b);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--t1)}
+.note b{font-weight:600}
+</style>
+</head>
+<body>
+<div class="intro">
+  <h1>模型页 · 第 3 版</h1>
+  <p>按你的意见改了：连接信息全部藏起来，只在“编辑服务商”里出现；协议从服务商挪到模型上。</p>
+</div>
+<!-- A -->
+<div class="opt">
+  <div class="opt-head" data-choice="final-page">
+    <div class="letter">✓</div>
+    <div><h2>页面平时的样子</h2><p>地址、协议、Key 都不显示。鼠标移到左边服务商上出现 ✎ 编辑按钮（图里就是移上去的样子）。表格上方只剩一行。一屏约 15 个模型。</p></div>
+    
+  </div>
+  <div class="fit"><div class="app">
+    <div class="top"><span class="brand">角色互动工作流</span><span class="nav">动态</span><span class="nav">人设</span><span class="nav on">设置</span><span class="sp"></span><span class="pill">● 已暂停</span><span class="btn dark">启动</span></div>
+    <div class="body">
+      <div class="snav" data-nav></div>
+      <div class="main">
+        <div class="mh"><b>模型</b><small>管理服务商、模型与参数</small><span class="sp"></span></div>
+        <div class="content" style="grid-template-columns:230px minmax(0,1fr)">
+          <div class="pcol">
+            <div class="lab"><span>已添加的服务商</span></div>
+            <div class="prow on hov"><span class="dot"></span><span style="flex:1">opencode-go</span><span class="tag">使用中</span><span class="pedit" title="编辑服务商">✎</span></div>
+            <div class="addp">＋ 添加服务商</div>
+          </div>
+          <div class="mcol">
+            <div class="tools" style="padding-top:2px"><b style="font-size:14px">opencode-go</b><span style="color:var(--t3);font-size:12.5px;margin-right:8px">30 个模型</span><span class="search" style="width:300px">搜索模型…</span><span class="sp"></span><span class="btn sm">刷新列表</span><span class="btn sm">手动添加模型</span></div>
+            <div class="tbl"><table data-table></table></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+</div>
+
+<div class="opt">
+  <div class="opt-head"><div class="letter">✎</div><div><h2>两个编辑窗口</h2><p>左：点服务商上的“编辑”打开。右：点模型行上的“编辑”打开，协议在这里。</p></div></div>
+  <div class="dlgs">
+    <div class="dlg">
+      <div class="dh"><b>编辑服务商</b><span class="x">✕</span></div>
+      <div class="fld"><div class="fl">名称</div><div class="inp">opencode-go</div></div>
+      <div class="fld"><div class="fl">地址</div><div class="inp">https://opencode.ai/inference/go/v1</div></div>
+      <div class="fld"><div class="fl">API Key</div><div class="inp" style="color:var(--t3)">已保存 ••••KDtA，留空表示不改</div></div>
+      <div class="df"><span class="danger">删除服务商</span><span class="sp"></span><span class="btn sm">取消</span><span class="btn sm dark">保存</span></div>
+      <div class="hint" style="margin-top:8px">使用中的服务商不能删除，删除按钮会变灰并说明原因。</div>
+    </div>
+    <div class="dlg">
+      <div class="dh"><b>编辑模型 · kimi-k3</b><span class="x">✕</span></div>
+      <div class="kvg">
+        <span>接口协议</span><b>anthropic-messages <small>目录自带</small></b>
+        <span>上下文</span><b>1.05M token</b>
+        <span>价格</span><b>输入 $3.00 · 输出 $15.00 · 缓存读取 $0.30 <small>每百万 token</small></b>
+        <span>能力</span><b>推理 · 看图</b>
+      </div>
+      <div class="fld"><div class="fl">推理强度</div><div class="inp sel">关闭 <span>▾</span></div></div>
+      <div class="df"><span class="sp"></span><span class="btn sm">取消</span><span class="btn sm dark">保存</span></div>
+      <div class="hint" style="margin-top:8px">手动添加的模型（自定义接口）在这里选协议和填上下文；目录里的模型协议只读。</div>
+    </div>
+  </div>
+</div>
+<div class="note"><div><b>说明</b>：效果图按 1440×868 等比缩放。价格列只放输入 / 输出；鼠标移到价格上显示缓存读取 / 写入价（图里 claude-haiku-5-5 那一格）。价格只用 pi 目录自带的，不做峰谷价。推理 / 看图不再占列：模型名后面的灰色小图标（灯泡 = 支持推理，眼睛 = 支持看图），不支持就不显示，鼠标移上去有文字。“最近使用”只是一块分组，不再有单独一列。</div></div><div style="height:40px"></div>
+
+<script>
+const nav=[['运行',['运行与发送','模型','定时任务','消息分级与过滤']],['数据',['记忆','计费']],['浏览器与采集',['浏览器接管','采集来源']],['排查',['健康与日报','日志阶段与队列','任务执行历史']]];
+document.querySelectorAll('[data-nav]').forEach(el=>{el.innerHTML='<div class="h"><span>设置</span><span style="color:var(--t3)">≡</span></div>'+nav.map(([g,items])=>'<div class="g">'+g+'</div>'+items.map(t=>'<div class="i'+(t==='模型'?' on':'')+'">'+t+'</div>').join('')).join('');});
+const ICON_R='<svg viewBox="0 0 24 24"><title>支持推理</title><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.4 1 2.5h6c0-1.1.3-1.8 1-2.5A6 6 0 0 0 12 3z"/></svg>';
+const ICON_V='<svg viewBox="0 0 24 24"><title>支持看图</title><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const all=`deepseek-v4.1-flash|1M|$0.15 / $0.60|1|1|ok
+beam-free|1.05M||1|0|
+claude-haiku-5-5|1M|$0.10 / $0.50|1|1|ok2
+deepseek-v4-pro|1M|$0.66 / $1.98|1|0|
+gemini-4-argon|||0|0|
+glm-5.2|1M|$1.40 / $4.40|1|0|
+glm-5.3|1M|$1.40 / $4.40|1|0|
+glm-5.3-flash|1M|$0.15 / $0.50|1|1|
+gpt-5.6-luna|1.05M|$0.20 / $1.20|1|1|
+gpt-6-luna|1.05M|$0.10 / $0.50|1|1|
+grok-4.7|500K|$2.00 / $6.00|1|1|
+hy3|256K|$0.14 / $0.58|1|0|
+hy4-preview|1.02M|$0.83 / $2.50|1|0|
+iceman-contributor-free|||0|0|
+kimi-k2.7-code|262K|$0.95 / $4.00|1|1|
+kimi-k3|1.05M|$3.00 / $15.00|1|1|ok3
+kimi-k3.1-pro|||0|0|
+longcat-2.0|1M|$0.30 / $1.20|1|0|
+mimo-v2.5|1M|$0.14 / $0.28|1|1|
+mimo-v2.5-pro|1.05M|$0.44 / $0.87|1|0|
+qwen3.8-flash|1M|$0.15 / $0.47|1|1|ok4`.split('\n').map(l=>l.split('|'));
+const by=Object.fromEntries(all.map(r=>[r[0],r]));
+const starred=['deepseek-v4.1-flash','claude-haiku-5-5','kimi-k3'];
+const recent=[['qwen3.8-flash','2 小时前'],['glm-5.3-flash','昨天'],['deepseek-v4-pro','10/24']];
+const others=all.map(r=>r[0]).filter(id=>!starred.includes(id)&&!recent.some(x=>x[0]===id));
+const tests={ok:'1.97s',ok2:'2.40s',ok3:'3.12s',ok4:'1.55s'};
+const used={'deepseek-v4.1-flash':'刚刚','claude-haiku-5-5':'今天','kimi-k3':'10/27'};
+const head='<tr><th style="width:26px"></th><th style="width:16px"></th><th>模型</th><th class="n">上下文</th><th class="n">价格（输入 / 输出）</th><th>测试</th><th></th></tr>';
+function row(id,opts){const [,ctx,price,r,v,t]=by[id];const active=id==='deepseek-v4.1-flash';return '<tr class="'+(opts.cls||'')+'"><td class="star'+(opts.star?' on':'')+'">'+(opts.star?'★':'☆')+'</td><td class="grip'+(opts.star?' can':'')+'">⋮⋮</td><td class="name">'+id+'<span class="caps">'+(r==='1'?ICON_R:'')+(v==='1'?ICON_V:'')+'</span>'+(active?'<span class="tag">使用中</span>':'')+'</td><td class="n">'+(ctx||'<span class="muted">自定义</span>')+'</td><td class="n'+(id==='claude-haiku-5-5'?' tipcell':'')+'">'+(price||'<span class="muted">未定价</span>')+(id==='claude-haiku-5-5'?'<div class="tip"><div><span>输入</span>$0.10</div><div><span>输出</span>$0.50</div><div><span>缓存读取</span>$0.01</div><div><span>缓存写入</span>$0.125</div><small>美元 / 每百万 token · 来自 pi 目录</small></div>':'')+'</td><td>'+(t?'<span class="test-ok">✓ '+tests[t]+'</span>':'<span class="muted">未测试</span>')+'</td><td class="act">'+(active?'':'<span class="btn sm">设为使用中</span> ')+'<span class="btn sm">测试 <span class="fee">计费</span></span> <span class="btn sm">编辑</span></td></tr>';}
+const sec=(name,n,hint)=>'<tr class="sec"><td colspan="7"><b>'+name+'</b>'+n+(hint?'<span class="hint">'+hint+'</span>':'')+'</td></tr>';
+const rows=sec('★ 星标',3,'拖动 ⋮⋮ 调整顺序')
+ +starred.map((id,i)=>row(id,{star:1,used:used[id],cls:i===1?'hov':''})).join('')
+ +sec('最近使用',3,'最近 30 天调用过的，按时间排')
+ +recent.map(([id,u])=>row(id,{used:u})).join('')
+ +sec('其他模型',24,'')
+ +others.map(id=>row(id,{})).join('');
+document.querySelectorAll('[data-table]').forEach(t=>t.innerHTML=head+rows);
+function fit(){document.querySelectorAll('.fit').forEach(f=>{const k=Math.min(1,f.clientWidth/1440);const a=f.firstElementChild;a.style.transform='scale('+k+')';f.style.height=(868*k)+'px';});}
+addEventListener('resize',fit);fit();
+</script>
+</body>
+</html>

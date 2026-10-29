@@ -114,14 +114,21 @@ export class TaskScheduler {
   if(patch.enabled===false){for(const [runId,abort] of this.active){const run=this.getRun(runId);if(run?.taskId===id)abort.abort();}}
   return {...this.list(),revision:result.revision};
  }
- history(query:{taskId?:string;cursor?:string;limit?:number;accountId?:string}={}){
+ history(query:{taskId?:string;task?:string;status?:string;from?:number|string;to?:number|string;cursor?:string;limit?:number;accountId?:string}={}){
   const limit=Math.max(1,Math.min(100,Number(query.limit)||30));
-  const where:string[]=[],args:(string|number)[]=[];
-  if(query.taskId){this.assertTask(query.taskId);where.push('task_id=?');args.push(query.taskId);}
-  if(query.accountId){where.push('account_id=?');args.push(query.accountId);}
+  const windowWhere:string[]=[],windowArgs:(string|number)[]=[];
+  if(query.accountId){windowWhere.push('account_id=?');windowArgs.push(query.accountId);}
+  if(query.from!==undefined&&query.from!==''&&Number.isFinite(Number(query.from))){windowWhere.push('started_at>=?');windowArgs.push(Number(query.from));}
+  if(query.to!==undefined&&query.to!==''&&Number.isFinite(Number(query.to))){windowWhere.push('started_at<?');windowArgs.push(Number(query.to));}
+  const countRows=this.store.db.prepare("SELECT task_id AS task,COUNT(*) AS total,SUM(CASE WHEN status IN ('failed','interrupted','unknown') THEN 1 ELSE 0 END) AS failed FROM task_runs"+(windowWhere.length?' WHERE '+windowWhere.join(' AND '):'')+' GROUP BY task_id').all(...windowArgs) as {task:string;total:number;failed:number}[];
+  const counts=countRows.map(r=>({task:r.task,total:Number(r.total)||0,failed:Number(r.failed)||0}));
+  const where=[...windowWhere],args=[...windowArgs];
+  const taskFilter=query.taskId||query.task;
+  if(taskFilter){this.assertTask(taskFilter);where.push('task_id=?');args.push(taskFilter);}
+  if(query.status){where.push('status=?');args.push(String(query.status));}
   if(query.cursor){const cursor=this.getRun(query.cursor);if(!cursor)throw new Error('任务历史游标无效');where.push('(started_at<? OR (started_at=? AND id<?))');args.push(cursor.startedAt,cursor.startedAt,cursor.id);}
   const rows=this.store.db.prepare('SELECT * FROM task_runs'+(where.length?' WHERE '+where.join(' AND '):'')+' ORDER BY started_at DESC,id DESC LIMIT ?').all(...args,limit+1) as any[];
-  return {items:rows.slice(0,limit).map(row=>this.decorate(fromRow(row))),nextCursor:rows.length>limit?rows[limit-1].id:null};
+  return {items:rows.slice(0,limit).map(row=>this.decorate(fromRow(row))),nextCursor:rows.length>limit?rows[limit-1].id:null,counts};
  }
  getRun(id:string):TaskRun|null {const row=this.store.db.prepare('SELECT * FROM task_runs WHERE id=?').get(id);return row?this.decorate(fromRow(row)):null;}
  /** 日报不涉及浏览器和模型，暂停期间仍可补生成；由独立 app 周期调用。 */

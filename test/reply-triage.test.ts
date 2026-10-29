@@ -137,14 +137,14 @@ test('出队按优先级与时间排序，且只从可用通道取消息',()=>{
  }finally{f.close();}
 });
 
-test('普通消息三小时过期，优先消息沿用六小时且超时不占实际候选名额',()=>{
+test('普通消息与优先消息共用统一 maxAgeHours（默认三小时），超时不占实际候选名额',()=>{
  const f=fixture();try{
-  f.triage.ingest(event('normal','hi',{timestamp:NOW-3.5*3600000}),'worker');
-  f.triage.ingest(event('priority','我有一个问题',{timestamp:NOW-3.5*3600000}),'worker');
-  f.triage.ingest(event('expired','重要但太迟的消息',{timestamp:NOW-6.5*3600000}),'worker');
-  f.triage.ingest(event('fresh','hi',{timestamp:NOW-3.6*3600000}),'worker');
-  assert.deepEqual(f.triage.pending(2,'worker',['public']).map((row:any)=>JSON.parse(row.body).platformId),['priority']);
-  assert.equal(f.row('normal').status,'skipped');assert.equal(f.row('expired').status,'skipped');assert.equal(f.row('fresh').status,'skipped');
+  f.triage.ingest(event('normal-expired','hi',{timestamp:NOW-3.5*3600000}),'worker');
+  f.triage.ingest(event('priority-expired','重要但超过三小时的消息',{timestamp:NOW-3.5*3600000}),'worker');
+  f.triage.ingest(event('priority-valid','我有一个问题',{timestamp:NOW-2.5*3600000}),'worker');
+  f.triage.ingest(event('normal-valid','hi',{timestamp:NOW-2*3600000}),'worker');
+  assert.deepEqual(f.triage.pending(2,'worker',['public']).map((row:any)=>JSON.parse(row.body).platformId),['priority-valid','normal-valid']);
+  assert.equal(f.row('normal-expired').status,'skipped');assert.equal(f.row('priority-expired').status,'skipped');
  }finally{f.close();}
 });
 
@@ -298,15 +298,43 @@ test('真实数据库的 unknown 阻塞按当前账号和通道判断，终态�
 
 test('健康队列只读共用分级时效与忽略条件，并计入人工批准及重写候选',()=>{
  const f=fixture();try{
-  for(const e of [event('normal-expired','hi',{timestamp:NOW-3.5*3600000}),event('priority-valid','有效优先内容',{timestamp:NOW-3.5*3600000}),event('ignored-queued','等待但已忽略',{userId:'ignored-person'}),event('approved','已批准正文',{channel:'private'}),event('rewrite','空投 https://example.com',{userId:'ignored-person',channel:'private'}),event('foreign','其他账号内容')])f.triage.ingest(e,e.id==='foreign'?'other':'worker');
+  for(const e of [event('normal-expired','hi',{timestamp:NOW-3.5*3600000}),event('priority-valid','有效优先内容',{timestamp:NOW-2.5*3600000}),event('ignored-queued','等待但已忽略',{userId:'ignored-person'}),event('approved','已批准正文',{channel:'private'}),event('rewrite','空投 https://example.com',{userId:'ignored-person',channel:'private'}),event('foreign','其他账号内容')])f.triage.ingest(e,e.id==='foreign'?'other':'worker');
   for(let n=0;n<3;n++){f.triage.recordSkip(event('strike','消息',{userId:'ignored-person'}),'worker','harassment');f.triage.recordSkip(event('private-strike','消息',{userId:'ignored-person',channel:'private'}),'worker','harassment');}
   f.store.update('approved','approved',{},'worker');
   f.store.db.prepare("UPDATE messages SET status='queued',tier='priority',draft=? WHERE source_id='rewrite'").run(JSON.stringify({action:'reply',text:'旧草稿',reason:'',review:true}));
   const before=f.store.db.prepare('SELECT id,status,updated_at,processed_seq FROM messages ORDER BY id').all();
-  const observed=f.triage.healthQueue('worker',6);
-  assert.deepEqual(observed,{public:{count:1,oldestAt:NOW-3.5*3600000},private:{count:2,oldestAt:NOW}});
+  const observed=f.triage.healthQueue('worker',3);
+  assert.deepEqual(observed,{public:{count:1,oldestAt:NOW-2.5*3600000},private:{count:2,oldestAt:NOW}});
   assert.deepEqual(f.store.db.prepare('SELECT id,status,updated_at,processed_seq FROM messages ORDER BY id').all(),before);
-  const pending=f.triage.pending(4,'worker',['public','private'],6);
+  const pending=f.triage.pending(4,'worker',['public','private'],3);
   assert.deepEqual(new Set(pending.map((row:any)=>JSON.parse(row.body).platformId)),new Set(['priority-valid','rewrite']));
  }finally{f.close();}
+});
+
+test('启动迁移备份旧 settings.json 并合并 normalMaxAgeHours 与 maxAgeHours，分流设置接口原子读写',async()=>{
+ const {readPanelSettings,commitTriageSettings,upgradeMessageAgeSettings,panelDir}=await import('../src/settings.js');
+ const {mkdirSync,writeFileSync,readFileSync,readdirSync}=await import('node:fs');
+ const dir=mkdtempSync(tmpdir()+'/role-age-mig-'),prev=process.env.DATA_DIR;process.env.DATA_DIR=dir;
+ try{
+  mkdirSync(panelDir(),{recursive:true});
+  writeFileSync(panelDir()+'/settings.json',JSON.stringify({program:{mode:'draft',maxAgeHours:6},triage:{normalMaxAgeHours:4,batchThreshold:5},revisions:{program:2,triage:3}},null,2));
+  const first=upgradeMessageAgeSettings(undefined,6,1700000000000);
+  assert.equal(first.upgraded,true);assert.equal(first.maxAgeHours,4);
+  const files=readdirSync(panelDir());assert.ok(files.some(name=>name.startsWith('settings.json.bak-message-age-')));
+  const upgraded=readPanelSettings();
+  assert.equal(upgraded.program?.maxAgeHours,4);
+  assert.equal(upgraded.triage?.normalMaxAgeHours,4);
+  assert.equal(upgraded.migrations?.messageAge,1);
+  assert.equal(upgraded.revisions?.program,3);
+  assert.equal(upgraded.revisions?.triage,4);
+  assert.equal(upgradeMessageAgeSettings(undefined,6).upgraded,false);
+  const saved=commitTriageSettings({batchThreshold:6},{maxAgeHours:8,expectedRevision:4,expectedProgramRevision:3});
+  assert.equal(saved.revision,5);assert.equal(saved.programRevision,4);
+  assert.equal(readPanelSettings().program?.maxAgeHours,8);
+  assert.equal(readPanelSettings().triage?.batchThreshold,6);
+  assert.equal(JSON.parse(readFileSync(panelDir()+'/settings.json','utf8')).triage.normalMaxAgeHours,4);
+ }finally{
+  if(prev===undefined)delete process.env.DATA_DIR;else process.env.DATA_DIR=prev;
+  rmSync(dir,{recursive:true,force:true});
+ }
 });

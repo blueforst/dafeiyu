@@ -45,7 +45,7 @@ test('历史资格查询显式使用传入时刻而不偷用当前时刻',()=>{
  const now=at('2026-10-28T12:00:00'),past=now-2*hour,f=dbFixture(now);try{
   const event:Event={id:'x:100002',platformId:'100002',channel:'public',userId:'x:bob',handle:'bob',text:'普通排队消息',conversationId:'100002',timestamp:now-4*hour,timestampReliable:true};
   f.store.ingest(event,'worker');const row=f.store.getMessage(event.id,'worker');f.store.db.prepare("UPDATE messages SET tier='normal' WHERE id=?").run(row.id);
-  const current=f.triage.queuedEligibility(6),historical=(f.triage.queuedEligibility as any)(6,{},past);
+  const current=f.triage.queuedEligibility(3),historical=(f.triage.queuedEligibility as any)(3,{},past);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM messages m WHERE '+current.sql).get(...current.params)?.n,0);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM messages m WHERE '+historical.sql).get(...historical.params)?.n,1);
  }finally{f.close();}

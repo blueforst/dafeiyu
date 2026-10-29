@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>设置 · 记忆与计费</title>
+<style>
+:root{--bg:#fff;--page:#eef0f3;--side:#f9fafb;--hover:rgba(38,49,72,.05);--active:#ebeef2;--t1:#0f1115;--t2:#61666b;--t3:#81858c;--cap:#adb2b8;--b1:rgba(0,0,0,.08);--b2:rgba(0,0,0,.12);--brand:#4176e6;--brand-soft:#e4edfd;--ok:#15803d;--ok-soft:#e6faed;--warn:#aa6416;--warn-soft:#fef5e7;--fill:#f3f4f6;--card:#fafbfc;--note:#fff8db;--note-b:#f1d675}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151517;--page:#0c0c0d;--side:#1b1b1c;--hover:rgba(255,255,255,.05);--active:#2c2c2e;--t1:#f9fafb;--t2:#adb2b8;--t3:#81858c;--cap:#61666b;--b1:rgba(255,255,255,.08);--b2:rgba(255,255,255,.16);--brand:#7aaaff;--brand-soft:#28314a;--ok:#4ade80;--ok-soft:#233c2c;--warn:#fbbf24;--warn-soft:#27241f;--fill:#232326;--card:#1b1b1d;--note:#2d2814;--note-b:#6b5a1c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--t1);font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.intro,.opt,.note{max-width:1472px;margin:0 auto;padding:0 16px}
+.intro{padding-top:22px}
+.intro h1{font-size:19px;margin:0 0 6px}
+.intro p,.intro li{color:var(--t2);font-size:13.5px}
+.intro p{margin:0 0 4px}.intro ul{margin:6px 0 0;padding-left:18px}
+.opt{margin-top:22px;margin-bottom:8px}
+.opt-head{display:flex;align-items:center;gap:12px;margin-bottom:10px;padding:6px 10px}
+.opt-head .letter{width:28px;height:28px;border-radius:50%;background:var(--t1);color:var(--bg);display:grid;place-items:center;font-weight:600;font-size:13px;flex:none}
+.opt-head h2{font-size:16px;margin:0}.opt-head p{margin:0;color:var(--t2);font-size:13px}
+.fit{position:relative}
+.app{width:1440px;height:868px;transform-origin:0 0;background:var(--bg);border:1px solid var(--b2);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.06)}
+.top{height:56px;flex:none;display:flex;align-items:center;gap:6px;padding:0 20px;border-bottom:1px solid var(--b1)}
+.top .brand{font-weight:600;font-size:15px;margin-right:18px}
+.top .nav{padding:6px 12px;border-radius:8px;color:var(--t2)}
+.top .nav.on{background:var(--active);color:var(--t1);font-weight:600}
+.sp{flex:1}
+.pill{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--warn-soft);color:var(--warn)}
+.btn{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--b2);background:var(--bg);color:var(--t1);font:inherit;font-size:13px;white-space:nowrap}
+.btn.dark{background:var(--t1);color:var(--bg);border-color:var(--t1)}
+.btn.sm{height:26px;padding:0 9px;font-size:12.5px}
+.btn.ghost{border-color:transparent;color:var(--t2)}
+.fee{font-size:10.5px;border:1px solid var(--b2);border-radius:4px;padding:0 3px;color:var(--t3);line-height:15px}
+.body{flex:1;display:grid;grid-template-columns:232px minmax(0,1fr);min-height:0}
+.snav{background:var(--side);border-right:1px solid var(--b1);padding:10px}
+.snav .h{display:flex;justify-content:space-between;padding:10px 4px 14px;font-weight:600}
+.snav .g{font-size:11.5px;color:var(--t3);padding:12px 12px 6px}
+.snav .i{padding:7px 12px;border-radius:8px;font-size:13.5px;display:flex;align-items:center}
+.snav .i.on{background:var(--active)}
+.snav .dotw{width:6px;height:6px;border-radius:50%;background:var(--warn);margin-left:auto}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.mh{height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--b1)}
+.mh b{font-size:14px}.mh small{color:var(--t3);font-size:12.5px}
+.cnt{flex:1;min-height:0;overflow:hidden;padding:20px 28px;display:flex;flex-direction:column;gap:16px}
+.cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.card{border:1px solid var(--b1);border-radius:12px;padding:14px 18px;background:var(--bg)}
+.ch{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+.ch b{font-size:14px}.ch small{color:var(--t3);font-size:12px}
+.muted{color:var(--t3)}.cap{color:var(--cap)}
+.num{width:64px;height:30px;border:1px solid var(--b2);border-radius:7px;display:inline-flex;align-items:center;padding:0 8px;font-variant-numeric:tabular-nums;font-size:13px;background:var(--bg)}
+.num.w{width:78px}
+.unit{color:var(--t3);font-size:12.5px;margin-left:5px}
+.switch{width:34px;height:20px;border-radius:99px;background:var(--brand);position:relative;flex:none;display:inline-block;vertical-align:middle}
+.switch:after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:2px;left:16px;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch.off{background:var(--b2)}.switch.off:after{left:2px}
+.switch.ro{opacity:.45}
+/* run */
+.modes{display:flex;gap:10px;align-items:center}
+.mode{display:flex;align-items:center;gap:10px;border:1px solid var(--b2);border-radius:10px;padding:9px 14px;width:330px}
+.mode.on{border-color:var(--brand);background:var(--brand-soft)}
+.radio{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--b2);flex:none}
+.mode.on .radio{border:4.5px solid var(--brand)}
+.mode b{font-size:13.5px}.mode small{display:block;color:var(--t3);font-size:12px}
+.lim{width:100%;border-collapse:collapse;font-size:13px}
+.lim th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 10px 6px 0}
+.lim td{padding:6px 10px 6px 0;border-top:1px solid var(--b1);white-space:nowrap}
+.lim td:first-child{font-weight:500;width:84px}
+.use{color:var(--t3);font-size:12.5px}
+.bar{display:inline-block;width:70px;height:5px;border-radius:9px;background:var(--fill);vertical-align:middle;margin-right:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok);border-radius:9px}
+.row{display:flex;align-items:center;gap:10px;min-height:34px}
+.big{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:1px 9px;border-radius:99px;background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.adv{border:1px solid var(--b1);border-radius:12px;background:var(--card)}
+.adv-h{display:flex;align-items:center;gap:10px;padding:11px 18px;font-size:13.5px}
+.adv-h b{font-weight:600}.adv-h small{color:var(--t3);font-size:12px}
+.adv-h .chev{color:var(--t3);font-size:11px;width:12px}
+.adv-b{border-top:1px solid var(--b1);padding:12px 18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 32px}
+.f{display:flex;align-items:center;gap:10px;font-size:13px}
+.f .l{min-width:118px;color:var(--t2)}
+.f .h{color:var(--cap);font-size:12px}
+/* triage */
+.stats{display:flex;border:1px solid var(--b1);border-radius:12px;padding:12px 6px;align-items:center}
+.stat{flex:1;padding:0 16px;border-right:1px solid var(--b1)}
+.stat:last-of-type{border-right:0}
+.stat small{display:block;color:var(--t3);font-size:12px}
+.stat b{font-size:19px;font-variant-numeric:tabular-nums}
+.stat b span{font-size:13px;color:var(--t3);font-weight:400}
+.refresh{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--t3);margin-right:6px}
+.lbl{font-size:12.5px;color:var(--t2);margin:2px 0 6px;display:flex;gap:6px;align-items:baseline}
+.lbl small{color:var(--cap)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tg{font-size:12.5px;padding:2px 9px;border-radius:7px;background:var(--fill);color:var(--t1)}
+.tg.add{background:none;border:1px dashed var(--b2);color:var(--t3)}
+.empty-in{height:30px;border:1px dashed var(--b2);border-radius:8px;display:flex;align-items:center;padding:0 10px;color:var(--cap);font-size:12.5px;margin-bottom:12px}
+.line{display:flex;gap:22px;font-size:13px;color:var(--t2);align-items:center}
+.line .okc{color:var(--ok)}
+/* tasks */
+.tl{position:relative;height:92px;margin:2px 8px 0}
+.tl .axis{position:absolute;left:0;right:0;top:56px;height:4px;background:var(--fill);border-radius:9px}
+.tl .closed{position:absolute;top:50px;height:16px;background:repeating-linear-gradient(135deg,var(--warn-soft),var(--warn-soft) 5px,transparent 5px,transparent 9px);border:1px solid rgba(170,100,22,.25);border-radius:5px;font-size:10.5px;color:var(--warn);line-height:14px;padding-left:6px;white-space:nowrap;overflow:hidden}
+.tl .tick{position:absolute;top:72px;font-size:11px;color:var(--cap);transform:translateX(-50%);white-space:nowrap}
+.tl .ev{position:absolute;transform:translateX(-50%);font-size:11.5px;white-space:nowrap;text-align:center}
+.tl .ev.a{top:0}.tl .ev.b{top:20px}
+.tl .ev .stem{position:absolute;left:50%;width:1px;background:var(--b2)}
+.tl .ev.a .stem{top:17px;height:37px}.tl .ev.b .stem{top:17px;height:17px}
+.tl .d{position:absolute;top:52px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--brand);border:2px solid var(--bg)}
+.tl .d.off{background:var(--bg);border:1.5px solid var(--cap)}
+.tl .ev.off{color:var(--cap)}
+.tl .now{position:absolute;top:44px;height:28px;width:2px;background:var(--t1);border-radius:2px}
+.tl .nowl{position:absolute;top:28px;font-size:10.5px;transform:translateX(-50%);white-space:nowrap;font-weight:600}
+table.tk{width:100%;border-collapse:collapse;font-size:13px}
+.tk th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 10px 8px;border-bottom:1px solid var(--b1)}
+.tk td{padding:0 10px;height:42px;border-bottom:1px solid var(--b1);white-space:nowrap}
+.tk td.nm{font-weight:500}
+.tk td.act{width:100%;text-align:right}
+.tk td.act .btn{visibility:hidden}
+.tk tr.hov td{background:var(--hover)}
+.tk tr.hov td.act .btn{visibility:visible}
+.tk tr.offr td.nm,.tk tr.offr td.t{color:var(--t3)}
+.xw{font-size:11px;padding:0 6px;border-radius:5px;background:var(--warn-soft);color:var(--warn);margin-left:8px;font-weight:400}
+.tm{width:74px;height:28px;border:1px solid var(--b2);border-radius:7px;display:inline-flex;align-items:center;padding:0 8px;font-variant-numeric:tabular-nums}
+.foot{font-size:12.5px;color:var(--t3);display:flex;gap:14px}
+.foot a{color:var(--brand);text-decoration:none}
+.note div{background:var(--note);border:1px solid var(--note-b);border-radius:10px;padding:10px 14px;font-size:13px;margin-top:10px}
+.tagnote{display:inline-block;font-size:11px;color:var(--brand);background:var(--brand-soft);border-radius:5px;padding:0 6px;margin-left:8px}
+
+.cnt.nopad{padding:0;gap:0}
+.ml{display:grid;grid-template-columns:300px minmax(0,1fr);height:100%;min-height:0}
+.ul{border-right:1px solid var(--b1);padding:14px 12px;display:flex;flex-direction:column;gap:8px;min-height:0}
+.srch{height:32px;border-radius:8px;background:var(--fill);display:flex;align-items:center;padding:0 10px;color:var(--cap);font-size:13px}
+.seg{display:inline-flex;gap:1px;padding:2px;background:var(--active);border-radius:8px}
+.seg span{padding:2px 10px;border-radius:6px;font-size:12.5px;color:var(--t3)}
+.seg span.on{background:var(--bg);color:var(--t1);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.urow{padding:8px 10px;border-radius:8px;display:grid;grid-template-columns:1fr auto;gap:1px 8px}
+.urow.on{background:var(--active)}
+.urow b{font-weight:500;font-size:13.5px}
+.urow small{color:var(--t3);font-size:12px}
+.ch2{font-size:11px;padding:0 6px;border-radius:5px;background:var(--fill);color:var(--t2);align-self:center}
+.ch2.dm{background:var(--brand-soft);color:var(--brand)}
+.ud{padding:16px 24px;display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0}
+.udh{display:flex;align-items:center;gap:10px}
+.udh h3{margin:0;font-size:17px}
+.udh .m{color:var(--t3);font-size:12.5px}
+.ugrid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;min-height:0}
+.mem{display:flex;align-items:center;gap:12px;padding:9px 4px;border-bottom:1px solid var(--b1);font-size:13.5px}
+.mem .t{flex:1}
+.mem .s{color:var(--cap);font-size:12px;white-space:nowrap}
+.side{display:flex;flex-direction:column;gap:12px}
+.box{border:1px solid var(--b1);border-radius:10px;padding:12px 14px;font-size:13px}
+.box b{display:block;font-size:12.5px;color:var(--t3);font-weight:500;margin-bottom:6px}
+.kvl{display:grid;grid-template-columns:72px 1fr;gap:4px 8px;font-size:12.5px}.kvl span{color:var(--t3)}
+.sample{font-size:11px;color:var(--warn);background:var(--warn-soft);border-radius:5px;padding:0 6px}
+.lnk{color:var(--brand);font-size:12.5px}
+/* billing */
+.bgrid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px}
+.chart{height:190px;display:flex;align-items:flex-end;gap:18px;padding:0 6px 0 40px;position:relative;border-bottom:1px solid var(--b1)}
+.chart .yl{position:absolute;left:0;font-size:11px;color:var(--cap)}
+.chart .gl{position:absolute;left:36px;right:0;border-top:1px dashed var(--b1)}
+.chart .bar2{flex:1;background:var(--brand);border-radius:5px 5px 0 0;min-height:2px;position:relative;opacity:.9}
+.xl{display:flex;gap:18px;padding:4px 6px 0 40px;font-size:11px;color:var(--cap)}.xl span{flex:1;text-align:center}
+.donut{width:120px;height:120px;border-radius:50%;background:var(--brand);display:grid;place-items:center;flex:none}
+.donut div{width:84px;height:84px;border-radius:50%;background:var(--bg);display:grid;place-items:center;text-align:center;font-size:15px;font-weight:600;line-height:1.2}
+.donut small{display:block;font-size:10.5px;color:var(--t3);font-weight:400}
+.leg{flex:1;display:flex;flex-direction:column;gap:8px;font-size:12.5px}
+.leg div{display:flex;align-items:center;gap:8px}.leg i{width:9px;height:9px;border-radius:3px;flex:none}.leg .v{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--t2)}
+.heat{display:grid;grid-template-rows:repeat(7,11px);grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:3px}
+.heat i{border-radius:2px;background:var(--fill)}
+.calls{width:100%;border-collapse:collapse;font-size:12.5px}
+.calls th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 10px 6px;border-bottom:1px solid var(--b1)}
+.calls td{padding:0 10px;height:34px;border-bottom:1px solid var(--b1);white-space:nowrap}
+.calls td.n,.calls th.n{text-align:right;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div class="intro">
+  <h1>设置 · 数据类两页（记忆 / 计费）</h1>
+  <p>按 1440×868 画。记忆页你现在只有 1 个用户、0 条记忆，图里补了几条<span class="sample">示例</span>数据看排版；计费页的汇总数字是你面板里的真实值。</p>
+  <ul>
+    <li>记忆：右边不再空着——进来自动选中第一个用户；用户列表一人两行；“策略”标签页的三个参数收进右上角“高级设置”；“遗忘并停止记录”这种危险操作收进 ··· 菜单。</li>
+    <li>计费：数字最多保留两位有效小数（$0.04840811 → $0.048，鼠标移上去看精确值）；趋势图矮一半、和用量占比并排；全年热力图压成一条；调用流水默认收起，只占一行。</li>
+  </ul>
+</div>
+<div class="opt">
+  <div class="opt-head"><div class="letter">1</div><div><h2>记忆 · 用户记忆</h2><p>左：用户列表；右：选中用户的记忆。三个折叠区改成右侧的标签切换。</p></div></div>
+  <div class="fit" data-frame="memory"></div>
+</div>
+<div class="opt">
+  <div class="opt-head"><div class="letter">2</div><div><h2>计费</h2><p>一屏内看完：汇总一条 → 趋势 + 占比并排 → 活动热力图一条 → 调用流水（默认收起）。</p></div></div>
+  <div class="fit" data-frame="billing"></div>
+</div>
+<div class="note"><div><b>说明</b>：“角色经历”标签页内容不多，改成同样的列表（每条经历一行），右上角“＋ 登记经历”打开弹窗，不再用折叠的表单；没有经历时只显示一行提示。记忆“高级设置”里是：近期互动数量 3、近期窗口 7 天、原文保留 30 天。</div></div>
+<div style="height:40px"></div>
+<script>
+const NAV=[['运行',[['run','运行与发送'],['model','模型'],['tasks','定时任务'],['triage','消息分级与过滤']]],['数据',[['memory','记忆'],['billing','计费']]],['浏览器与采集',[['browser','浏览器接管'],['sources','采集来源']]],['排查',[['health','健康与日报'],['logs','日志阶段与队列'],['history','任务执行历史']]]];
+function shell(id,title,desc,actions,body){
+  const nav='<div class="h"><span>设置</span><span class="muted">≡</span></div>'+NAV.map(([g,items])=>'<div class="g">'+g+'</div>'+items.map(([k,t])=>'<div class="i'+(k===id?' on':'')+'">'+t+(k==='health'?'<span class="dotw"></span>':'')+'</div>').join('')).join('');
+  return '<div class="app"><div class="top"><span class="brand">角色互动工作流</span><span class="nav">动态</span><span class="nav">人设</span><span class="nav on">设置</span><span class="sp"></span><span class="pill">● 已暂停</span>&nbsp;<span class="btn dark">启动</span></div><div class="body"><div class="snav">'+nav+'</div><div class="main"><div class="mh"><b>'+title+'</b><small>'+desc+'</small><span class="sp"></span>'+actions+'</div><div class="cnt">'+body+'</div></div></div></div>';
+}
+
+const users=[['@yuki_dm','私信',12,'10/29 11:02',1],['x:cn4bie','公开',0,'10/28 13:09',0],['@mika_02','公开',5,'10/29 15:20',1],['@sora_n','公开',3,'10/27 22:41',1],['@kai.k','私信',8,'10/26 09:15',1],['@lin_','公开',1,'10/24 18:30',1]];
+const MEM=`<div class="ml">
+ <div class="ul">
+  <div class="srch">搜索用户或会话…</div>
+  <div style="display:flex;align-items:center;gap:8px"><span class="seg"><span class="on">全部 6</span><span>公开</span><span>私信</span></span><span class="sp"></span><span class="muted" style="font-size:12.5px">筛选 ▾</span></div>
+  ${users.map(([n,c,k,t,s],i)=>`<div class="urow${i===0?' on':''}"><b>${n}${s?' <span class="sample">示例</span>':''}</b><span class="ch2${c==='私信'?' dm':''}">${c}</span><small>${k} 条记忆 · ${t}</small></div>`).join('')}
+ </div>
+ <div class="ud">
+  <div class="udh"><h3>@yuki_dm</h3><span class="ch2 dm">私信</span><span class="m">允许记录 · 最近互动 10/29 11:02</span><span class="sp"></span><span class="btn sm">召回预览</span><span class="btn sm">重新整理 <span class="fee">计费</span></span><span class="btn sm ghost">···</span></div>
+  <div class="ugrid">
+   <div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span class="seg"><span class="on">长期记忆 12</span><span>互动记录 34</span><span>近期可见 6</span></span><span class="sp"></span><span class="srch" style="width:200px;height:28px">在记忆里搜索…</span></div>
+    ${[['喜欢猫，家里有一只橘猫叫豆包','私信','10/27'],['在东京读研，专业是建筑','私信','10/25'],['不喜欢被叫昵称，叫她 yuki 就好','私信','10/25'],['最近在准备毕业设计，压力大','私信','10/24'],['周末常去神保町逛旧书店','私信','10/22'],['对咖啡因敏感，只喝低因','私信','10/20'],['和角色约好下次聊《海边的卡夫卡》','私信','10/19'],['十一月要回国两周','私信','10/18'],['养过一只仓鼠，去年走了','私信','10/15']].map(([t,s,d])=>`<div class="mem"><span class="t">${t}</span><span class="s">${s} · ${d}</span></div>`).join('')}
+    <div class="muted" style="font-size:12.5px;padding:8px 4px">还有 3 条 · 往下滚动</div>
+   </div>
+   <div class="side">
+    <div class="box"><b>身份关联</b>尚未关联公开身份 <span class="lnk">关联…</span></div>
+    <div class="box"><b>整理</b><div class="kvl"><span>上次整理</span>10/29 03:00<span>待整理</span>2 条互动<span>下次</span>今晚 03:00（记忆补整理）</div></div>
+   </div>
+  </div>
+ </div>
+</div>`;
+document.querySelector('[data-frame=memory]').innerHTML=shell('memory','记忆','用户记忆与角色经历','<span class="seg"><span class="on">用户记忆</span><span>角色经历</span></span><span class="btn sm ghost">⚙ 高级设置</span>',MEM).replace('<div class="cnt">','<div class="cnt nopad">');
+const days=[['10/23',0],['10/24',0],['10/25',0],['10/26',0],['10/27',0],['10/28',36.97],['10/29',0.77]];
+let heat='';for(let i=0;i<364;i++){const last=i>=357;heat+='<i style="'+(i===362?'background:#1f6f43':i===363?'background:#9fd5b3':'')+'"></i>';}
+const BILL=`
+<div class="stats">
+  <div class="stat"><small>累计 token</small><b>37.7 <span>万</span></b></div>
+  <div class="stat"><small>可估算费用</small><b>$0.048</b></div>
+  <div class="stat"><small>单日峰值</small><b>37.0 <span>万 token</span></b></div>
+  <div class="stat"><small>缓存读取占比</small><b>39.7<span>%</span></b></div>
+  <div class="stat"><small>每次回复均费</small><b>$0.00025</b></div>
+</div>
+<div class="bgrid">
+  <div class="card">
+    <div class="ch"><b>每日用量</b><small>按模型</small><span class="sp"></span><span class="seg"><span class="on">token</span><span>费用</span></span></div>
+    <div class="chart"><span class="yl" style="bottom:182px">40 万</span><span class="gl" style="bottom:186px"></span><span class="yl" style="bottom:88px">20 万</span><span class="gl" style="bottom:93px"></span><span class="yl" style="bottom:-6px">0</span>
+      ${days.map(([d,v])=>`<div class="bar2" style="height:${Math.max(.6,v/40*100)}%"></div>`).join('')}</div>
+    <div class="xl">${days.map(([d])=>`<span>${d}</span>`).join('')}</div>
+  </div>
+  <div class="card">
+    <div class="ch"><b>用量占比</b><span class="sp"></span><span class="seg"><span class="on">按模型</span><span>按用途</span></span></div>
+    <div style="display:flex;gap:22px;align-items:center;padding:14px 4px">
+      <div class="donut"><div>37.7万<small>token</small></div></div>
+      <div class="leg">
+        <div><i style="background:var(--brand)"></i>deepseek-v4.1-flash<span class="v">100%</span></div>
+        <div class="muted" style="font-size:12px;padding-left:17px">37.7 万 token · $0.048</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="card" style="padding:12px 18px">
+  <div style="display:flex;align-items:center;gap:16px"><b style="font-size:14px">活动</b><small class="muted">近一年 · 每格一天</small><div class="heat" style="flex:1">${heat}</div><small class="cap">少 ▢▢▣■ 多</small></div>
+</div>
+<div class="adv"><div class="adv-h"><span class="chev">▸</span><b>调用流水</b><small>10/23 – 10/29 · 共 23 次调用 · 点开看每一次的用途、模型、token 和费用，可按用途和日期筛选</small></div></div>`;
+document.querySelector('[data-frame=billing]').innerHTML=shell('billing','计费','Pi 目录估算 · 美元 · 北京时间','<span class="seg"><span>今日</span><span class="on">近 7 日</span><span>近 30 日</span><span>本月</span></span><span class="refresh" title="刷新">↻</span>',BILL);
+function fit(){document.querySelectorAll('.fit').forEach(f=>{const k=Math.min(1,f.clientWidth/1440);const a=f.firstElementChild;if(!a)return;a.style.transform='scale('+k+')';f.style.height=(868*k)+'px';});}
+addEventListener('resize',fit);fit();
+</script>
+</body>
+</html>

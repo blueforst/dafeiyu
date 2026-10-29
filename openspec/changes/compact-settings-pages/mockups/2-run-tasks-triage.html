@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>设置 · 表单三页</title>
+<style>
+:root{--bg:#fff;--page:#eef0f3;--side:#f9fafb;--hover:rgba(38,49,72,.05);--active:#ebeef2;--t1:#0f1115;--t2:#61666b;--t3:#81858c;--cap:#adb2b8;--b1:rgba(0,0,0,.08);--b2:rgba(0,0,0,.12);--brand:#4176e6;--brand-soft:#e4edfd;--ok:#15803d;--ok-soft:#e6faed;--warn:#aa6416;--warn-soft:#fef5e7;--fill:#f3f4f6;--card:#fafbfc;--note:#fff8db;--note-b:#f1d675}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151517;--page:#0c0c0d;--side:#1b1b1c;--hover:rgba(255,255,255,.05);--active:#2c2c2e;--t1:#f9fafb;--t2:#adb2b8;--t3:#81858c;--cap:#61666b;--b1:rgba(255,255,255,.08);--b2:rgba(255,255,255,.16);--brand:#7aaaff;--brand-soft:#28314a;--ok:#4ade80;--ok-soft:#233c2c;--warn:#fbbf24;--warn-soft:#27241f;--fill:#232326;--card:#1b1b1d;--note:#2d2814;--note-b:#6b5a1c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--t1);font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.intro,.opt,.note{max-width:1472px;margin:0 auto;padding:0 16px}
+.intro{padding-top:22px}
+.intro h1{font-size:19px;margin:0 0 6px}
+.intro p,.intro li{color:var(--t2);font-size:13.5px}
+.intro p{margin:0 0 4px}.intro ul{margin:6px 0 0;padding-left:18px}
+.opt{margin-top:22px;margin-bottom:8px}
+.opt-head{display:flex;align-items:center;gap:12px;margin-bottom:10px;padding:6px 10px}
+.opt-head .letter{width:28px;height:28px;border-radius:50%;background:var(--t1);color:var(--bg);display:grid;place-items:center;font-weight:600;font-size:13px;flex:none}
+.opt-head h2{font-size:16px;margin:0}.opt-head p{margin:0;color:var(--t2);font-size:13px}
+.fit{position:relative}
+.app{width:1440px;height:868px;transform-origin:0 0;background:var(--bg);border:1px solid var(--b2);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.06)}
+.top{height:56px;flex:none;display:flex;align-items:center;gap:6px;padding:0 20px;border-bottom:1px solid var(--b1)}
+.top .brand{font-weight:600;font-size:15px;margin-right:18px}
+.top .nav{padding:6px 12px;border-radius:8px;color:var(--t2)}
+.top .nav.on{background:var(--active);color:var(--t1);font-weight:600}
+.sp{flex:1}
+.pill{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--warn-soft);color:var(--warn)}
+.btn{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--b2);background:var(--bg);color:var(--t1);font:inherit;font-size:13px;white-space:nowrap}
+.btn.dark{background:var(--t1);color:var(--bg);border-color:var(--t1)}
+.btn.sm{height:26px;padding:0 9px;font-size:12.5px}
+.btn.ghost{border-color:transparent;color:var(--t2)}
+.fee{font-size:10.5px;border:1px solid var(--b2);border-radius:4px;padding:0 3px;color:var(--t3);line-height:15px}
+.body{flex:1;display:grid;grid-template-columns:232px minmax(0,1fr);min-height:0}
+.snav{background:var(--side);border-right:1px solid var(--b1);padding:10px}
+.snav .h{display:flex;justify-content:space-between;padding:10px 4px 14px;font-weight:600}
+.snav .g{font-size:11.5px;color:var(--t3);padding:12px 12px 6px}
+.snav .i{padding:7px 12px;border-radius:8px;font-size:13.5px;display:flex;align-items:center}
+.snav .i.on{background:var(--active)}
+.snav .dotw{width:6px;height:6px;border-radius:50%;background:var(--warn);margin-left:auto}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.mh{height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--b1)}
+.mh b{font-size:14px}.mh small{color:var(--t3);font-size:12.5px}
+.cnt{flex:1;min-height:0;overflow:hidden;padding:20px 28px;display:flex;flex-direction:column;gap:16px}
+.cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.card{border:1px solid var(--b1);border-radius:12px;padding:14px 18px;background:var(--bg)}
+.ch{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+.ch b{font-size:14px}.ch small{color:var(--t3);font-size:12px}
+.muted{color:var(--t3)}.cap{color:var(--cap)}
+.num{width:64px;height:30px;border:1px solid var(--b2);border-radius:7px;display:inline-flex;align-items:center;padding:0 8px;font-variant-numeric:tabular-nums;font-size:13px;background:var(--bg)}
+.num.w{width:78px}
+.unit{color:var(--t3);font-size:12.5px;margin-left:5px}
+.switch{width:34px;height:20px;border-radius:99px;background:var(--brand);position:relative;flex:none;display:inline-block;vertical-align:middle}
+.switch:after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:2px;left:16px;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch.off{background:var(--b2)}.switch.off:after{left:2px}
+.switch.ro{opacity:.45}
+/* run */
+.modes{display:flex;gap:10px;align-items:center}
+.mode{display:flex;align-items:center;gap:10px;border:1px solid var(--b2);border-radius:10px;padding:9px 14px;width:330px}
+.mode.on{border-color:var(--brand);background:var(--brand-soft)}
+.radio{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--b2);flex:none}
+.mode.on .radio{border:4.5px solid var(--brand)}
+.mode b{font-size:13.5px}.mode small{display:block;color:var(--t3);font-size:12px}
+.lim{width:100%;border-collapse:collapse;font-size:13px}
+.lim th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 10px 6px 0}
+.lim td{padding:6px 10px 6px 0;border-top:1px solid var(--b1);white-space:nowrap}
+.lim td:first-child{font-weight:500;width:84px}
+.use{color:var(--t3);font-size:12.5px}
+.bar{display:inline-block;width:70px;height:5px;border-radius:9px;background:var(--fill);vertical-align:middle;margin-right:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok);border-radius:9px}
+.row{display:flex;align-items:center;gap:10px;min-height:34px}
+.big{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:1px 9px;border-radius:99px;background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.adv{border:1px solid var(--b1);border-radius:12px;background:var(--card)}
+.adv-h{display:flex;align-items:center;gap:10px;padding:11px 18px;font-size:13.5px}
+.adv-h b{font-weight:600}.adv-h small{color:var(--t3);font-size:12px}
+.adv-h .chev{color:var(--t3);font-size:11px;width:12px}
+.adv-b{border-top:1px solid var(--b1);padding:12px 18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 32px}
+.f{display:flex;align-items:center;gap:10px;font-size:13px}
+.f .l{min-width:118px;color:var(--t2)}
+.f .h{color:var(--cap);font-size:12px}
+/* triage */
+.stats{display:flex;border:1px solid var(--b1);border-radius:12px;padding:12px 6px;align-items:center}
+.stat{flex:1;padding:0 16px;border-right:1px solid var(--b1)}
+.stat:last-of-type{border-right:0}
+.stat small{display:block;color:var(--t3);font-size:12px}
+.stat b{font-size:19px;font-variant-numeric:tabular-nums}
+.stat b span{font-size:13px;color:var(--t3);font-weight:400}
+.refresh{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--t3);margin-right:6px}
+.lbl{font-size:12.5px;color:var(--t2);margin:2px 0 6px;display:flex;gap:6px;align-items:baseline}
+.lbl small{color:var(--cap)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tg{font-size:12.5px;padding:2px 9px;border-radius:7px;background:var(--fill);color:var(--t1)}
+.tg.add{background:none;border:1px dashed var(--b2);color:var(--t3)}
+.empty-in{height:30px;border:1px dashed var(--b2);border-radius:8px;display:flex;align-items:center;padding:0 10px;color:var(--cap);font-size:12.5px;margin-bottom:12px}
+.line{display:flex;gap:22px;font-size:13px;color:var(--t2);align-items:center}
+.line .okc{color:var(--ok)}
+/* tasks */
+.tl{position:relative;height:92px;margin:2px 8px 0}
+.tl .axis{position:absolute;left:0;right:0;top:56px;height:4px;background:var(--fill);border-radius:9px}
+.tl .closed{position:absolute;top:50px;height:16px;background:repeating-linear-gradient(135deg,var(--warn-soft),var(--warn-soft) 5px,transparent 5px,transparent 9px);border:1px solid rgba(170,100,22,.25);border-radius:5px;font-size:10.5px;color:var(--warn);line-height:14px;padding-left:6px;white-space:nowrap;overflow:hidden}
+.tl .tick{position:absolute;top:72px;font-size:11px;color:var(--cap);transform:translateX(-50%);white-space:nowrap}
+.tl .ev{position:absolute;transform:translateX(-50%);font-size:11.5px;white-space:nowrap;text-align:center}
+.tl .ev.a{top:0}.tl .ev.b{top:20px}
+.tl .ev .stem{position:absolute;left:50%;width:1px;background:var(--b2)}
+.tl .ev.a .stem{top:17px;height:37px}.tl .ev.b .stem{top:17px;height:17px}
+.tl .d{position:absolute;top:52px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--brand);border:2px solid var(--bg)}
+.tl .d.off{background:var(--bg);border:1.5px solid var(--cap)}
+.tl .ev.off{color:var(--cap)}
+.tl .now{position:absolute;top:44px;height:28px;width:2px;background:var(--t1);border-radius:2px}
+.tl .nowl{position:absolute;top:28px;font-size:10.5px;transform:translateX(-50%);white-space:nowrap;font-weight:600}
+table.tk{width:100%;border-collapse:collapse;font-size:13px}
+.tk th{font-weight:500;color:var(--t3);font-size:12px;text-align:left;padding:0 10px 8px;border-bottom:1px solid var(--b1)}
+.tk td{padding:0 10px;height:42px;border-bottom:1px solid var(--b1);white-space:nowrap}
+.tk td.nm{font-weight:500}
+.tk td.act{width:100%;text-align:right}
+.tk td.act .btn{visibility:hidden}
+.tk tr.hov td{background:var(--hover)}
+.tk tr.hov td.act .btn{visibility:visible}
+.tk tr.offr td.nm,.tk tr.offr td.t{color:var(--t3)}
+.xw{font-size:11px;padding:0 6px;border-radius:5px;background:var(--warn-soft);color:var(--warn);margin-left:8px;font-weight:400}
+.tm{width:74px;height:28px;border:1px solid var(--b2);border-radius:7px;display:inline-flex;align-items:center;padding:0 8px;font-variant-numeric:tabular-nums}
+.foot{font-size:12.5px;color:var(--t3);display:flex;gap:14px}
+.foot a{color:var(--brand);text-decoration:none}
+.note div{background:var(--note);border:1px solid var(--note-b);border-radius:10px;padding:10px 14px;font-size:13px;margin-top:10px}
+.tagnote{display:inline-block;font-size:11px;color:var(--brand);background:var(--brand-soft);border-radius:5px;padding:0 6px;margin-left:8px}
+</style>
+</head>
+<body>
+<div class="intro">
+  <h1>设置 · 表单类三页（运行与发送 / 消息分级与过滤 / 定时任务）</h1>
+  <p>按你的窗口 1440×868 画，数据是你面板里现在的值。思路：主页面只放平时会看、会改的；其余参数收进每页底部的“高级设置”，默认收起。</p>
+  <ul>
+    <li>输入框按内容给宽度（填 2～3 位数的框不再拉满一整行），两列卡片铺满宽度。三页都在一屏内放下。</li>
+    <li>两个“普通消息时效”（6 小时 / 3 小时）合并成一个<b>消息时效</b>，放在“消息分级与过滤 → 高级设置”，默认 3 小时；优先名单里的消息照样排在前面。</li>
+  </ul>
+</div>
+
+<div class="opt">
+  <div class="opt-head"><div class="letter">1</div><div><h2>运行与发送</h2><p>高级设置在图里是展开的样子，平时收起。</p></div></div>
+  <div class="fit" data-frame="run"></div>
+</div>
+<div class="opt">
+  <div class="opt-head"><div class="letter">2</div><div><h2>消息分级与过滤</h2><p>关键词和名单从大文本框改成小标签；统计压成一条；排队、冷却为空时只占一行。</p></div></div>
+  <div class="fit" data-frame="triage"></div>
+</div>
+<div class="opt">
+  <div class="opt-head"><div class="letter">3</div><div><h2>定时任务</h2><p>上面一条“今天的安排”时间轴，下面每个任务一行，按时间排序；“单次执行”鼠标移上去才出现。</p></div></div>
+  <div class="fit" data-frame="tasks"></div>
+</div>
+<div class="note"><div><b>说明</b>：“高级设置”每页各自一块、默认收起，展开状态会记住。图 1 展开给你看里面有什么；图 2、图 3 是收起的样子，括号里写了收着的是哪几项。</div></div>
+<div style="height:40px"></div>
+
+<script>
+const NAV=[['运行',[['run','运行与发送'],['model','模型'],['tasks','定时任务'],['triage','消息分级与过滤']]],['数据',[['memory','记忆'],['billing','计费']]],['浏览器与采集',[['browser','浏览器接管'],['sources','采集来源']]],['排查',[['health','健康与日报'],['logs','日志阶段与队列'],['history','任务执行历史']]]];
+function shell(id,title,desc,actions,body){
+  const nav='<div class="h"><span>设置</span><span class="muted">≡</span></div>'+NAV.map(([g,items])=>'<div class="g">'+g+'</div>'+items.map(([k,t])=>'<div class="i'+(k===id?' on':'')+'">'+t+(k==='health'?'<span class="dotw"></span>':'')+'</div>').join('')).join('');
+  return '<div class="app"><div class="top"><span class="brand">角色互动工作流</span><span class="nav">动态</span><span class="nav">人设</span><span class="nav on">设置</span><span class="sp"></span><span class="pill">● 已暂停</span>&nbsp;<span class="btn dark">启动</span></div><div class="body"><div class="snav">'+nav+'</div><div class="main"><div class="mh"><b>'+title+'</b><small>'+desc+'</small><span class="sp"></span>'+actions+'</div><div class="cnt">'+body+'</div></div></div></div>';
+}
+const RUN=`
+<div class="card">
+  <div class="ch"><b>运行模式</b><small>切换立即保存；顶部“启动 / 暂停”控制主循环，切换模式不会恢复业务</small></div>
+  <div class="modes">
+    <div class="mode"><span class="radio"></span><div><b>草稿模式</b><small>只生成草稿，批准后才发送</small></div></div>
+    <div class="mode on"><span class="radio"></span><div><b>自动模式</b><small>按身份、时效、额度和出站规则自动发送</small></div></div>
+  </div>
+</div>
+<div class="cols">
+  <div class="card">
+    <div class="ch"><b>发送上限</b><small>私信的“每天”按近 24 小时算；公开的“今天”含问候帖</small></div>
+    <table class="lim">
+      <tr><th></th><th>每小时</th><th>每天</th><th>已用（本小时 · 今天）</th></tr>
+      <tr><td>公开回复</td><td><span class="num">10</span></td><td><span class="num">180</span></td><td class="use"><span class="bar"><i style="width:2%"></i></span>0 · 0</td></tr>
+      <tr><td>私信</td><td><span class="num">30</span></td><td><span class="num">400</span></td><td class="use"><span class="bar"><i style="width:2%"></i></span>0 · 0</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <div class="ch"><b>回复时段</b><span class="sp"></span><span class="chip">● 现在可以回复</span></div>
+    <div class="row"><span class="big">23:30 – 08:00</span><span class="muted">不回复</span></div>
+    <div class="row" style="margin-top:4px"><span class="switch"></span><span>跟随早晚安：早安帖后开放，晚安帖后 30 分钟关闭</span></div>
+    <div class="row cap" style="font-size:12px">早晚安任务停用或失败时，仍按上面的时间开关</div>
+  </div>
+</div>
+<div class="adv">
+  <div class="adv-h"><span class="chev">▾</span><b>高级设置</b><small>平时不用改 · 默认收起</small></div>
+  <div class="adv-b">
+    <div class="f"><span class="l">每轮最多处理</span><span class="num">2</span><span class="unit">条</span><span class="h">公开与私信轮流出队</span></div>
+    <div class="f"><span class="l">晚安后关闭延迟</span><span class="num">30</span><span class="unit">分钟</span></div>
+    <div class="f"><span class="l">账号字数上限</span><span>原创 280 · 公开回复 280</span><span class="h">加权字符 · 尚未读取</span><span class="btn sm ghost">重新读取</span></div>
+    
+  </div>
+</div>`;
+const TRIAGE=`
+<div class="stats">
+  <div class="stat"><small>今日公开</small><b>0 <span>/ 180</span></b></div>
+  <div class="stat"><small>近 24 小时私信</small><b>0 <span>/ 400</span></b></div>
+  <div class="stat"><small>排队</small><b>0</b></div>
+  <div class="stat"><small>今日过滤</small><b>0</b></div>
+  <div class="stat"><small>骚扰冷却</small><b>0 <span>人</span></b></div>
+  <span class="refresh" title="刷新">↻</span>
+</div>
+<div class="cols">
+  <div class="card">
+    <div class="ch"><b>优先处理</b><small>名单里的消息排在前面</small></div>
+    <div class="lbl">公开账号</div>
+    <div class="empty-in">输入 @账号，回车添加</div>
+    <div class="lbl">私信会话</div>
+    <div class="empty-in" style="margin-bottom:2px">输入会话或用户，回车添加</div>
+  </div>
+  <div class="card">
+    <div class="ch"><b>过滤</b><small>命中的消息不回复</small></div>
+    <div class="lbl">广告关键词 <small>7</small></div>
+    <div class="tags"><span class="tg">返利</span><span class="tg">代理</span><span class="tg">空投</span><span class="tg">airdrop</span><span class="tg">giveaway</span><span class="tg">加v</span><span class="tg">互关涨粉</span><span class="tg add">＋ 添加</span></div>
+    <div class="lbl">纯问候词 <small>12</small></div>
+    <div class="tags" style="margin-bottom:0"><span class="tg">hi</span><span class="tg">hello</span><span class="tg">hey</span><span class="tg">在吗</span><span class="tg">在么</span><span class="tg">你好</span><span class="tg">嗨</span><span class="tg">哈喽</span><span class="tg">早</span><span class="tg">早安</span><span class="tg">晚上好</span><span class="tg">晚安</span><span class="tg add">＋ 添加</span></div>
+  </div>
+</div>
+<div class="card" style="padding:11px 18px">
+  <div class="line"><b style="color:var(--t1)">排队与冷却</b><span><span class="okc">✓</span> 当前没有排队消息</span><span><span class="okc">✓</span> 今天没有过滤</span><span><span class="okc">✓</span> 没有处于骚扰冷却的用户</span></div>
+</div>
+<div class="adv">
+  <div class="adv-h"><span class="chev">▸</span><b>高级设置</b><small>消息时效 3 小时（超过就不回复）、同文重复降优先阈值 3</small></div>
+</div>`;
+const TASKS=`
+<div class="card" style="padding-bottom:6px">
+  <div class="ch"><b>今天的安排</b><small>北京时间</small></div>
+  <div class="tl" id="tl"></div>
+</div>
+<div class="card" style="padding:12px 8px 4px">
+  <table class="tk">
+    <tr><th style="width:44px"></th><th>任务</th><th>时间</th><th>上次执行</th><th></th></tr>
+    <tr class="offr"><td><span class="switch off"></span></td><td class="nm">数据库备份</td><td class="t"><span class="tm">02:30</span></td><td class="cap">从未执行</td><td class="act"><span class="btn sm">单次执行</span></td></tr>
+    <tr><td><span class="switch"></span></td><td class="nm">记忆补整理</td><td class="t"><span class="tm">03:00</span></td><td class="muted">10/28 13:32 完成</td><td class="act"><span class="btn sm">单次执行 <span class="fee">计费</span></span></td></tr>
+    <tr class="hov"><td><span class="switch"></span></td><td class="nm">虚构日程</td><td class="t"><span class="tm">06:00</span></td><td class="muted">10/28 13:32 完成</td><td class="act"><span class="btn sm">单次执行 <span class="fee">计费</span></span></td></tr>
+    <tr class="offr"><td><span class="switch off"></span></td><td class="nm">早安帖<span class="xw">会发到 X</span></td><td class="t"><span class="tm">08:00</span></td><td class="cap">从未执行</td><td class="act"><span class="btn sm">单次执行 <span class="fee">计费</span></span></td></tr>
+    <tr><td><span class="switch"></span></td><td class="nm">每日日报</td><td class="t"><span class="tm">09:00</span></td><td class="muted">10/29 09:00 完成</td><td class="act"><span class="btn sm">单次执行</span></td></tr>
+    <tr><td><span class="switch"></span></td><td class="nm">账号合规检查</td><td class="t"><span class="tm">10:00</span></td><td class="muted">10/28 19:24 完成</td><td class="act"><span class="btn sm">单次执行</span></td></tr>
+    <tr class="offr"><td><span class="switch off"></span></td><td class="nm">晚安帖<span class="xw">会发到 X</span></td><td class="t"><span class="tm">23:00</span></td><td class="cap">从未执行</td><td class="act"><span class="btn sm">单次执行 <span class="fee">计费</span></span></td></tr>
+  </table>
+</div>
+<div class="foot"><span>主循环由顶部“启动 / 暂停”控制</span><a href="#">查看任务执行历史 →</a></div>
+<div class="adv">
+  <div class="adv-h"><span class="chev">▸</span><b>高级设置</b><small>主循环间隔 60 秒、宿主健康检查间隔 300 秒（只读）</small></div>
+</div>`;
+document.querySelector('[data-frame=run]').innerHTML=shell('run','运行与发送','保存后下一轮生效','<span class="btn dark sm">保存</span>',RUN);
+document.querySelector('[data-frame=triage]').innerHTML=shell('triage','消息分级与过滤','分级、优先名单与骚扰冷却','<span class="btn dark sm">保存</span>',TRIAGE);
+document.querySelector('[data-frame=tasks]').innerHTML=shell('tasks','定时任务','计划统一使用北京时间','<span class="btn dark sm">保存</span>',TASKS);
+// timeline
+const tl=document.getElementById('tl');const pct=h=>(h/24*100)+'%';
+let html='<div class="axis"></div><div class="closed" style="left:0;width:'+pct(8)+'">不回复</div><div class="closed" style="left:'+pct(23.5)+';right:0"></div>';
+for(const h of [0,3,6,9,12,15,18,21,24])html+='<span class="tick" style="left:'+pct(h)+'">'+String(h).padStart(2,'0')+':00</span>';
+const ev=[[2.5,'备份','a',0],[3,'记忆补整理','b',1],[6,'虚构日程','a',1],[8,'早安帖','b',0],[9,'日报','a',1],[10,'合规检查','b',1],[23,'晚安帖','a',0]];
+for(const [h,name,row,on] of ev)html+='<div class="ev '+row+(on?'':' off')+'" style="left:'+pct(h)+'">'+name+'<span class="stem"></span></div><i class="d'+(on?'':' off')+'" style="left:'+pct(h)+'"></i>';
+html+='<div class="now" style="left:'+pct(16.6)+'"></div><span class="nowl" style="left:'+pct(16.6)+'">现在 16:36</span>';
+tl.innerHTML=html;
+function fit(){document.querySelectorAll('.fit').forEach(f=>{const k=Math.min(1,f.clientWidth/1440);const a=f.firstElementChild;if(!a)return;a.style.transform='scale('+k+')';f.style.height=(868*k)+'px';});}
+addEventListener('resize',fit);fit();
+</script>
+</body>
+</html>

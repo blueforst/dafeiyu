@@ -27,7 +27,7 @@ function scrub(text:string, key?:string):string {
 }
 
 async function infoFor(provider:string, id:string, isCustomModel:boolean):Promise<ModelInfo|undefined> {
-  if (isCustomModel) {const info=await findCatalogModel(id);return info?{...info,cost:{input:0,output:0},costKnown:false}:undefined;}
+  if (isCustomModel) {const info=await findCatalogModel(id);return info?{...info,cost:{input:0,output:0,cacheRead:0,cacheWrite:0},costKnown:false}:undefined;}
   return (await listModels(provider)).find(m => m.id === id);
 }
 
@@ -109,10 +109,10 @@ export function registerModelRoutes(app:FastifyInstance, deps:Deps):void {
     const b = req.body ?? {};
     const provider = String(b.provider ?? '');
     try { checkBaseUrl(b.baseUrl); } catch (e:any) { throw new HttpError(e.message); }
-    if (provider === 'custom' ? !CUSTOM_APIS.includes(b.api) : !(await listProviders()).some(p => p.id === provider && p.available)) throw new HttpError(provider === 'custom' ? '请选择接口协议' : '服务商尚未接入或不存在');
+    if (provider === 'custom' ? (b.api !== undefined && b.api !== '' && !CUSTOM_APIS.includes(b.api)) : !(await listProviders()).some(p => p.id === provider && p.available)) throw new HttpError(provider === 'custom' ? '请选择接口协议' : '服务商尚未接入或不存在');
     const apiKey = keyFor(provider, String(b.baseUrl), b.apiKey);
     try {
-      const r = await discover({ provider, baseUrl: String(b.baseUrl).trim(), api: provider === 'custom' ? b.api : undefined, apiKey });
+      const r = await discover({ provider, baseUrl: String(b.baseUrl).trim(), api: provider === 'custom' && b.api ? b.api : undefined, apiKey });
       deps.store.log('model-discover', provider + ' 拉取到 ' + r.total + ' 个模型');
       return r;
     } catch (e:any) {

@@ -261,6 +261,10 @@ test('主循环失败和重启中断均保留真实历史且不执行第二个�
   f.scheduler.recordMainStart('interrupted-round','test-account',at+1000);
   f.at(at+2000);const restarted=new TaskScheduler(f.store,f.deps);
   assert.equal(restarted.getRun('interrupted-round')?.status,'interrupted');
-  assert.equal(restarted.history({taskId:'main'}).items.length,2);assert.deepEqual(f.calls,[]);
+  const hist=restarted.history({taskId:'main'});
+  assert.equal(hist.items.length,2);
+  const mainCount=hist.counts.find(c=>c.task==='main');
+  assert.deepEqual(mainCount,{task:'main',total:2,failed:2});
+  assert.deepEqual(f.calls,[]);
  }finally{f.close();}
 });

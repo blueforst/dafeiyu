@@ -7,15 +7,22 @@ import {readTweets} from '../dist/browser.js';
 
 const OUT=process.env.ARTIFACT_DIR||'/artifacts';mkdirSync(OUT,{recursive:true});
 const worker='fixture_worker',stamp=new Date().toISOString();
-const article=(handle,id,text,options={})=>`<article data-testid="tweet">${options.social===undefined?'':'<div data-testid="socialContext">'+options.social+'</div>'}<a href="/${handle}/status/${id}"><time${options.time===null?'':' datetime="'+(options.time||stamp)+'"'}></time></a><div data-testid="tweetText">${text}</div></article>`;
+const nativeRows=new Map(),parents={'601':'501','602':'502','603':'503','604':'504','605':'505'};
+const article=(handle,id,text,options={})=>{
+ const parent=parents[id]??null;nativeRows.set(id,{rest_id:id,legacy:{conversation_id_str:parent??id,in_reply_to_status_id_str:parent,...(parent?{in_reply_to_screen_name:worker}:{}),created_at:options.time||stamp},core:{user_results:{result:{legacy:{screen_name:handle}}}}});
+ const body=handle===worker?text:'@'+worker+' '+text;
+ return `<article data-testid="tweet">${options.social===undefined?'':'<div data-testid="socialContext">'+options.social+'</div>'}<a href="/${handle}/status/${id}"><time${options.time===null?'':' datetime="'+(options.time||stamp)+'"'}></time></a><div data-testid="tweetText">${body}</div></article>`;
+};
 const pageHTML=(body,script='')=>'<!doctype html><html><body>'+body+(script?'<script>'+script+'</script>':'')+'</body></html>';
 const report={evidence:'真实隔离 Camoufox + 合成 DOM，所有网络请求均被脚本拦截；没有真实 X 页面或账号',checks:[],errors:[],requests:[],platformVisited:false};
 const browser=await observer(),context=await browser.newContext(),page=await context.newPage();let scenario='mentions';
+function nativeFixtures(html){return html.replace('</body>',`<script>fetch('/i/api/graphql/fixture/Relations')</script></body>`);}
 await context.route('**/*',async route=>{
  const url=new URL(route.request().url());report.requests.push({origin:url.origin,path:url.pathname});
  if(url.origin!=='https://x.com'){await route.abort();return;}
+ if(url.pathname==='/i/api/graphql/fixture/Relations'){await route.fulfill({status:200,json:{data:[...nativeRows.values()]}});return;}
  if(url.pathname==='/i/api/graphql/fixture/NotificationsTimeline'){await new Promise(resolve=>setTimeout(resolve,scenario==='native-error'?300:1200));await route.fulfill({status:scenario==='native-error'?503:200,json:{ready:scenario!=='native-error'}});return;}
- let html;
+ nativeRows.clear();let html;
  if(url.pathname==='/notifications/mentions'){
   html=scenario==='unknown'?pageHTML('<main><div>尚未水合的列表</div></main>'):['native-pending','native-error'].includes(scenario)?pageHTML('<main>'+article('visitor','403','旧缓存评论')+'</main>',`fetch('/i/api/graphql/fixture/NotificationsTimeline').then(response=>{if(!response.ok)throw Error('合成读取故障');return response.json()}).then(()=>{document.querySelector('main').insertAdjacentHTML('beforeend',${JSON.stringify(article('visitor','404','原生读取结束后出现的新评论'))})}).catch(()=>{})`):pageHTML('<main><div role="progressbar">正在读取</div></main>',`setTimeout(()=>{document.querySelector('main').innerHTML=${JSON.stringify(article('visitor','401','正文中出现 No results 也不能被过滤'))}},1100)`);
  }else if(url.pathname==='/search')html=pageHTML('<main><div data-testid="emptyState"><h2>No results</h2></div></main>');
@@ -31,7 +38,8 @@ await context.route('**/*',async route=>{
  else if(url.pathname==='/'+worker+'/status/504')html=pageHTML('<main>'+article(worker,'504','自己的次新主帖')+article('other_visitor','604','次新主帖中的普通新回复')+'</main>');
  else if(url.pathname==='/'+worker+'/status/505')html=pageHTML('<main>'+article(worker,'505','自己的时间未知主帖',{time:null})+article('other_visitor','605','时间未知主帖中的可靠回复')+'</main>');
  else{await route.abort();return;}
- await route.fulfill({status:200,contentType:'text/html; charset=utf-8',body:html});
+ // 通知正文的提及由夹具直接给出；线程回复另外携带固定父帖元数据。
+ await route.fulfill({status:200,contentType:'text/html; charset=utf-8',body:nativeFixtures(html)});
 });
 const run=source=>collectReadyPublic({page,handle:worker,source,deadline:Date.now()+15000,readTweets,navigate:async(p,url,deadline)=>p.goto(url,{waitUntil:'domcontentloaded',timeout:Math.max(1,Math.min(5000,deadline-Date.now()))})});
 async function check(name,fn){console.log('[开始] '+name);try{await fn();report.checks.push(name);console.log('[通过] '+name);}catch(error){report.errors.push({name,error:error.stack||String(error)});console.log('[失败] '+name);}}
