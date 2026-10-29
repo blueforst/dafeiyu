@@ -61,9 +61,8 @@ export function notice(text, kind = 'info', {duration=kind==='error'?8000:3200}=
   const arm=()=>{if(active&&duration>0&&!hovered&&!focused){pause();started=Date.now();timer=setTimeout(dismiss,remaining);}};
   clearNotice=dismiss;el.dataset.kind=kind;
   if(!text){dismiss();return;}
-  set(el,h('span',{class:'notice-text'},text),h('button',{type:'button',class:'notice-close','aria-label':'关闭提示',onclick:dismiss}));el.hidden=false;
+  set(el,h('span',{class:'notice-text'},text),h('button',{type:'button',class:'notice-close','aria-label':'关闭提示',onclick:dismiss,onfocus:()=>{focused=true;pause();},onblur:()=>{focused=false;arm();}}));el.hidden=false;
   el.onpointerenter=()=>{hovered=true;pause();};el.onpointerleave=()=>{hovered=false;arm();};
-  el.onfocusin=()=>{focused=true;pause();};el.onfocusout=event=>{if(!el.contains(event.relatedTarget)){focused=false;arm();}};
   arm();
 }
 

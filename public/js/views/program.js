@@ -113,6 +113,7 @@ export const EVENT_SUMMARY = {
   processed: { category: '运行', summarize: d => { const o = parseJson(d); return o ? `消息处理完成（${o.channel === 'private' ? '私信' : '公开'} · ${STATUS[o.status] || o.status || '已处理'}）` : '消息处理完成'; } },
   'generation-error': { category: '运行', tone: 'warn', summarize: () => '回复生成失败' },
   'message-validation': { category: '采集', tone: 'warn', summarize: d => { const o = parseJson(d); return '入站消息校验跳过：' + (o?.reason || '缺少可靠时间或标识'); } },
+  'collection-result': {category:'采集',summarize:d=>{const o=parseJson(d);if(!o)return '采集结果';const state={ok:'读取成功',empty:'本轮没有新消息',partial:'部分读取',failed:'读取失败',unsupported:'尚未适配',blocked:'需要人工处理',unknown:'结果待确认'}[o.status]||'结果待确认';return `${o.channel==='private'?'私信':'公开'}采集：${state}${Number.isFinite(o.eventCount)?'（'+o.eventCount+' 条）':''}`;}},
   'collection-warning': { category: '采集', tone: 'warn', summarize: d => { const o = parseJson(d); return o?.reason || '页面采集存在异常'; } },
   'private-peer-candidate': { category: '记忆', summarize: d => { const o = parseJson(d); return o?.peerHandle ? `识别私信对象候选 @${o.peerHandle}` : '识别私信对象候选'; } },
   'identity-link-conflict': { category: '记忆', tone: 'warn', summarize: () => '跨渠道身份关联冲突' },
@@ -385,7 +386,7 @@ export function mount(root, ctx) {
         onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRow(); } },
       },
         h('td', { class: 'log-col-time', title: fmtDateTime(row.at) }, fmtTime(row.at, true)),
-        h('td', { class: 'log-col-cat' }, h('span', { class: 'ws-badge ' + tone }, category)),
+        h('td', { class: 'log-col-cat' }, h('span', { class: 'ws-badge ' + tone, title:category }, category)),
         h('td', { class: 'log-col-msg' },
           summary,
           row.channel ? h('span', { class: 'ws-badge', style: 'margin-left:6px' }, row.channel === 'private' ? '私信' : '公开') : null

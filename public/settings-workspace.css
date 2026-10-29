@@ -404,3 +404,6 @@ tr.selected td,.ws-row-hover.selected{background:var(--ws-hover)}
 .call-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 24px;margin:0}
 .call-detail-grid>div{min-width:0}.call-detail-grid dt{font-size:12px;color:var(--ws-muted);margin-bottom:3px}.call-detail-grid dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap;font-variant-numeric:tabular-nums}
 .call-ledger caption{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* 未知事件类别也不能越过固定列，完整名称保留在悬停及展开明细。 */
+.log-col-cat{overflow:hidden}
+.log-col-cat .ws-badge{display:inline-block;max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}

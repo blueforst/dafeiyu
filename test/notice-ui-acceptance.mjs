@@ -9,7 +9,7 @@ const browser=await observer(),page=await browser.newPage({viewport:{width:1280,
 await page.route('**/api/status',r=>r.fulfill({json:{control,busy:false,accountId:'fixture',browser:{loggedIn:true,handle:'fixture'},config:{mode:'auto',model:{configured:true,id:'fixture'}},cooldown:{}}}));
 await page.route('**/api/control/*',async route=>{if(hold)await new Promise(resolve=>release=resolve);if(fail){fail=false;return route.fulfill({status:409,json:{error:'合成控制失败'}});}const action=route.request().url().split('/').at(-1);control={resume:'running',pause:'paused',takeover:'manual',release:'paused'}[action];await route.fulfill({json:{ok:true,control}});});
 page.on('pageerror',e=>report.errors.push({name:'页面异常',error:String(e)}));
-async function check(name,fn){console.log('开始 '+name);try{await fn();report.checks.push(name);console.log('通过 '+name);}catch(e){report.errors.push({name,error:e.stack||String(e)});}}
+async function check(name,fn){console.log('开始 '+name);try{control='paused';hold=false;fail=false;release?.();await page.goto(BASE+'/#/persona');await page.locator('#persona-save').waitFor();await fn();report.checks.push(name);console.log('通过 '+name);}catch(e){report.errors.push({name,error:e.stack||String(e)});}}
 async function start(){await page.getByRole('button',{name:'启动',exact:true}).click();await page.waitForFunction(()=>document.getElementById('notice')?.textContent==='已启动');}
 const toast=()=>page.locator('#notice');
 await page.goto(BASE+'/#/persona');await page.locator('#persona-save').waitFor();
