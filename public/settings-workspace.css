@@ -381,3 +381,26 @@ tr.selected td,.ws-row-hover.selected{background:var(--ws-hover)}
 .history-toolbar{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;min-width:0}
 .history-toolbar>.sp{flex:1}
 .history-toolbar .history-seg{flex-wrap:wrap;min-width:0;max-width:100%}
+
+/* 调用流水：紧凑摘要行，展开后才显示计量与关联资料。 */
+.call-ledger-wrap{min-width:0;max-width:100%;overflow-x:auto;border:1px solid var(--ws-border);border-radius:var(--r-md)}
+.call-ledger{width:100%;min-width:780px;border-collapse:collapse;font-size:13px;text-align:left;line-height:1.4}
+.call-ledger th{background:var(--ws-fill);color:var(--ws-muted);font-size:12px;font-weight:400;padding:8px 12px;white-space:nowrap}
+.call-ledger td{padding:8px 12px;border-top:1px solid var(--ws-border);vertical-align:middle}
+.call-ledger-row{height:48px;cursor:pointer;color:var(--ws-text);background:var(--ws-bg)}
+.call-ledger-row:hover,.call-ledger-row[aria-expanded="true"]{background:var(--ws-hover)}
+.call-ledger-row:focus-visible{outline:2px solid var(--ws-brand);outline-offset:-2px}
+.call-ledger .call-number{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.call-time{white-space:nowrap;color:var(--ws-muted);font-size:12px;font-variant-numeric:tabular-nums}
+.call-chevron{display:inline-block;width:12px;margin-left:-4px;color:var(--ws-faint)}
+.call-ledger-row[aria-expanded="true"] .call-chevron{transform:rotate(90deg)}
+.call-model span,.call-account span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px}
+.call-model small,.call-account small{display:block;color:var(--ws-faint);font-size:12px}
+.call-status{display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;color:var(--ws-muted)}
+.call-status i{width:5px;height:5px;border-radius:var(--r-full);background:currentColor}
+.call-status.completed{color:var(--ws-ok)}.call-status.failed,.call-status.interrupted{color:var(--ws-error)}.call-status.started{color:var(--ws-brand)}
+.call-ledger-detail{background:var(--ws-fill)}
+.call-ledger-detail>td{padding:16px 24px}
+.call-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 24px;margin:0}
+.call-detail-grid>div{min-width:0}.call-detail-grid dt{font-size:12px;color:var(--ws-muted);margin-bottom:3px}.call-detail-grid dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap;font-variant-numeric:tabular-nums}
+.call-ledger caption{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}

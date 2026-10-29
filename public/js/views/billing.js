@@ -1,7 +1,7 @@
-import {h,set,fmtDateTime} from '../dom.js';
+import {h,set} from '../dom.js';
 import {api} from '../api.js';
 import {heatmap,trend,share,compact,money,addDays,destroyCharts} from '../charts/usage.js';
-import {empty,errorBox,fmtUsd} from '../view-utils.js';
+import {empty,errorBox,fmtUsd,fmtUsdText} from '../view-utils.js';
 
 const PURPOSE={
  reply:'回复',
@@ -18,6 +18,8 @@ const PURPOSE={
  'legacy-unknown':'历史用量'
 };
 const STATUS={completed:'完成',failed:'失败',aborted:'已中止',interrupted:'重启中断',started:'进行中'};
+
+function callTime(ms){return ms?new Date(ms).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'—';}
 
 function today(){
  return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(Date.now());
@@ -41,7 +43,7 @@ function pills(items,onChange,initial){
 }
 
 export function mount(root,ctx={}){
- let alive=true,generation=0,activity=null,summary=null,heatMode='daily',trendMetric='totalTokens',shareGroup='models',shareTable=false,cursor=null,query='',loadingCalls=false,callsLoaded=false,custom=false;
+ let alive=true,generation=0,activity=null,summary=null,heatMode='daily',trendMetric='totalTokens',shareGroup='models',shareTable=false,cursor=null,query='',loadingCalls=false,callsLoaded=false,custom=false,callRequest=0,rowSequence=0,callBody=null;
  const day=today();
  const from=h('input',{type:'date',class:'input small','aria-label':'开始日期',value:addDays(day,-6)});
  const to=h('input',{type:'date',class:'input small','aria-label':'结束日期',value:day});
@@ -55,7 +57,7 @@ export function mount(root,ctx={}){
  const line=h('div');
  const donut=h('div');
  const state=h('div',{role:'status',class:'muted small',hidden:true});
- const calls=h('div',{class:'stack'});
+ const calls=h('div',{class:'call-ledger-wrap',tabindex:0,'aria-label':'调用流水表格，可横向滚动'});
  const more=h('button',{class:'btn small',hidden:true,type:'button',onclick:()=>loadCalls(true)},'加载更多调用');
  const rangeLabel=h('small',{class:'muted'},`${from.value} 至 ${to.value}`);
 
@@ -209,6 +211,7 @@ export function mount(root,ctx={}){
   state.textContent='';
   query=new URLSearchParams({from:from.value,to:addDays(to.value,1),...(purpose.value?{purpose:purpose.value}:{})}).toString();
   callsLoaded=false;
+  callRequest++;loadingCalls=false;
   cursor=null;
   set(calls);
   more.hidden=true;
@@ -246,50 +249,54 @@ export function mount(root,ctx={}){
   await loadRange();
  }
 
+ function ledger(){
+  callBody=h('tbody');
+  set(calls,h('table',{class:'call-ledger'},
+   h('caption',{class:'sr-only'},'调用流水，点击记录或按回车、空格展开详情'),
+   h('thead',{},h('tr',{},['时间','状态','模型','账号 / 用途','耗时','Token','费用'].map((text,i)=>h('th',{scope:'col',class:i>=4?'call-number':''},text)))),callBody));
+ }
  function callRow(c){
-  const u=c.usage;
-  const price=c.pricingStatus==='unpriced'?'未定价':c.cost?.total==null?money(null):fmtUsd(c.cost.total);
-  return h('article',{class:'call-record subcard stack'},
-   h('div',{class:'toolbar'},
-    h('b',{class:'grow'},PURPOSE[c.purpose]||c.purpose),
-    h('span',{class:'small muted'},STATUS[c.status]||c.status)
-   ),
-   h('div',{class:'small muted break'},fmtDateTime(c.startedAt)+' · '+[c.provider,c.model].filter(Boolean).join(' / ')+' · '+(c.latencyMs??'未知')+' ms'),
-   h('div',{class:'toolbar'},
-    h('span',{class:'numbers grow'},u?compact(u.totalTokens)+' token':'用量未知'),
-    h('b',{},price)
-   ),
-   h('details',{},
-    h('summary',{class:'small'},'分项与关联'),
-    h('div',{class:'small pre-wrap'},
-     u
-      ?'输入 '+compact(u.input)+' · 输出 '+compact(u.output)+'\n缓存读取 '+compact(u.cacheRead)+' · 缓存写入 '+compact(u.cacheWrite)+(u.reasoning==null?'':' · 思考 '+compact(u.reasoning)+'（含于输出）')
-      :'没有可靠用量',
-     '\n调用 '+c.id+'\n来源 '+(c.source||'未知')+(c.interactionId?'\n关联 '+c.interactionId:'')
-    )
-   )
-  );
+  const id='call-detail-'+(++rowSequence),u=c.usage,price=c.pricingStatus==='unpriced'?'未定价':c.cost?.total==null?'—':fmtUsdText(c.cost.total).text;
+  const detail=h('tr',{class:'call-ledger-detail',id,hidden:true}),cell=h('td',{colspan:7});detail.append(cell);
+  const status=['completed','failed','aborted','interrupted','started'].includes(c.status)?c.status:'unknown';
+  const row=h('tr',{class:'call-record call-ledger-row',tabindex:0,'aria-expanded':'false','aria-controls':id,'aria-label':callTime(c.startedAt)+' '+(c.actualModel||c.model||'未知模型')+' '+(STATUS[c.status]||c.status||'未知状态')+'，展开详情'},
+   h('td',{class:'call-time'},h('span',{class:'call-chevron','aria-hidden':'true'},'›'),callTime(c.startedAt)),
+   h('td',{},h('span',{class:'call-status '+status},h('i',{'aria-hidden':'true'}),STATUS[c.status]||c.status||'未知')),
+   h('td',{class:'call-model'},h('span',{},c.actualModel||c.model||'未知模型'),h('small',{},c.provider||'未知接口')),
+   h('td',{class:'call-account'},h('span',{},c.accountId||'—'),h('small',{},PURPOSE[c.purpose]||c.purpose||'未知用途')),
+   h('td',{class:'call-number',title:c.latencyMs==null?'耗时未知':c.latencyMs+' ms'},c.latencyMs==null?'—':(c.latencyMs/1000).toFixed(2)+' s'),
+   h('td',{class:'call-number',title:u?.totalTokens==null?'用量未知':u.totalTokens.toLocaleString()+' token'},u?.totalTokens==null?'—':compact(u.totalTokens)),
+   h('td',{class:'call-number',title:c.cost?.total==null?price:'$'+c.cost.total},price));
+  const toggle=()=>{
+   detail.hidden=!detail.hidden;row.setAttribute('aria-expanded',String(!detail.hidden));
+   if(!detail.hidden&&!cell.children.length){
+    const values=[['调用 ID',c.id],['来源',c.source],['渠道',c.channel],['关联',c.interactionId],['请求模型',c.model],['实际模型',c.actualModel],['结束原因',c.stopReason],['定价状态',c.pricingStatus],['价格来源',c.priceSource],['费用（美元估算）',c.cost?.total==null?price:'$'+c.cost.total],['开始',callTime(c.startedAt)],['结束',c.finishedAt?callTime(c.finishedAt):'—']];
+    if(u)values.push(...[['输入',u.input],['输出',u.output],['缓存读取',u.cacheRead],['缓存写入',u.cacheWrite],['1 小时缓存写入',u.cacheWrite1h],['思考（含于输出）',u.reasoning],['总 Token',u.totalTokens]]);
+    const dl=h('dl',{class:'call-detail-grid'});
+    for(const [label,value]of values)dl.append(h('div',{},h('dt',{},label),h('dd',{},value==null||value===''?'—':String(value))));
+    cell.append(dl);if(!u)cell.append(h('p',{class:'small muted'},'没有可靠用量'));cell.append(h('p',{class:'small muted'},'费用 '+price));
+   }
+  };
+  row.addEventListener('click',()=>{if(!getSelection()?.toString())toggle();});
+  row.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();toggle();}});
+  return [row,detail];
  }
 
  async function loadCalls(append=false){
   if(loadingCalls||!query)return;
-  loadingCalls=true;
-  more.disabled=true;
-  const expected=query;
+  loadingCalls=true;more.disabled=true;
+  const expected=query,request=++callRequest;
   try{
    const page=await api('/api/billing/calls?'+expected+(append&&cursor?'&cursor='+encodeURIComponent(cursor):''));
-   if(!alive||query!==expected)return;
-   if(!append)set(calls);
-   calls.append(...(page.items||[]).map(callRow));
-   if(!calls.children.length)calls.append(empty('该范围没有调用流水'));
-   cursor=page.nextCursor;
-   more.hidden=!cursor;
-   callsLoaded=true;
+   if(!alive||request!==callRequest||query!==expected)return;
+   if(!append)ledger();
+   callBody.append(...(page.items||[]).flatMap(callRow));
+   if(!callBody.children.length)set(calls,empty('该范围没有调用流水'));
+   cursor=page.nextCursor;more.hidden=!cursor;callsLoaded=true;
   }catch(e){
-   if(alive)errorBox(calls,e,()=>loadCalls());
+   if(alive&&request===callRequest)errorBox(calls,e,()=>loadCalls());
   }finally{
-   loadingCalls=false;
-   more.disabled=false;
+   if(request===callRequest){loadingCalls=false;more.disabled=false;}
   }
  }
 
