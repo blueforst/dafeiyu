@@ -1,4 +1,4 @@
-import { h, set } from './dom.js';
+import { h, set, fmtTime } from './dom.js';
 
 let serial = 0;
 const stored = (key, value) => { try { if (value === undefined) return localStorage.getItem(key) === '1'; localStorage.setItem(key, value ? '1' : '0'); } catch { return false; } };
@@ -70,8 +70,30 @@ export function mountWorkspace(root, { page, left, main, right } = {}) {
     dispose(){if(disposed)return;disposed=true;document.removeEventListener('keydown',keydown);l.body.removeEventListener('click',selectLeft);narrow.removeEventListener('change',changed);observer?.disconnect();document.body.classList.remove('workspace');document.documentElement.style.removeProperty('--ws-top-height');el.remove();} };
 }
 
-export function sideItem({ title, subtitle, meta, selected=false, badge:label, icon, onclick, href, ...attrs }={}) {
-  return h(href?'a':'button',{class:'ws-side-item'+(selected?' selected':''),type:href?undefined:'button',href,'aria-current':selected?'true':undefined,'data-ws-select':'1',onclick,...attrs},icon?h('span',{class:'ws-avatar'},icon):null,h('span',{class:'ws-side-copy'},h('span',{class:'ws-side-title'},title),subtitle?h('span',{class:'ws-side-subtitle'},subtitle):null),label?badge(label):null,meta?h('span',{class:'ws-side-meta'},meta):null);
+export function sideItem({ title, subtitle, meta, selected=false, badge:label, icon, iconSeed, onclick, href, ...attrs }={}) {
+  return h(href?'a':'button',{class:'ws-side-item'+(selected?' selected':''),type:href?undefined:'button',href,'aria-current':selected?'true':undefined,'data-ws-select':'1',onclick,...attrs},icon?(iconSeed===undefined?h('span',{class:'ws-avatar'},icon):avatar(icon,iconSeed)):null,h('span',{class:'ws-side-copy'},h('span',{class:'ws-side-title'},title),subtitle?h('span',{class:'ws-side-subtitle'},subtitle):null),label?badge(label):null,meta?h('span',{class:'ws-side-meta'},meta):null);
+}
+
+/** 对话头像按标识稳定配色；旧 sideItem 调用保留原外观。 */
+export function avatar(name,seed){
+  const text=String(name||'').trim();let hash=0;
+  for(const point of String(seed||text))hash=(Math.imul(hash,31)+point.codePointAt(0))>>>0;
+  const first=typeof Intl.Segmenter==='function'?[...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(text)][0]?.segment:Array.from(text)[0];
+  return h('span',{class:'ws-avatar ws-avatar-'+(hash%6+1),'aria-hidden':'true'},first||'?');
+}
+export function divider(text,{line=false}={}){return h('div',{class:'ws-divider'+(line?' line':''),role:'separator'},h('span',{},text));}
+const dayKey=at=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(at));
+export function timeDivider(prevAt,at){
+  if(!Number.isFinite(Number(at))||Number(at)<=0)return null;
+  const day=dayKey(at);if(prevAt&&Math.abs(at-prevAt)<300000&&day===dayKey(prevAt))return null;
+  const date=day===dayKey(Date.now())?'今天':day===dayKey(Date.now()-86400000)?'昨天':new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit'}).format(new Date(at));
+  return date+' '+fmtTime(at);
+}
+export function detailRow(label,value){return h('div',{class:'ws-detail-row small'},h('span',{class:'ws-detail-label'},label),h('span',{class:'ws-detail-value'},value??'未知'));}
+export function autoGrow(control,maxHeight=220){control.style.height='auto';control.style.height=Math.min(control.scrollHeight||38,maxHeight)+'px';}
+export function reply({role='assistant',avatar:portrait,name,status,tags,body,notices,actions,stats,selected=false,onselect,...attrs}={}){
+  const interactive=event=>event.target.closest('button,a,input,textarea,select,label,[contenteditable]');
+  return h('article',{...attrs,class:`ws-turn ws-turn-${role} ws-reply${selected?' selected':''}`+(attrs.class?' '+attrs.class:''),role:'button',tabindex:0,onclick:event=>{if(!interactive(event))onselect?.(event);},onkeydown:event=>{if((event.key==='Enter'||event.key===' ')&&!interactive(event)){event.preventDefault();onselect?.(event);}}},portrait,h('div',{class:'ws-reply-content'},h('div',{class:'ws-reply-name'},h('b',{},name),status,tags),body,notices,h('div',{class:'ws-reply-actions'},actions,stats?h('span',{class:'ws-stat'},stats):null)));
 }
 export function segmented(items, value, onChange, label='切换视图') { return h('div',{class:'ws-segmented',role:'tablist','aria-label':label},items.map(item=>{const [id,title]=Array.isArray(item)?item:[item.value,item.label];return h('button',{type:'button',role:'tab','aria-selected':String(value===id),class:value===id?'selected':'',onclick:()=>onChange(id)},title);})); }
 export function badge(text,kind='') { return h('span',{class:'ws-badge '+kind},text); }

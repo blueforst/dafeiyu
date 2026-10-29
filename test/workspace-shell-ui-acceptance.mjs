@@ -6,7 +6,8 @@ const BASE=process.env.PANEL_URL||'http://127.0.0.1:8083',OUT=process.env.ARTIFA
 mkdirSync(OUT,{recursive:true});
 const report={evidence:'服务器 Camoufox，独立组件夹具，无业务请求',checks:[],errors:[]};
 const html=`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"><title>工作区组件验收</title><header class="topbar"><button id="outside">外部焦点</button><button id="dispose">卸载工作区</button></header><main id="view"></main><script type="module">
-import {mountWorkspace} from '/js/shell.js';
+import * as shell from '/js/shell.js';
+const {mountWorkspace}=shell;window.__shell=shell;
 import {h} from '/js/dom.js';
 const params=new URL(location.href).searchParams;
 if(params.get('blocked')==='1')Object.defineProperty(window,'localStorage',{configurable:true,get(){throw new DOMException('禁用存储','SecurityError');}});
@@ -14,6 +15,7 @@ const root=document.getElementById('view');
 document.documentElement.dataset.originalWidth=getComputedStyle(root).maxWidth;
 const content=()=>h('div',{},Array.from({length:40},(_,i)=>h('p',{},'可滚动内容 '+i)));
 const ws=mountWorkspace(root,{page:'component',left:content(),main:content(),right:params.get('right')==='0'?false:content()});
+window.__workspace=ws;
 ws.leftHeader.append('左栏');ws.mainHeader.append('主区');ws.rightHeader.append('右栏');
 document.getElementById('dispose').onclick=()=>{ws.dispose();document.documentElement.dataset.restoredWidth=getComputedStyle(root).maxWidth;document.documentElement.dataset.disposed='1';};
 document.documentElement.dataset.ready='1';
@@ -66,6 +68,22 @@ await check('375px抽屉与浮层焦点、Esc恢复、无整体横溢',async()=>
  assert.equal(await page.locator('.ws-right').evaluate(node=>node.contains(document.activeElement)),true);await page.keyboard.press('Escape');assert.equal(await page.locator('.ws-right').isVisible(),false);assert.equal(await trigger.evaluate(node=>document.activeElement===node),true);
  await page.getByRole('button',{name:'展开左栏',exact:true}).click();assert.equal(await page.locator('.ws-left').isVisible(),true);await page.keyboard.press('Escape');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+});
+await check('共用头像、完整表情、六组浅深配色和五分钟分隔',async()=>{
+ await page.setViewportSize({width:1440,height:1000});await open();
+ const values=await page.evaluate(async()=>{const s=await import(location.origin+'/js/shell.js');const first=s.avatar('🧑‍💻角色','stable'),second=s.avatar('另一个名','stable'),empty=s.avatar('');const at=Date.parse('2026-10-29T12:00:00+08:00');return {first:first.textContent,same:first.className===second.className,empty:empty.textContent,times:[s.timeDivider(null,at),s.timeDivider(at,at+120000),s.timeDivider(at,at+480000),s.timeDivider(Date.parse('2026-10-29T23:59:00+08:00'),Date.parse('2026-10-30T00:01:00+08:00'))]};});
+ assert.equal(values.first,'🧑‍💻');assert.equal(values.same,true);assert.equal(values.empty,'?');assert.ok(values.times[0]);assert.equal(values.times[1],null);assert.ok(values.times[2]);assert.ok(values.times[3]);
+ report.avatarContrast={};for(const scheme of ['light','dark']){await page.emulateMedia({colorScheme:scheme,reducedMotion:'reduce'});const ratios=await page.evaluate(async()=>{const shell=await import(location.origin+'/js/shell.js'),host=document.querySelector('.ws-main>.ws-content');host.replaceChildren();const luminance=value=>{const rgb=value.match(/[\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};return Array.from({length:6},(_,i)=>{const a=shell.avatar('字');a.className='ws-avatar ws-avatar-'+(i+1);host.append(a);const css=getComputedStyle(a),x=luminance(css.color),y=luminance(css.backgroundColor);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);});});assert.ok(ratios.every(r=>r>=4.5),scheme+'头像对比度');report.avatarContrast[scheme]=ratios;}
+});
+await check('回复选择、操作隔离、摘要显隐和详情首行顶端对齐',async()=>{
+ await open();await page.emulateMedia({colorScheme:'light',reducedMotion:'reduce'});
+ await page.evaluate(async()=>{const s=await import(location.origin+'/js/shell.js');document.documentElement.dataset.selected='0';document.documentElement.dataset.buttons='0';const child=document.createElement('button');child.id='reply-child';child.textContent='操作';child.onclick=()=>document.documentElement.dataset.buttons=String(Number(document.documentElement.dataset.buttons)+1);const r=s.reply({name:'角色',avatar:s.avatar('角色'),body:'正文',actions:[child],stats:'统计',id:'sample-reply',onselect:event=>{document.documentElement.dataset.selected=String(Number(document.documentElement.dataset.selected)+1);event.currentTarget.classList.add('selected');}});document.querySelector('.ws-main>.ws-content').classList.add('ws-thread');document.querySelector('.ws-main>.ws-content').replaceChildren(r);const rows=document.createElement('div');rows.id='align-rows';rows.style.width='240px';rows.append(s.detailRow('模型','x'.repeat(40)),s.detailRow('耗时','12 ms'));document.querySelector('.ws-right>.ws-content').replaceChildren(rows);});
+ const row=page.locator('#sample-reply'),stat=row.locator('.ws-stat');await page.mouse.move(0,0);assert.equal(await stat.evaluate(n=>getComputedStyle(n).opacity),'0');await row.hover();assert.equal(await stat.evaluate(n=>getComputedStyle(n).opacity),'1');await page.mouse.move(0,0);await row.focus();assert.equal(await stat.evaluate(n=>getComputedStyle(n).opacity),'1');await row.press('Enter');await row.press('Space');assert.equal(await page.evaluate(()=>Number(document.documentElement.dataset.selected)),2);await page.locator('#reply-child').click();assert.equal(await page.evaluate(()=>Number(document.documentElement.dataset.selected)),2);assert.equal(await page.evaluate(()=>Number(document.documentElement.dataset.buttons)),1);
+ await row.locator('.ws-reply-name').click();assert.equal(await page.evaluate(()=>Number(document.documentElement.dataset.selected)),3);await page.mouse.move(0,0);assert.equal(await stat.evaluate(n=>getComputedStyle(n).opacity),'1');
+ const alignment=await page.locator('.ws-detail-row').evaluateAll(rows=>rows.map(r=>{const [label,value]=r.children,a=label.getBoundingClientRect(),b=value.getBoundingClientRect();return {top:Math.abs(a.top-b.top),label:a.height,value:b.height};}));assert.ok(alignment.every(x=>x.top<=1));assert.ok(alignment[0].value>alignment[0].label);
+ // 直接激活媒体规则，模拟 hover:none；验证触屏不会因悬停或聚焦显露摘要。
+ await page.evaluate(()=>{for(const sheet of document.styleSheets)for(const rule of sheet.cssRules)if(rule.conditionText==='(hover: none)'||rule.conditionText==='(hover:none)')rule.media.mediaText='all';document.querySelector('#sample-reply').classList.remove('selected');});
+ await row.hover();await row.focus();assert.equal(await stat.evaluate(n=>getComputedStyle(n).opacity),'0');await row.press('Enter');assert.equal(await stat.evaluate(n=>getComputedStyle(n).opacity),'1');
 });
 await check('卸载移除全局工作区布局并恢复原main宽度',async()=>{
  await page.setViewportSize({width:1440,height:1000});await open();assert.equal(await page.locator('body').evaluate(node=>node.classList.contains('workspace')),true);await page.locator('#dispose').click();
