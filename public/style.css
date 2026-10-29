@@ -550,3 +550,14 @@ body.workspace .notice:has(.notice-close){pointer-events:auto}
 .notice-close{flex:none;margin-left:auto;width:22px;height:22px;padding:0;border:0;border-radius:var(--r-sm);background:none;color:inherit;cursor:pointer;line-height:22px;font-size:18px}
 .notice-close::before{content:'×'}.notice-close:hover{background:var(--ws-hover)}
 .notice-close:focus-visible{outline:2px solid var(--ws-brand);outline-offset:2px}
+
+/* 会话操作属于左栏会话；popover进入顶层，避免被滚动容器裁剪。 */
+.chat-session-row{display:flex;align-items:center;position:relative;border-radius:var(--r-lg)}
+.chat-session-row>.ws-side-item{flex:1;min-width:0;padding-right:36px}
+.chat-session-options{position:absolute;right:4px;flex:none;opacity:0;background:var(--ws-side);color:var(--ws-muted)}
+.chat-session-row:hover .chat-session-options,.chat-session-row:focus-within .chat-session-options,.chat-session-row.menu-open .chat-session-options{opacity:1}
+.chat-session-row.selected .chat-session-options{background:var(--ws-active)}
+.chat-session-popover{position:fixed;inset:auto;margin:0;width:208px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);overflow:auto;color:var(--ws-text)}
+@media(hover:none),(max-width:860px){.chat-session-options{opacity:1}}
+
+.chat-session-popover button:focus-visible{outline:2px solid var(--ws-brand);outline-offset:-2px}
