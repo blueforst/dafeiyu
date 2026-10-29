@@ -26,6 +26,8 @@ import {safeBrowserDiagnostic} from './browser-operation.js';
 import {failureSummary} from './failure-summary.js';
 import type {ManualImportsService} from './manual-imports.js';
 import type {RoleExperienceService} from './role-experiences.js';
+import type {CollectionResult} from './collection-health.js';
+import {privateRequestDecision,privateRequestState,recordPrivateRequestState,confirmPrivateRequestState} from './private-requests.js';
 
 export function loggedInHandle(identity:Identity):string {
  const handle=String(identity.handle||'').trim().replace(/^@/,'').toLowerCase();
@@ -134,6 +136,33 @@ export class Workflow {
   if(sending&&channel==='private'&&this.services.triage&&this.services.triage.privateRecentCount(this.accountId())-recentAdjustment>=(c.privatePerDay??400))return 'private-daily-quota';
   return null;
  }
+ private async processPrivateRequests(result:CollectionResult,handle:string,roundId:string,deadline:number,canContinue:()=>boolean){
+  for(const value of result.privateAcceptances??[])if(value.status==='accepted'&&/^\d+-\d+$/.test(value.conversationId))confirmPrivateRequestState(this.store,handle,value.conversationId);
+  for(const candidate of (result.requests??[]).slice(0,6)){
+   if(!canContinue()||this.control()!=='running'||this.abort?.signal.aborted)break;
+   const event=candidate.event,previous=event?privateRequestState(this.store,handle,event.conversationId):null,c=this.config(),lookupOnly=previous?.status==='unknown';
+   const decision=privateRequestDecision(candidate,{accountId:handle,config:c,control:this.control(),replyHoursOpen:this.replyHours().open,channelWait:!!this.channelWaitReason('private',c,true),forgotten:!!event&&this.store.forgotten(event.userId,handle),ignored:!!event&&!!this.services.triage?.ignored(event.userId,'private',handle),age:event?this.replyAge(event.timestamp):NaN});
+   if(!event||decision==='invalid-evidence')continue;
+   if(decision!=='eligible'&&!lookupOnly){const status=decision==='advertising'?'filtered':['forgotten','harassment-cooldown'].includes(decision)?'ignored':decision==='expired'?'expired':'waiting';recordPrivateRequestState(this.store,candidate,status,decision);continue;}
+   if(!this.transport.acceptPrivateRequest||Date.now()>=deadline){if(!lookupOnly)recordPrivateRequestState(this.store,candidate,'waiting',this.transport.acceptPrivateRequest?'collection-budget':'adapter-unavailable');continue;}
+   recordPrivateRequestState(this.store,candidate,'unknown',lookupOnly?previous!.reason:'acceptance-submitting');
+   try{
+    const accepted=await this.stage('private-request',roundId,()=>this.transport.acceptPrivateRequest!(candidate,handle,{signal:this.abort?.signal,deadline,lookupOnly}));
+    if(accepted.status==='accepted'){
+     recordPrivateRequestState(this.store,candidate,'accepted',accepted.reason);
+     for(const value of accepted.events??[])if(value.channel==='private'&&value.accountId===handle&&value.conversationId===event.conversationId&&value.userId===event.userId&&value.privateContract==='xchat-native-v2'&&value.timestampReliable===true&&Number.isSafeInteger(value.timestamp)&&value.timestamp>0&&value.platformId&&value.senderId===event.senderId)result.events.push(value);
+    }else recordPrivateRequestState(this.store,candidate,accepted.status==='unknown'?'unknown':accepted.status==='blocked'?'blocked':'waiting',accepted.reason);
+   }catch(error){
+    recordPrivateRequestState(this.store,candidate,'unknown','acceptance-result-unverified');
+    if((error as any)?.browserPaused||(error as any)?.restricted||this.abort?.signal.aborted)throw error;
+   }
+  }
+  if(result.requests?.length){
+   const reports=result.requests.map(candidate=>{const state=privateRequestState(this.store,handle,candidate.event.conversationId),code=state?.status==='accepted'?'private-request-accepted':state?.status==='unknown'?'private-request-unknown':['filtered','ignored','expired'].includes(state?.status??'')?'private-request-retained':'private-request-waiting';return {channel:'private' as const,source:candidate.source,status:code==='private-request-unknown'?'unknown' as const:state?.status==='blocked'?'blocked' as const:'ok' as const,code,eventCount:code==='private-request-accepted'?result.events.filter(event=>event.conversationId===candidate.event.conversationId).length:0};});
+   result.diagnostics=[...(result.diagnostics??[]).filter(row=>row.code!=='private-request-observed'),...reports];
+   result.warnings=result.diagnostics.some(row=>!['ok','empty'].includes(row.status))?['私信来源或请求结果仍待核对，请查看分项诊断。']:[];
+  }
+ }
  private async generateDraft(e:Event,c:Config,persona:any,memoryPolicy:any,daily:any,roundId:string,merged:Event[]=[],personaIdentity?:{id?:string;name?:string;revision?:number}){
   const frozenIdentity=personaIdentity??{...this.services.persona?.activeIdentity?.(),revision:this.services.persona?.get().revision};
   return generateReply({config:c,accountId:this.accountId(),persona,personaService:this.services.persona,generator:this.generator,
@@ -213,10 +242,12 @@ export class Workflow {
      const publicResult=await this.stage('collect-public',roundId,()=>this.transport.collectPublic!(handle,{signal:this.abort!.signal,deadline:publicDeadline}));
      this.services.health?.recordCollectionResult(handle,roundId,publicResult,'public');
      if(!budget.check()||this.control()!=='running')return publicResult;
-     const privateResult=await this.stage('collect-private',roundId,()=>this.transport.collectPrivate!(handle,{signal:this.abort!.signal,deadline:budget.collectionDeadline('private',c.health)})).catch(error=>{
+     const privateDeadline=budget.collectionDeadline('private',c.health);
+     const privateResult:CollectionResult=await this.stage('collect-private',roundId,()=>this.transport.collectPrivate!(handle,{signal:this.abort!.signal,deadline:privateDeadline})).catch(error=>{
       if((error as any)?.browserPaused||(error as any)?.restricted||this.abort?.signal.aborted)throw error;
       return {events:[] as Event[],warnings:['私信页面读取失败，保留已采集公开消息'],diagnostics:[{channel:'private' as const,source:'chat' as const,status:'failed' as const,code:'private-navigation-failed',eventCount:0}]};
      });
+     await this.processPrivateRequests(privateResult,handle,roundId,privateDeadline,()=>budget.check());
      this.services.health?.recordCollectionResult(handle,roundId,privateResult,'private');
      return {events:[...publicResult.events,...privateResult.events],warnings:[...publicResult.warnings,...privateResult.warnings]};
     })():await this.stage('collect',roundId,async()=>{const result=await this.transport.collect(handle,{signal:this.abort!.signal,deadline:budget.collectionDeadline('public',c.health)});this.services.health?.recordCollectionResult(handle,roundId,result);return result;});

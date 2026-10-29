@@ -7,7 +7,9 @@
 .feed-filters{display:flex;gap:2px;flex-wrap:wrap;padding:0 0 10px;flex:none}
 .feed-filter{border:0;border-radius:var(--r-sm);padding:4px 7px;background:transparent;color:var(--ws-faint);font:inherit;font-size:12px;cursor:pointer}
 .feed-filter[aria-pressed=true]{color:var(--ws-text);background:var(--ws-active)}
-.feed-attention,.feed-pending-imports{border:1px solid var(--ws-border);background:var(--ws-bg);border-radius:var(--r-md);margin-bottom:8px;min-height:34px;padding:6px 8px;text-align:left;font-size:12px;color:var(--ws-warning);cursor:pointer}
+.feed-attention,.feed-pending-imports,.feed-request-status{border:1px solid var(--ws-border);background:var(--ws-bg);border-radius:var(--r-md);margin-bottom:8px;min-height:34px;padding:6px 8px;text-align:left;font-size:12px;color:var(--ws-warning);cursor:pointer}
+.feed-request-status{color:var(--ws-text);white-space:normal;overflow-wrap:anywhere}
+.feed-request-status .small{display:block;color:var(--ws-muted)}
 .feed-attention.bad{color:var(--ws-error);background:var(--ws-error-soft)}
 .feed-conversations{flex:1;overflow:auto;min-height:0;overscroll-behavior:contain}
 .feed-conversation{width:100%;display:grid;grid-template-columns:32px minmax(0,1fr) auto;grid-template-rows:auto auto;gap:4px 8px;border:0;background:transparent;border-radius:var(--r-md);text-align:left;color:var(--ws-text);padding:10px 8px;cursor:pointer;font:inherit;position:relative}

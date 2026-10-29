@@ -1,14 +1,15 @@
 import type { Page } from 'playwright-core';
 import type { Event } from './types.js';
 import type { CollectionDiagnostic,CollectionResult } from './collection-health.js';
+import {readNativeModels,promoteNativeInspection} from './xchat-native.js';
 
 /** 新 Chat 当前只读观察契约；没有可靠原生时间与接收端身份样本时不产生自动回复事件。 */
 export const NATIVE_CHAT_CONTRACT='xchat-observation-v1';
-export type ChatContract='legacy'|'xchat-observation-v1'|'unknown';
+export type ChatContract='legacy'|'xchat-observation-v1'|'xchat-native-v2'|'unknown';
 export type ChatDiagnosticStatus='ok'|'empty'|'partial'|'failed'|'unsupported'|'blocked'|'unknown';
-export type ChatDiagnostic=CollectionDiagnostic&{channel:'private';source:'inbox'|'requests'|'conversation'|'chat';messageCount?:number};
+export type ChatDiagnostic=CollectionDiagnostic&{channel:'private';source:'inbox'|'requests'|'other'|'conversation'|'chat';messageCount?:number};
 export type ChatProtection={hasUnlockedSession:boolean;unlockPending:boolean;needsHuman:boolean};
-export type ChatObservedMessage={id:string;text:string;direction:'in'|'out'|'unknown';timestamp:number;timestampReliable:boolean;media:boolean;contract:ChatContract;senderLabel?:string;displayTime?:string;dateBoundary?:string;sendStatus?:string;blockedCodes:string[]};
+export type ChatObservedMessage={id:string;text:string;direction:'in'|'out'|'unknown';timestamp:number;timestampReliable:boolean;media:boolean;contract:ChatContract;senderLabel?:string;displayTime?:string;dateBoundary?:string;sendStatus?:string;nativeSequence?:string;senderId?:string;blockedCodes:string[]};
 export type ChatInspection={ui?:PrivateUIReadiness;contract:ChatContract;conversationId:string;events:Event[];all:ChatObservedMessage[];diagnostics:ChatDiagnostic[];warnings:string[];chatProtection:ChatProtection};
 export type PrivateInboxKind='inbox'|'requests'|'other';
 export type PrivateConversationLink={conversationId:string;url:string;contract:'legacy'|'xchat-observation-v1';source:PrivateInboxKind};
@@ -47,24 +48,24 @@ function result(contract:ChatContract,conversationId:string,all:ChatObservedMess
  const protection=chatProtection??noProtection();
  return {contract,conversationId,events,all,diagnostics,warnings:[...new Set(diagnostics.filter(d=>!['ok','empty'].includes(d.status)).map(d=>chatDiagnosticMessage(d.code)))],chatProtection:protection};
 }
-function conversationPath(url:string,conversationId:string){try{const parsed=new URL(url);return parsed.origin==='https://x.com'&&parsed.pathname==='/i/chat/'+conversationId;}catch{return false;}}
+function conversationPath(url:string,conversationId:string){try{const parsed=new URL(url);return parsed.origin==='https://x.com'&&['/i/chat/'+conversationId,'/i/chat/requests/'+conversationId,'/i/chat/requests/other/'+conversationId].includes(parsed.pathname);}catch{return false;}}
 
 export type PrivateUIKind='inbox'|'conversation';
 export type PrivateTraversalOptions={maxDepth?:number;maxRoots?:number;maxElements?:number};
 export type PrivateUIExpectation={kind:PrivateUIKind;conversationId?:string;traversal?:PrivateTraversalOptions};
 export type PrivateUIState={state:'ready'|'empty'|'locked'|'loading'|'unsupported'|'unknown'|'wrong-location';code:string;contract:ChatContract;locationValid:boolean;nativeHosts:number;openShadowRoots:number;mainPresent:boolean;loading:boolean;loadingIndicators:number;lockInputs:number;emptyMarkers:number;conversationLinks:number;conversationLists:number;optionalEntries:number;validConversations:number;messageLogs:number;messageRows:number;legacyRows:number;shadowChildElements?:number;nestedOpenRoots?:number;iframeCount?:number;readableIframeDocuments?:number;unreadableIframeDocuments?:number;slotCount?:number;assignedElements?:number;traversedElements?:number;traversalRoots?:number;traversalTruncated?:boolean;maxObservedDepth?:number;depthTruncations?:number;rootTruncations?:number;elementTruncations?:number;emptyPanelProof?:number;emptyPanelProofType?:'native-empty-inbox-v1'|'native-empty-inbox-testid-v1'|null;emptyPanelHeadings?:number;emptyPanelSubtitles?:number;allViewConfirmed?:boolean;searchFieldCount?:number;searchEmpty?:boolean|null;dedicatedEmptyPanels?:number;dedicatedEmptyTitles?:number;dedicatedEmptySubtitles?:number;visibleEmptyPanels?:number;visibleEmptyTitles?:number;visibleEmptySubtitles?:number;inboxPanels?:number;inboxHeaders?:number;visibleInboxPanels?:number;visibleInboxHeaders?:number;allCandidateCount?:number;allControlCount?:number;allViewScope?:'native-inbox-header'|'generic'|'unverified'};
 export type PrivateUIReadiness=PrivateUIState&{uiState:PrivateUIState['state'];samples:number;elapsedMs:number};
-export type PrivateReadinessOptions={deadline?:number;now?:()=>number;sleep?:(milliseconds:number)=>Promise<void>;inspect?:(page:Page,expected:PrivateUIExpectation)=>Promise<PrivateUIState>;traversal?:PrivateTraversalOptions;stableMs?:number;minimumObserveMs?:number;timeoutMs?:number;intervalMs?:number};
+export type PrivateReadinessOptions={deadline?:number;now?:()=>number;sleep?:(milliseconds:number)=>Promise<void>;inspect?:(page:Page,expected:PrivateUIExpectation)=>Promise<PrivateUIState>;traversal?:PrivateTraversalOptions;stableMs?:number;minimumObserveMs?:number;timeoutMs?:number;intervalMs?:number;selfUserId?:string};
 
 /** 仅返回结构计数。页面函数自包含，不读取正文、口令值或账号资料，也不操作任何控件。 */
 export async function readPrivateUIState(page:Page,expected:PrivateUIExpectation):Promise<PrivateUIState>{
  // 先在调用侧检查目标地址；不为错误页面启动DOM遍历或读取其标签。
  let here:URL|null=null;try{here=new URL(page.url());}catch{}
- const matching=!!here&&here.origin==='https://x.com'&&(expected.kind==='conversation'?!!expected.conversationId&&['/i/chat/'+expected.conversationId,'/messages/'+expected.conversationId].includes(here.pathname):/^\/(?:i\/chat|messages)(?:\/(?:requests|other|\d+(?:-\d+)?))?\/?$/.test(here.pathname));
+ const matching=!!here&&here.origin==='https://x.com'&&(expected.kind==='conversation'?!!expected.conversationId&&['/i/chat/'+expected.conversationId,'/messages/'+expected.conversationId,'/i/chat/requests/'+expected.conversationId,'/i/chat/requests/other/'+expected.conversationId].includes(here.pathname):/^\/(?:i\/chat|messages)(?:\/(?:requests|other|\d+(?:-\d+)?))?\/?$/.test(here.pathname));
  if(!matching)return {state:'wrong-location',code:'private-wrong-location',contract:here?.origin==='https://x.com'&&/^\/i\/chat(?:\/|$)/.test(here.pathname)?NATIVE_CHAT_CONTRACT:'unknown',locationValid:false,nativeHosts:0,openShadowRoots:0,mainPresent:false,loading:false,loadingIndicators:0,lockInputs:0,emptyMarkers:0,conversationLinks:0,conversationLists:0,optionalEntries:0,validConversations:0,messageLogs:0,messageRows:0,legacyRows:0,shadowChildElements:0,nestedOpenRoots:0,iframeCount:0,readableIframeDocuments:0,unreadableIframeDocuments:0,slotCount:0,assignedElements:0,traversedElements:0,traversalRoots:0,traversalTruncated:false,maxObservedDepth:0,depthTruncations:0,rootTruncations:0,elementTruncations:0};
  const snapshot=await page.evaluate(({kind,conversationId,traversal})=>{
   const path=location.pathname,origin=location.origin;
-  const locationValid=origin==='https://x.com'&&(kind==='conversation'?!!conversationId&&['/i/chat/'+conversationId,'/messages/'+conversationId].includes(path):/^\/(?:i\/chat|messages)(?:\/(?:requests|other|\d+(?:-\d+)?))?\/?$/.test(path));
+  const locationValid=origin==='https://x.com'&&(kind==='conversation'?!!conversationId&&['/i/chat/'+conversationId,'/messages/'+conversationId,'/i/chat/requests/'+conversationId,'/i/chat/requests/other/'+conversationId].includes(path):/^\/(?:i\/chat|messages)(?:\/(?:requests|other|\d+(?:-\d+)?))?\/?$/.test(path));
   if(!locationValid)return {contract:origin==='https://x.com'&&/^\/i\/chat(?:\/|$)/.test(path)?'xchat-observation-v1':'unknown',locationValid:false,nativeHosts:0,openShadowRoots:0,mainPresent:false,loading:false,loadingIndicators:0,lockInputs:0,emptyMarkers:0,conversationLinks:0,conversationLists:0,optionalEntries:0,validConversations:0,messageLogs:0,messageRows:0,legacyRows:0,shadowChildElements:0,nestedOpenRoots:0,iframeCount:0,readableIframeDocuments:0,unreadableIframeDocuments:0,slotCount:0,assignedElements:0,traversedElements:0,traversalRoots:0,traversalTruncated:false,maxObservedDepth:0,depthTruncations:0,rootTruncations:0,elementTruncations:0};
   const hosts=Array.from(document.querySelectorAll('[data-testid="xchatEmbedRoute"]')),host=hosts.length===1?hosts[0]:null,shadow=host?.shadowRoot;
   const scope:Document|ShadowRoot=shadow??document;
@@ -261,7 +262,7 @@ export async function inspectPrivateConversation(page:Page,conversationId:string
   if(!DIRECT.test(conversationId)||!conversationPath(page.url(),conversationId)){const changed={...ui,state:'wrong-location' as const,uiState:'wrong-location' as const,code:'private-wrong-location',locationValid:false};return {...result(NATIVE_CHAT_CONTRACT,conversationId,[],[uiDiagnostic(changed,'conversation')]),ui:changed};}
   const logs=hosts.locator('[role="log"][aria-label="Messages"][data-testid="dm-message-scroller"]');
   const logCount=await logs.count();if(logCount!==1){const changed={...ui,state:'unknown' as const,uiState:'unknown' as const,code:'chat-native-messages-unavailable',messageLogs:logCount};return {...result(NATIVE_CHAT_CONTRACT,conversationId,[],[uiDiagnostic(changed,'conversation')]),ui:changed};}
-  const rows=await logs.locator('[data-dm-message-row]').evaluateAll(nodes=>nodes.slice(-20).map(row=>{
+  const readRows=()=>logs.locator('[data-dm-message-row]').evaluateAll(nodes=>nodes.slice(-20).map(row=>{
    const root=row.getRootNode() as ShadowRoot,nativeId=row.getAttribute('data-dm-message-row')??'';
    const articles=Array.from(row.querySelectorAll('[role="article"]'));
    const candidate=articles.length===1?articles[0]:null;
@@ -277,7 +278,23 @@ export async function inspectPrivateConversation(page:Page,conversationId:string
    return {nativeId,articleRole:article?.getAttribute('role')??'',focusTarget:article?.getAttribute('data-dm-message-focus-target')??'',testId:row.getAttribute('data-testid')??'',contentTestId:content?.getAttribute('data-testid')??'',contentLinked:!!content,bodyUnique:bodies.length===1,text:body?.innerText??'',sender:sender?.textContent?.trim()??'',senderLinked:!!sender,displayTime:time?.textContent?.trim()??'',dateBoundary:boundary?.textContent?.trim().slice(0,100)??'',sendStatus:row.getAttribute('data-send-status')??'',media:!!row.querySelector('img:not([data-testid*="Avatar"]),video')};
   }));
   if(expired())return budgetResult();
-  return {...inspectNativeChatRows(rows,conversationId,page.url()),ui};
+  const rows=await readRows();if(expired())return budgetResult();
+  const observed=inspectNativeChatRows(rows,conversationId,page.url());
+  if(options.selfUserId){try{
+   const own=/^\d{1,25}$/.test(options.selfUserId)&&conversationId.split('-').includes(options.selfUserId)&&new Set(conversationId.split('-')).size===2;
+   const until=Math.min(options.deadline??Infinity,Date.now()+2500);let previous='',stable=0,last=observed;
+   for(let count=0;count<20&&Date.now()<until;count++){
+    const snapshot=await readNativeModels(page,conversationId);if(expired())return budgetResult();
+    const freshRows=await readRows();if(expired())return budgetResult();
+    const fresh=inspectNativeChatRows(freshRows,conversationId,page.url());last=promoteNativeInspection(fresh,snapshot,options.selfUserId,(options.now??Date.now)());
+    if(!own||last.all.at(-1)?.timestampReliable)return {...last,ui};
+    if(snapshot.ready&&snapshot.atBottom){const signature=JSON.stringify(last.all.map(row=>[row.id,row.blockedCodes]));stable=signature===previous?stable+1:0;previous=signature;if(stable>=1)return {...last,ui};}
+    else if(snapshot.ready&&own)await logs.evaluate(node=>{node.scrollTop=node.scrollHeight;});
+    if(expired())return budgetResult();await page.waitForTimeout(Math.max(1,Math.min(100,until-Date.now())));
+   }
+   return {...last,ui};
+  }catch{return {...observed,ui};}}
+  return {...observed,ui};
  }
  if(ui.contract!=='legacy'||hostCount>0)return {...result(ui.contract,conversationId,[],[diagnostic('unknown','private-structure-unverified','conversation')]),ui:{...ui,state:'unknown',uiState:'unknown',code:'private-structure-unverified'}};
  if(expired())return budgetResult();
@@ -336,7 +353,7 @@ export async function discoverPrivateInboxes(page:Page,options:PrivateReadinessO
 }
 
 export type PrivateCollectionInput={page:Page;handle:string;deadline:number;navigate:(page:Page,url:string,deadline:number)=>Promise<void>;now?:()=>number;readiness?:PrivateReadinessOptions};
-export type PrivateCollectionResult=CollectionResult&{pageStates:Array<PrivateUIReadiness&{source:PrivateInboxKind|'conversation'}>;diagnostics:ChatDiagnostic[];observations:Array<{conversationId:string;source:PrivateInboxKind;contract:ChatContract;messageCount:number;outgoing:number;unknownDirection:number;queueable:number;blockedCodes:string[]}>;chatProtection:ChatProtection};
+export type PrivateCollectionResult=CollectionResult&{pageStates:Array<PrivateUIReadiness&{source:PrivateInboxKind|'conversation'}>;diagnostics:ChatDiagnostic[];observations:Array<{conversationId:string;source:PrivateInboxKind;contract:ChatContract;messageCount:number;outgoing:number;unknownDirection:number;queueable:number;blockedCodes:string[];composer?:import('./xchat-composer.js').NativeComposer}>;chatProtection:ChatProtection};
 export async function collectPrivateWithDiagnostics(input:PrivateCollectionInput):Promise<PrivateCollectionResult>{
  const {page,handle,deadline,navigate}=input,now=input.now??Date.now,events:Event[]=[],diagnostics:ChatDiagnostic[]=[],warnings:string[]=[],observations:PrivateCollectionResult['observations']=[],pageStates:PrivateCollectionResult['pageStates']=[];
  const inboxes=['https://x.com/messages'],visited=new Set<string>(),conversations=new Map<string,PrivateConversationLink>();let protection=noProtection();

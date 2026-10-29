@@ -6,6 +6,7 @@ import {safeBrowserDiagnostic} from './browser-operation.js';
 import {failureSummary} from './failure-summary.js';
 import type {CollectionResult} from './collection-health.js';
 import type {InspectPostResult} from './public-target.js';
+import type {PrivateRequestCandidate,PrivateRequestResult} from './private-requests.js';
 export type TransportRequestOptions={signal?:AbortSignal;deadline?:number;timeoutMs?:number};
 export interface Transport {
  identity(options?:TransportRequestOptions):Promise<Identity>;
@@ -18,6 +19,7 @@ export interface Transport {
  collect(handle:string,options?:TransportRequestOptions):Promise<CollectionResult>;
  collectPublic?(handle:string,options?:TransportRequestOptions):Promise<CollectionResult>;
  collectPrivate?(handle:string,options?:TransportRequestOptions):Promise<CollectionResult>;
+ acceptPrivateRequest?(candidate:PrivateRequestCandidate,handle:string,options?:TransportRequestOptions&{lookupOnly?:boolean}):Promise<PrivateRequestResult>;
  context(event:Event,handle:string,options?:TransportRequestOptions):Promise<string>;
  send(event:Event,text:string,handle:string,options?:TransportRequestOptions):Promise<Receipt>;
  lookup(event:Event,text:string,handle:string,options?:TransportRequestOptions):Promise<Receipt>;
@@ -45,6 +47,7 @@ export class BrowserTransport implements Transport {
  collect(handle:string,options?:TransportRequestOptions){return this.rpc('/collect',{handle,...(options?.deadline!==undefined?{deadline:options.deadline}:{})},options);}
  collectPublic(handle:string,options?:TransportRequestOptions){return this.rpc('/collect/public',{handle,...(options?.deadline!==undefined?{deadline:options.deadline}:{})},options);}
  collectPrivate(handle:string,options?:TransportRequestOptions){return this.rpc('/collect/private',{handle,...(options?.deadline!==undefined?{deadline:options.deadline}:{})},options);}
+ acceptPrivateRequest(candidate:PrivateRequestCandidate,handle:string,options?:TransportRequestOptions&{lookupOnly?:boolean}){return this.rpc('/private/request/accept',{candidate,handle,lookupOnly:options?.lookupOnly===true,...(options?.deadline!==undefined?{deadline:options.deadline}:{})},options);}
  context(event:Event,handle:string,options?:TransportRequestOptions){return this.rpc('/context',{event,handle},options).then(x=>x.text);}
  send(event:Event,text:string,handle:string,options?:TransportRequestOptions){return this.rpc('/send',{event,text,handle,requestId:event.outboxId||event.id},options);}
  lookup(event:Event,text:string,handle:string,options?:TransportRequestOptions){return this.rpc('/lookup',{event,text,handle,requestId:event.outboxId||event.id},options);}

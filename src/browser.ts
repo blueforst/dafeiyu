@@ -4,7 +4,7 @@ import twitterText from 'twitter-text';
 import { type BrowserContext, type Page } from 'playwright-core';
 import { launchBrowser } from './browser-launcher.js';
 import { readFileSync,writeFileSync,renameSync,mkdirSync,openSync,closeSync,fsyncSync } from 'node:fs';
-import { createHash,timingSafeEqual } from 'node:crypto';
+import { createHash,timingSafeEqual,randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { dirname } from 'node:path';
 import { promisify } from 'node:util';
@@ -21,6 +21,9 @@ import {relevantPublicMessage} from './public-relations.js';
 import {collectReadyPublic,observeNativeReads} from './public-collection.js';
 import {collectionSources} from './collection-sources.js';
 import {inspectPrivateConversation,collectPrivateWithDiagnostics,type ChatProtection} from './chat-dom.js';
+import {collectNativePrivate} from './xchat-inbox.js';
+import {PrivateAcceptJournal,type PrivateRequestCandidate} from './private-requests.js';
+import {acceptNativePrivateRequest,nativeComposerLocators,observeNativePending,matchNativePrivateReceipt,type NativeSubmitEvidence} from './xchat-actions.js';
 import type {CollectionDiagnostic} from './collection-health.js';
 import {readObservedComplianceProfile,readObservedComplianceFilters,readObservedComplianceQuality,type ComplianceWaitOptions} from './account-compliance-dom.js';
 const exec=promisify(execFile);
@@ -59,21 +62,34 @@ export function platformId(e:Event):string {
  if(!id||e.channel==='public'&&!/^\d+$/.test(id))throw new Error('消息缺少可靠平台 ID');
  return id;
 }
-type Intent={kind:'reply'|'dm'|'post';handle:string;targetId:string;textHash:string;at:number;receipt:Receipt};
+type Intent={kind:'reply'|'dm'|'post';handle:string;targetId:string;textHash:string;at:number;receipt:Receipt;native?:NativeSubmitEvidence};
+function validNativeIntent(value:NativeSubmitEvidence,target:string){
+ const uuid=(id:unknown)=>typeof id==='string'&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id);
+ return value?.contract==='xchat-native-v2'&&/^\d{1,25}$/.test(value.selfUserId)&&/^\d+-\d+$/.test(target)&&target.split('-').includes(value.selfUserId)&&uuid(value.targetUuid)&&uuid(value.browserSession)&&Array.isArray(value.baselineIds)&&value.baselineIds.length<=20&&value.baselineIds.every(uuid)&&new Set(value.baselineIds).size===value.baselineIds.length&&(value.ambiguous===undefined||typeof value.ambiguous==='boolean')&&(value.localPendingId===undefined&&value.pendingCreatedAt===undefined||uuid(value.localPendingId)&&!value.baselineIds.includes(value.localPendingId!)&&Number.isSafeInteger(value.pendingCreatedAt)&&(value.pendingCreatedAt??0)>0);
+}
 // 浏览器与 app 使用同一出站 ID；unknown 永不被有界清理丢弃。
 export class TransportJournal {
  entries:Record<string,Intent>=Object.create(null);
- constructor(public path:string){try{const raw=JSON.parse(readFileSync(path,'utf8'));if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('invalid journal');for(const [id,value] of Object.entries(raw)){const x=value as any;if(x&&x.receipt&&['confirmed','unknown','rejected'].includes(x.receipt.status)&&typeof x.textHash==='string'&&typeof x.handle==='string'&&typeof x.targetId==='string'&&Number.isFinite(x.at)&&['reply','dm','post'].includes(x.kind))this.entries[id]=x;else if(['confirmed','unknown','rejected'].includes(x?.status))this.entries[id]={kind:'reply',handle:'',targetId:'',textHash:'',at:0,receipt:x};else throw new Error('invalid journal entry');}}catch(e:any){if(e?.code!=='ENOENT')throw new Error('浏览器发送日志损坏，停止自动发送');}}
+ constructor(public path:string){try{const raw=JSON.parse(readFileSync(path,'utf8'));if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('invalid journal');for(const [id,value] of Object.entries(raw)){const x=value as any;if(x&&x.receipt&&['confirmed','unknown','rejected'].includes(x.receipt.status)&&typeof x.textHash==='string'&&typeof x.handle==='string'&&typeof x.targetId==='string'&&Number.isFinite(x.at)&&['reply','dm','post'].includes(x.kind)){if(x.native!==undefined&&(x.kind!=='dm'||!validNativeIntent(x.native,x.targetId)))throw Error('invalid native intent');if(x.native&&x.receipt.status==='confirmed'&&(x.native.ambiguous||x.receipt.id!==x.native.localPendingId||!/^\d{1,25}$/.test(x.receipt.nativeSequence??'')||BigInt(x.receipt.nativeSequence)<=0n))throw Error('invalid native receipt');this.entries[id]=x;}else if(['confirmed','unknown','rejected'].includes(x?.status))this.entries[id]={kind:'reply',handle:'',targetId:'',textHash:'',at:0,receipt:x};else throw new Error('invalid journal entry');}}catch(e:any){if(e?.code!=='ENOENT')throw new Error('浏览器发送日志损坏，停止自动发送');}}
  get(id:string){return Object.hasOwn(this.entries,id)?this.entries[id]:undefined;}
- intent(id:string,kind:Intent['kind'],handle:string,targetId:string,text:string):Intent {
+ intent(id:string,kind:Intent['kind'],handle:string,targetId:string,text:string,native?:NativeSubmitEvidence):Intent {
   if(!/^[A-Za-z0-9:_-]{1,250}$/.test(id)||!handle||!text.trim())throw new Error('发送意图无效');
   const old=this.get(id);
   if(old){if(old.textHash&&(old.textHash!==hash(text)||old.handle!==handle.toLowerCase()||old.targetId!==targetId||old.kind!==kind))throw new Error('出站标识已使用，正文或目标不能改变');return old;}
-  const next:Intent={kind,handle:handle.toLowerCase(),targetId,textHash:hash(text),at:Date.now(),receipt:{status:'unknown',reason:'已保存提交意图，尚未取得唯一平台回执'}};
+  if(native&&(kind!=='dm'||!validNativeIntent(native,targetId)||native.localPendingId))throw Error('原生私信提交证据无效');
+  const next:Intent={kind,handle:handle.toLowerCase(),targetId,textHash:hash(text),at:Date.now(),receipt:{status:'unknown',reason:'已保存提交意图，尚未取得唯一平台回执'},...(native?{native:structuredClone(native)}:{})};
   this.entries[id]=next;this.save();return next;
  }
- settle(id:string,r:Receipt){if(r.status==='not_submitted')throw new Error('提交意图已存在，不能改记为未提交');const entry=this.get(id);if(!entry)throw new Error('发送意图不存在');if(entry.receipt.status==='confirmed'||entry.receipt.status==='rejected')return entry.receipt;if(r.status==='confirmed'&&!r.id)r={status:'unknown',reason:'缺少唯一平台回执 ID'};entry.receipt=r;this.save();return r;}
- save(){const entries=Object.entries(this.entries);const uncertain=entries.filter(([,x])=>x.receipt.status==='unknown');const finished=entries.filter(([,x])=>x.receipt.status!=='unknown').slice(-2000);this.entries=Object.assign(Object.create(null),Object.fromEntries([...finished,...uncertain]));writeFileSync(this.path+'.tmp',JSON.stringify(this.entries),{mode:0o600});renameSync(this.path+'.tmp',this.path);}
+ bindNativePending(id:string,pending:{id:string;createdAt:number}){
+  const entry=this.get(id);if(!entry?.native||entry.receipt.status!=='unknown'||entry.native.ambiguous)throw Error('原生私信原意图不可绑定');
+  if(entry.native.localPendingId&&entry.native.localPendingId!==pending.id)throw Error('本次存在多个本地待发送消息，不能改绑');
+  const next={...entry.native,localPendingId:pending.id,pendingCreatedAt:pending.createdAt};
+  if(!validNativeIntent(next,entry.targetId)||pending.createdAt<entry.at-1000||pending.createdAt>Date.now()+60000)throw Error('本地待发送消息证据无效');
+  entry.native=next;this.save();return next;
+ }
+ nativePendingConflict(id:string){const entry=this.get(id);if(!entry?.native||entry.receipt.status!=='unknown')throw Error('原生私信原意图不可标记');entry.native.ambiguous=true;this.save();}
+ settle(id:string,r:Receipt){if(r.status==='not_submitted')throw new Error('提交意图已存在，不能改记为未提交');const entry=this.get(id);if(!entry)throw new Error('发送意图不存在');if(entry.receipt.status==='confirmed'||entry.receipt.status==='rejected')return entry.receipt;if(r.status==='confirmed'&&!r.id)r={status:'unknown',reason:'缺少唯一平台回执 ID'};if(r.status==='confirmed'&&entry.native&&(entry.native.ambiguous||r.id!==entry.native.localPendingId||!/^\d{1,25}$/.test(r.nativeSequence??'')||BigInt(r.nativeSequence!)<=0n))r={status:'unknown',reason:'原生私信缺少与原待发送 ID 绑定的平台序号'};entry.receipt=r;this.save();return r;}
+ save(){const entries=Object.entries(this.entries);const uncertain=entries.filter(([,x])=>x.receipt.status==='unknown');const finished=entries.filter(([,x])=>x.receipt.status!=='unknown').slice(-2000);this.entries=Object.assign(Object.create(null),Object.fromEntries([...finished,...uncertain]));persistPreflight(this.path,JSON.stringify(this.entries));}
 }
 type PreflightEntry={kind:Intent['kind'];handle:string;targetId:string;textHash:string;at:number;receipt:Receipt};
 function persistPreflight(path:string,serialized:string){
@@ -140,7 +156,10 @@ export async function identity(page:Page):Promise<Identity>{
   const needsHuman=/verify (your|you are)|unusual activity|authenticate your|enter (your )?passcode|unlock your|验证你的身份|输入.*密码锁|解锁.*聊天/i.test(text)||/challenge|account\/access/.test(location.pathname);
   return {handle,loggedIn:!!handle,needsHuman,pageText:text,ownAccount:!!handle,url:location.href,reason:needsHuman?'页面需要人工验证或解锁':!handle?'尚未登录或页面结构需要适配':undefined};
  });const restricted=detectAccountRestriction({url:result.url,text:result.pageText,ownAccount:result.ownAccount});
- const {pageText,ownAccount,url,...safe}=result;return {...safe,...(restricted?{restricted,reason:'当前工作账号受限：'+restricted}:{})};
+ const {pageText,ownAccount,url,...safe}=result;
+ // twid 只提供当前会话的公开数字账号 ID；认证 cookie 和原值不进入结果或日志。
+ let userId:string|undefined;try{if(safe.loggedIn){const cookies=await page.context().cookies('https://x.com'),ids=[...new Set(cookies.filter(cookie=>cookie.name==='twid'&&['x.com','.x.com'].includes(cookie.domain)&&cookie.path==='/'&&cookie.secure).flatMap(cookie=>{try{const match=decodeURIComponent(cookie.value).match(/^u=(\d{1,25})$/);return match?[match[1]]:[];}catch{return [];}}))];if(ids.length===1)userId=ids[0];}}catch{}
+ return {...safe,...(userId?{userId}:{}),...(restricted?{restricted,reason:'当前工作账号受限：'+restricted}:{})};
 }
 export async function readTweets(page:Page):Promise<Event[]> {
  return readPublicPosts(page);
@@ -154,9 +173,10 @@ export async function replyArticleIndex(page:Page,target:string):Promise<number>
 }
 export async function readDM(page:Page,conversationId:string,selfHandle=''):Promise<{events:Event[];all:any[]}> {
  if(await page.locator('[data-testid="xchatEmbedRoute"]').count()){
-  // 已观察到的新版 Chat 只有分钟显示时间，未满足可靠入站及回执契约。
-  await inspectPrivateConversation(page,conversationId);
-  throw new BrowserOperationError('private-contract-unverified','dm-validate');
+  const actor=await identity(page);if(!selfHandle||actor.handle.toLowerCase()!==selfHandle.toLowerCase()||!actor.loggedIn||actor.needsHuman||!actor.userId)throw new BrowserOperationError('private-contract-unverified','dm-validate');
+  const read=await inspectPrivateConversation(page,conversationId,{selfUserId:actor.userId});
+  if(read.contract!=='xchat-native-v2'||!read.all.length||read.all.some(row=>row.blockedCodes.length))throw new BrowserOperationError('private-contract-unverified','dm-validate');
+  return {events:read.events,all:read.all};
  }
  if(!/^\d+-\d+$/.test(conversationId)&&await page.locator('[data-conversation-type="direct"],[data-chat-type="direct"],[data-participant-count="2"]').count()===0)throw new Error('当前聊天缺少可靠一对一会话标识，停止自动处理');
  const all=await page.evaluate(()=>{
@@ -212,6 +232,7 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
  let shuttingDown=false,internalRestart=false;
  let mode='paused',effectiveHealth=healthSettings();const serial=new Serial();let round=0;let context:BrowserContext;const launch=options.launch??launchBrowser;
  const journal=new TransportJournal(profile+'/transport-journal.json');
+ const privateAccepts=new PrivateAcceptJournal(profile+'/private-accept-v1.json'),privateOffsets=new Map<string,number>(),browserSession=randomUUID();
  const preflight=new PreflightJournal(profile+'/posting-preflight-v1.json');const capabilities=new BrowserPostingCapabilities();
  const proxy=browserProxy(process.env.BROWSER_PROXY_SERVER);
  context=await launch(profile,proxy);
@@ -264,7 +285,7 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
    const conversation:PublicConversationContext=ready?{messages:ready.context,contextIncomplete:ready.contextIncomplete,omittedEarlier:ready.omittedEarlier}:await publicConversationContext(reading);return JSON.stringify(conversation);
    }finally{native.dispose();}
   }
-  const p=await getDM();await navigate(p,e.url);return JSON.stringify((await readDM(p,e.conversationId)).all);
+  const p=await getDM();await navigate(p,e.url);return JSON.stringify((await readDM(p,e.conversationId,handle)).all);
  }
  async function capture(page:Page,fn:()=>Promise<void>):Promise<PlatformTweet[]>{
   const pending:Promise<PlatformTweet[]>[]=[];
@@ -284,7 +305,9 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
    return matchTweetReceipt(rows,handle,text,target,intent.at);
   }else{
    if(intent.targetId!==e.conversationId)throw new Error('回查私信会话与原发送意图不符');
-   const p=await getDM();await navigate(p,e.url);const {all}=await readDM(p,e.conversationId);
+   const p=await getDM();await navigate(p,e.url);const {all}=await readDM(p,e.conversationId,handle);
+   if(intent.native){const actor=await check(handle);if(actor.userId!==intent.native.selfUserId)return {status:'unknown',reason:'原生私信回查账号与原意图不符'};return matchNativePrivateReceipt(all,text,intent.native,intent.at);}
+   if(all.some(row=>row.contract==='xchat-native-v2'))return {status:'unknown',reason:'原意图缺少原生本地待发送 ID，不能认领同文消息'};
    const candidates=all.filter(x=>x.direction==='out'&&x.text?.trim()===text.trim()&&x.id&&x.timestamp&&x.timestamp>=intent.at-1000);
    if(candidates.length===1)return {status:'confirmed',id:String(candidates[0].id)};
   }
@@ -393,10 +416,18 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
  }
  async function collectPrivate(handle:string,requestedDeadline?:number){
   const deadline=Math.min(Date.now()+effectiveHealth.privateCollectionSeconds*1000,Number.isFinite(requestedDeadline)?requestedDeadline!:Infinity);
-  try{const result=await collectPrivateWithBudget({page:await getDM(),handle,deadline,navigate});privateProtection=result.chatProtection;return result;}catch(error){if((error as any)?.restricted)throw error;return collected([],['私信页面读取失败，结果未知'],handle,[{channel:'private',source:'chat',status:'failed',code:'private-navigation-failed',eventCount:0}]);}
+  try{const page=await getDM(),actor=await check(handle),native=actor.userId?await collectNativePrivate({page,handle,deadline,navigate,selfUserId:actor.userId,canContinue:()=>mode==='auto',offsets:privateOffsets,unsettled:privateAccepts.pending(handle),confirmAccepted:conversationId=>{const entry=privateAccepts.get(handle,conversationId);if(entry){if(entry.selfUserId!==actor.userId)throw Error('接受意图与当前账号身份不符');privateAccepts.accepted(handle,conversationId);}}}):null;
+   const result=native??await collectPrivateWithBudget({page,handle,deadline,navigate});privateProtection=result.chatProtection;return result;
+  }catch(error){if((error as any)?.restricted)throw error;return collected([],['私信页面读取失败，结果未知'],handle,[{channel:'private',source:'chat',status:'failed',code:'private-navigation-failed',eventCount:0}]);}
  }
  app.post('/collect/public',async(req,reply)=>task(req,reply,()=>collectPublic((req.body as any).handle,(req.body as any).deadline)));
  app.post('/collect/private',async(req,reply)=>task(req,reply,()=>collectPrivate((req.body as any).handle,(req.body as any).deadline)));
+ app.post('/private/request/accept',async(req,reply)=>task(req,reply,async()=>{
+  const {candidate,handle}=req.body as {candidate:PrivateRequestCandidate;handle:string};if(!candidate?.event)throw new BrowserOperationError('invalid-request','request');safeEvent(candidate.event);
+  const actor=await check(handle);if(!actor.userId)throw new BrowserOperationError('identity-unavailable','identity');
+  const selfUserId=actor.userId;
+  return acceptNativePrivateRequest({page:await getDM(),candidate,handle,selfUserId,journal:privateAccepts,lookupOnly:(req.body as any).lookupOnly===true,deadline:Math.min(Date.now()+20000,Number.isFinite((req.body as any).deadline)?(req.body as any).deadline:Infinity),navigate,assertActor:async()=>{const current=await check(handle);if(mode!=='auto'||current.userId!==selfUserId)throw new BrowserOperationError('control-unavailable','control');}});
+ }));
  app.post('/collect',async(req,reply)=>task(req,reply,async()=>{
   const {handle}=req.body as {handle:string};const publicResult=await collectPublic(handle);await check(handle);const privateResult=await collectPrivate(handle);
   return collected([...publicResult.events,...privateResult.events],[...publicResult.warnings,...privateResult.warnings],handle,[...(publicResult.diagnostics??[]),...(privateResult.diagnostics??[])]);
@@ -429,16 +460,35 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
    attempt!.beforeIntent();journal.intent(requestId,'reply',handle,target,text);attempt!.setStage('submit-click');
    responseRows=await capture(p,async()=>{await dialog.getByTestId('tweetButton').click({timeout:15000});});
   }else{
-   attempt!.setStage('dm-validate');p=await getDM();const snap=await readDM(p,e.conversationId);
-   if(snap.events.at(-1)?.platformId!==target)throw new Error('私信上下文已变化，停止发送');
-   const input=p.locator('[data-testid="dmComposerTextInput"]');if(await input.count()!==1)throw new Error('当前私信输入框尚未适配');
+   attempt!.setStage('dm-validate');p=await getDM();const snap=await readDM(p,e.conversationId,handle),native=e.privateContract==='xchat-native-v2';
+   const sameTarget=(latest:Event|undefined)=>latest?.platformId===target&&(!native||latest.privateContract===e.privateContract&&latest.text===e.text&&latest.timestamp===e.timestamp&&latest.senderId===e.senderId&&latest.nativeSequence===e.nativeSequence);
+   if(!sameTarget(snap.events.at(-1)))throw new Error('私信上下文已变化，停止发送');
+   const composer=native?await nativeComposerLocators(p,e.conversationId):null,input=composer?.input??p.locator('[data-testid="dmComposerTextInput"]');if(await input.count()!==1)throw new Error('当前私信输入框尚未适配');
    attempt!.setStage('reply-fill');await input.fill(text);
+   if(native&&await input.evaluate(node=>node instanceof HTMLTextAreaElement?node.value:(node as HTMLElement).innerText)!==text)throw new Error('新 Chat 输入框未完整保留待发送正文');
    attempt!.setStage('identity');await check(handle);if(mode!=='auto')throw new BrowserOperationError('control-unavailable','control');
    attempt!.setStage('dm-validate');
-   if((await readDM(p,e.conversationId)).events.at(-1)?.platformId!==target)throw new Error('提交前私信已有新消息，停止旧上下文回复');
+   if(!sameTarget((await readDM(p,e.conversationId,handle)).events.at(-1)))throw new Error('提交前私信已有新消息，停止旧上下文回复');
    toastsBefore=await p.getByTestId('toast').allTextContents();
-   attempt!.beforeIntent();journal.intent(requestId,'dm',handle,e.conversationId,text);attempt!.setStage('submit-click');
-   await p.locator('[data-testid="dmComposerSendButton"]').click({timeout:15000});
+   if(native){
+    const actor=await check(handle);if(!actor.userId)throw new BrowserOperationError('identity-unavailable','identity');
+    const submit=(await nativeComposerLocators(p,e.conversationId)).submit;
+    if(!await submit.isEnabled())return attempt!.block({...initialValidation,allowed:false,code:'editor-unavailable',reason:'新 Chat 编辑器当前不允许发送'});
+    const evidence:NativeSubmitEvidence={contract:'xchat-native-v2',selfUserId:actor.userId,baselineIds:[...new Set(snap.all.map(row=>row.id).filter(id=>typeof id==='string'&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)))],targetUuid:target,browserSession};
+    const observer=await observeNativePending(p,{conversationId:e.conversationId,selfUserId:actor.userId,text,baselineIds:evidence.baselineIds,startedAt:Date.now(),key:'__rolePending_'+randomUUID().replace(/-/g,'')});
+    try{
+     attempt!.beforeIntent();journal.intent(requestId,'dm',handle,e.conversationId,text,evidence);attempt!.setStage('submit-click');await submit.click({timeout:15000});
+     for(let count=0;count<15;count++){
+      const state=await observer.read();if(state?.conflict){journal.nativePendingConflict(requestId);throw new Error('本次出现多个本地待发送消息，保持结果未知');}
+      if(state?.pending.length===1){journal.bindNativePending(requestId,state.pending[0]);break;}
+      await p.waitForTimeout(100);
+     }
+     await p.waitForTimeout(500);const stable=await observer.read();if(stable?.conflict){journal.nativePendingConflict(requestId);throw new Error('本次本地待发送消息出现冲突，保持结果未知');}
+    }finally{await observer.dispose();}
+   }else{
+    attempt!.beforeIntent();journal.intent(requestId,'dm',handle,e.conversationId,text);attempt!.setStage('submit-click');
+    await p.locator('[data-testid="dmComposerSendButton"]').click({timeout:15000});
+   }
   }
   attempt!.setStage('receipt-read');await p.waitForTimeout(1500);
   const toast=await p.locator('[data-testid="toast"]').allTextContents();

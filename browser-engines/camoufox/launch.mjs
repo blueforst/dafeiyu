@@ -1,9 +1,9 @@
 import { Camoufox, getRandomPreset } from 'camoufox';
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 
-export async function observer(proxy) {
+export async function observer(proxy, options={}) {
   mkdirSync('/tmp/role-camoufox-fontconfig', { recursive: true, mode: 0o700 });
-  return Camoufox({ headless: true, os: 'linux', locale: 'en-US', exclude_addons: ['UBO'], proxy });
+  return Camoufox({ headless: true, os: 'linux', locale: 'en-US', exclude_addons: ['UBO'], proxy, main_world_eval: options.mainWorldEval===true });
 }
 
 // 固定同一配置目录的设备预设，重启不重新抽取身份。
@@ -25,6 +25,7 @@ export async function launch(profile, proxy) {
   }
   return Camoufox({
     persistent_context: true,
+    main_world_eval: true,
     user_data_dir: profile,
     headless: false,
     os: 'linux',

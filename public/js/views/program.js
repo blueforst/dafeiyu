@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { notice, onEvent } from '../state.js';
 import { field, empty, table, json, editorGuard, errorBox } from '../view-utils.js';
 
-const STAGE = { waiting: '等待', identity: '身份检查', 'browser-prepare':'浏览器轮次准备', 'manual-import':'核对补录', 'experience-verify':'核对角色经历', 'collect-public': '公开采集', 'collect-private': '私信采集', collect: '采集', queue: '排队', context: '读取上下文', memory: '记忆召回', semantic: '语义判定', 'semantic-trigger': '语义判定', 'daily-state': '虚构日程', prompt: '组装提示词', generation: '生成', generate: '生成', send: '发送', sending: '发送', lookup: '回查', summary: '整理', cooldown: '退避', error: '错误' };
+const STAGE = { waiting: '等待', identity: '身份检查', 'browser-prepare':'浏览器轮次准备', 'manual-import':'核对补录', 'experience-verify':'核对角色经历', 'collect-public': '公开采集', 'collect-private': '私信采集', 'private-request':'接受私信请求', collect: '采集', queue: '排队', context: '读取上下文', memory: '记忆召回', semantic: '语义判定', 'semantic-trigger': '语义判定', 'daily-state': '虚构日程', prompt: '组装提示词', generation: '生成', generate: '生成', send: '发送', sending: '发送', lookup: '回查', summary: '整理', cooldown: '退避', error: '错误' };
 const STATUS = { running: '进行中', completed: '已完成', success: '已完成', failed: '失败', aborted: '已中止', interrupted: '重启中断', queued: '排队', generating: '生成中', draft: '草稿', sending: '发送中', unknown: '待回查', confirmed: '已确认', skipped: '已跳过', paused: '已暂停', manual: '人工接管', draining: '等待排空' };
 const CONTROL_LABEL = { paused: '暂停', running: '运行', manual: '人工', auto: '自动' };
 
@@ -114,6 +114,7 @@ export const EVENT_SUMMARY = {
   'generation-error': { category: '运行', tone: 'warn', summarize: () => '回复生成失败' },
   'message-validation': { category: '采集', tone: 'warn', summarize: d => { const o = parseJson(d); return '入站消息校验跳过：' + (o?.reason || '缺少可靠时间或标识'); } },
   'collection-result': {category:'采集',summarize:d=>{const o=parseJson(d);if(!o)return '采集结果';const state={ok:'读取成功',empty:'本轮没有新消息',partial:'部分读取',failed:'读取失败',unsupported:'尚未适配',blocked:'需要人工处理',unknown:'结果待确认'}[o.status]||'结果待确认';return `${o.channel==='private'?'私信':'公开'}采集：${state}${Number.isFinite(o.eventCount)?'（'+o.eventCount+' 条）':''}`;}},
+  'private-request-state': {category:'私信请求',summarize:d=>{const o=parseJson(d);return ({waiting:'请求等待处理',filtered:'广告请求已按规则保留',ignored:'请求受冷却或遗忘保护',expired:'请求已超过处理时效',blocked:'请求需要人工处理',unknown:'接受结果待回查',accepted:'请求已接受'}[o?.status]||'请求状态待确认')+(o?.reason?' · '+({'reply-hours-closed':'等待回复时段开放','draft-mode':'草稿模式保留请求','private-channel-wait':'等待私信通道或额度恢复',forgotten:'用户受遗忘保护','harassment-cooldown':'骚扰冷却中',advertising:'命中现有广告过滤',expired:'已超过处理时效','collection-budget':'等待下一轮核对','adapter-unavailable':'处理适配器不可用','acceptance-result-unverified':'只回查，不重复操作','acceptance-submitting':'核对接受结果'}[o.reason]||o.reason):'');}},
   'collection-warning': { category: '采集', tone: 'warn', summarize: d => { const o = parseJson(d); return o?.reason || '页面采集存在异常'; } },
   'private-peer-candidate': { category: '记忆', summarize: d => { const o = parseJson(d); return o?.peerHandle ? `识别私信对象候选 @${o.peerHandle}` : '识别私信对象候选'; } },
   'identity-link-conflict': { category: '记忆', tone: 'warn', summarize: () => '跨渠道身份关联冲突' },

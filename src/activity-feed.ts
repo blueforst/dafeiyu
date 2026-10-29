@@ -5,6 +5,7 @@ import { normalizePublicText,validatePostingText } from './posting-policy.js';
 import type { PostingCapabilitiesService } from './posting-capabilities.js';
 import type { ReplyTriage } from './reply-triage.js';
 import { formatIssues } from './reply-style.js';
+import { privateRequestsSummary } from './private-requests.js';
 
 export class FeedError extends Error {constructor(message:string,public statusCode=400,public current?:string){super(message);}}
 const parse=(value:any,fallback:any={})=>{try{return JSON.parse(value??'null')??fallback;}catch{return fallback;}};
@@ -35,9 +36,9 @@ export class ActivityFeed {
  private summaryFor(account:string,pending:{sql:string;params:Array<number|string>},messageSummary?:{latest:number;pending:number}){
   const m=messageSummary??this.store.db.prepare(`SELECT MAX(m.updated_at) latest,SUM(CASE WHEN ${pending.sql} THEN 1 ELSE 0 END) pending FROM messages m WHERE m.account_id=?`).get(...pending.params,account) as any;
   const p=this.store.db.prepare("SELECT MAX(updated_at) latest,SUM(CASE WHEN status='unknown' THEN 1 ELSE 0 END) pending FROM outbox WHERE account_id=? AND kind='post'").get(account) as any;
-  const imports=this.importsSummary?.(account)??{latest:0,pending:0};
+  const imports=this.importsSummary?.(account)??{latest:0,pending:0},requests=privateRequestsSummary(this.store,account);
   const task=this.hasTaskRuns()?this.store.db.prepare("SELECT MAX(MAX(started_at,COALESCE(finished_at,0))) latest FROM task_runs WHERE account_id=? AND task_id IN ('morning-post','evening-post')").get(account) as any:null;
-  return {latest:Math.max(Number(m.latest??0),Number(p.latest??0),Number(task?.latest??0),imports.latest),pending:Number(m.pending??0)+Number(p.pending??0)+imports.pending};
+  return {latest:Math.max(Number(m.latest??0),Number(p.latest??0),Number(task?.latest??0),imports.latest,requests.latest),pending:Number(m.pending??0)+Number(p.pending??0)+imports.pending+requests.pending,...(requests.pending||requests.retained?{privateRequests:requests}:{})};
  }
  summary(){const account=this.account();return account?this.summaryFor(account,this.pendingSql(Date.now())):{latest:0,pending:0};}
  private hasTaskRuns(){return !!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_runs'").get();}
@@ -96,7 +97,7 @@ export class ActivityFeed {
   const messageSummary=snapshotAt===undefined?rows.reduce((value,row)=>({latest:Math.max(value.latest,Number(row.latest_update)),pending:value.pending+Number(row.pending_count)}),{latest:0,pending:0}):undefined;
   const page=since===undefined?filtered.slice(0,limit):filtered,last=page.at(-1),summary=this.summaryFor(account,pending,messageSummary),imports=this.importsSummary?.(account)??{pending:0};
   const pageSnapshot=snapshotAt??all.reduce((max,r)=>Math.max(max,r.latestAt),0);
-  return {items:page,nextCursor:since===undefined&&filtered.length>limit&&last?encodeCursor({at:last.latestAt,key:last.key,snapshotAt:pageSnapshot}):null,pending:summary.pending,importsPending:imports.pending,serverTime,latest:summary.latest,removedKeys};
+  return {items:page,nextCursor:since===undefined&&filtered.length>limit&&last?encodeCursor({at:last.latestAt,key:last.key,snapshotAt:pageSnapshot}):null,pending:summary.pending,importsPending:imports.pending,serverTime,latest:summary.latest,removedKeys,...(summary.privateRequests?{privateRequests:summary.privateRequests}:{})};
  }
  /** 单会话按稳定入库时间翻页，增量读取忽略分页游标，不写入任何业务记录。 */
  conversationItems(key:string,query:ConversationItemsQuery={}){

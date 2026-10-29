@@ -2,18 +2,20 @@ import type {Store} from './store.js';
 import type {Channel,Event} from './types.js';
 
 export type CollectionStatus='ok'|'empty'|'partial'|'failed'|'unsupported'|'blocked'|'unknown';
-export type CollectionSource='mentions'|'search'|'own-post-replies'|'inbox'|'requests'|'conversation'|'chat';
+export type CollectionSource='mentions'|'search'|'own-post-replies'|'inbox'|'requests'|'other'|'conversation'|'chat';
 export type CollectionDiagnostic={channel:Channel;status:CollectionStatus;code:string;source?:CollectionSource;eventCount:number;readyPages?:number;failedPages?:number;emptyPages?:number};
-export type CollectionResult={events:Event[];warnings:string[];diagnostics?:CollectionDiagnostic[]};
+export type CollectionResult={events:Event[];warnings:string[];diagnostics?:CollectionDiagnostic[];requests?:import('./private-requests.js').PrivateRequestCandidate[];privateAcceptances?:Array<{conversationId:string;status:'accepted'}>};
 export const COLLECTION_CODES=[
+ 'private-request-accepted','private-request-unknown','private-request-retained','private-request-waiting',
+ 'chat-native-model-unverified','chat-native-sequence-unverified','chat-native-readable','private-requests-empty','private-requests-ready','private-request-observed','private-native-composer-unverified',
  'public-pin-unrecognized','public-relation-unverified','public-ready','public-confirmed-empty','public-budget-exhausted','public-page-timeout','public-page-error','public-target-unavailable','public-target-missing','public-wrong-location','public-parser-unready','public-profile-unready','public-navigation-failed',
  'chat-native-message-structure-unverified','chat-native-body-unverified','chat-native-observed','chat-native-time-unverified','chat-native-sender-unverified','chat-native-messages-unavailable','chat-native-locked','chat-native-shadow-unavailable','chat-native-conversation-mismatch','chat-native-id-conflict','chat-inbox-entries-unverified','chat-request-entry-missing','chat-other-entry-missing',
  'private-inbox-ready','chat-native-messages-ready','chat-native-conversation-empty','private-page-loading','private-structure-unverified','private-wrong-location',
  'private-legacy-body-unverified','private-direct-unverified','private-inbox-unverified','private-legacy-readable','private-inbox-empty','private-legacy-time-unverified','private-legacy-direction-unverified','private-legacy-id-missing','private-navigation-failed','private-collection-deadline',
  'legacy-unclassified','legacy-events-observed','legacy-empty-unverified','unclassified'
 ] as const;
-const CODES=new Set<string>(COLLECTION_CODES),STATUSES=new Set<string>(['ok','empty','partial','failed','unsupported','blocked','unknown']),SOURCES=new Set<string>(['mentions','search','own-post-replies','inbox','requests','conversation','chat']);
-const EMPTY_CODES=new Set(['public-confirmed-empty','private-inbox-empty','chat-native-conversation-empty']),BUDGET_CODES=new Set(['public-budget-exhausted','private-collection-deadline']);
+const CODES=new Set<string>(COLLECTION_CODES),STATUSES=new Set<string>(['ok','empty','partial','failed','unsupported','blocked','unknown']),SOURCES=new Set<string>(['mentions','search','own-post-replies','inbox','requests','other','conversation','chat']);
+const EMPTY_CODES=new Set(['public-confirmed-empty','private-inbox-empty','chat-native-conversation-empty','private-requests-empty']),BUDGET_CODES=new Set(['public-budget-exhausted','private-collection-deadline']);
 const count=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?Math.max(0,Math.min(100000,Math.floor(value))):0;
 const parse=(raw:string)=>{try{return JSON.parse(raw);}catch{return null;}};
 /** 浏览器只提供诊断；账号、轮次与日志时间始终由应用绑定。 */
