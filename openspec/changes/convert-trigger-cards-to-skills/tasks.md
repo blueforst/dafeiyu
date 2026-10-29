@@ -1,6 +1,6 @@
 # 触发卡按需读取实施任务
 
-当前完成 16/20 项。规格见 [persona-management](specs/persona-management/spec.md)、[reply-prompt-context](specs/reply-prompt-context/spec.md)、[chat-test](specs/chat-test/spec.md)、[persona-replay](specs/persona-replay/spec.md)、[persona-library](specs/persona-library/spec.md)、[workflow-observability](specs/workflow-observability/spec.md)、[llm-usage-billing](specs/llm-usage-billing/spec.md) 和 [model-configuration](specs/model-configuration/spec.md)，实现边界见 [design.md](design.md)。
+当前完成 20/20 项。规格见 [persona-management](specs/persona-management/spec.md)、[reply-prompt-context](specs/reply-prompt-context/spec.md)、[chat-test](specs/chat-test/spec.md)、[persona-replay](specs/persona-replay/spec.md)、[persona-library](specs/persona-library/spec.md)、[workflow-observability](specs/workflow-observability/spec.md)、[llm-usage-billing](specs/llm-usage-billing/spec.md) 和 [model-configuration](specs/model-configuration/spec.md)，实现边界见 [design.md](design.md)。
 
 执行边界：
 
@@ -39,12 +39,14 @@
 
 ## 6. 前端
 
-- [ ] 6.1 人设编辑器两组与卡片表单，删除触发方式与关键词输入（第 11 节）。验收：界面验收断言编辑与只读预设都只有“始终生效”和“触发卡”两组、卡片表单只有三项输入加开关和顺序、页面中没有“关键词”“skill”“工具调用”字样；375px 无整体横向溢出。
-- [ ] 6.2 试聊详情、动态右栏、回放预估与模型测试结果的展示（第 6、11 节）。验收：界面验收覆盖读取两张卡、未读取、旧记录三种情况，动态右栏旧记录保留“本次触发规则”标题；浅色和深色截图存入证据目录。
+- [x] 6.1 人设编辑器两组与卡片表单，删除触发方式与关键词输入（第 11 节）。验收：界面验收断言编辑与只读预设都只有“始终生效”和“触发卡”两组、卡片表单只有三项输入加开关和顺序、页面中没有“关键词”“skill”“工具调用”字样；375px 无整体横向溢出。
+- [x] 6.2 试聊详情、动态右栏、回放预估与模型测试结果的展示（第 6、11 节）。验收：界面验收覆盖读取两张卡、未读取、旧记录三种情况，动态右栏旧记录保留“本次触发规则”标题；浅色和深色截图存入证据目录。
 
 ## 7. 回归、真实验收、文档与发布
 
-- [ ] 7.1 服务器类型检查、全量回归、`dev/workspace-ui-test.sh` 和构建通过。验收：日志存入证据目录，失败、取消、跳过均为零；原有界面验收的业务断言保留。
+- [x] 7.1 服务器类型检查、全量回归、`dev/workspace-ui-test.sh` 和构建通过。验收：日志存入证据目录，失败、取消、跳过均为零；原有界面验收的业务断言保留。
 - [x] 7.2 真实模型验收（计费，需授权），按 design.md 第 13 节的样例与判定标准执行。验收：记录逐条读取的卡、请求轮数、费用和回复原文所在的证据文件；未达标的如实记录，不改写结论。
 - [x] 7.3 文档：`docs/人设与日程.md`（触发卡与按需读取）、`docs/前端接口.md`（卡片结构、关键词字段 400、`meta` 新字段、阶段详情）、`docs/人设回放.md`（预估口径）、`docs/模型库.md`（连接测试），以及 `openspec/config.yaml` 中“触发由 LLM 语义判断”的表述。验收：文档与实现一致。
-- [ ] 7.4 取得发布授权后随下一次发布上线，保持原有控制状态。验收：生产只读读回升级备份存在、各人设修订号与预期一致、人设页两组显示正确；发布记录写明回退步骤（design.md 第 12 节）。
+- [x] 7.4 取得发布授权后随下一次发布上线，保持原有控制状态。验收：生产只读读回升级备份存在、各人设修订号与预期一致、人设页两组显示正确；发布记录写明回退步骤（design.md 第 12 节）。
+
+验收与发布事实见 [0.1.21发布记录](../../../docs/发布记录/2026-10-29-0.1.21.md)。正式草稿抽查使用预览API，不代表X实际发送；相关既有平台验收任务保持原状态。
