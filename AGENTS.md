@@ -12,6 +12,8 @@
 
 # OpenSpec
 
+- 2026-10-30 安全返修及试聊会话菜单处于候选阶段，未发布。浏览器资源构建期间宿主失去 SSH／HTTP 响应，当前健康无法确认；先按 `docs/实施记录/2026-10-30-安全返修候选与恢复交接.md` 恢复服务器并停止本轮构建，再读取管理员最新控制。后文 healthy 为上一轮发布验收，不能当作当前可用性。禁止在该生产宿主并发执行浏览器资源解包和完整测试。
+
 - 需求、架构和跨模块变更采用 OpenSpec，先阅读 `openspec/README.md` 与 `openspec/config.yaml`。
 - 七页生产基线提案为 `openspec/changes/add-seven-page-production-bot/`；按 `proposal.md`、完整增量规格、`design.md`、`tasks.md` 理解范围。旧七页计划保留为来源，后续修改同步到提案，避免两份设计分叉。
 - `openspec/specs/` 只记录现有行为；尚未实现的需求保留在 change 的增量规格中，不能因规划完成就提前同步或归档。

@@ -20,7 +20,7 @@ import type { PostingCapabilitiesService } from './posting-capabilities.js';
 import { validatePostingText,rpcResourceOK } from './posting-policy.js';
 import { recentReplySamples } from './reply-hints.js';
 import { generateReply } from './reply-pipeline.js';
-import { captureGenerationSnapshot,pruneReplayData } from './persona-replay.js';
+import { captureGenerationSnapshot,pruneReplayData,memoryPrivacyRevision } from './persona-replay.js';
 import { RoundBudget,WorkflowWatchdog,healthSettings,type RuntimeHealth } from './unattended-health.js';
 import {safeBrowserDiagnostic} from './browser-operation.js';
 import {failureSummary} from './failure-summary.js';
@@ -39,6 +39,10 @@ export class Workflow {
  private startedAt=0;private watchdogTimer?:ReturnType<typeof setInterval>;private wakeRequested=false;
  private activeHandle='';private stopped=false;private schedulerActive=false;private roundCalls=new Set<string>();private roundId='';
  private controlRevision=0;private browserControlTail:Promise<unknown>=Promise.resolve();
+ private controlListeners=new Set<()=>void>();
+ controlEpoch(){return this.controlRevision;}
+ onControlRevision(listener:()=>void){this.controlListeners.add(listener);return ()=>{this.controlListeners.delete(listener);};}
+ private nextControlRevision(){this.controlRevision++;for(const listener of this.controlListeners)listener();return this.controlRevision;}
  constructor(public store:Store,public transport:Transport,public generator:Generator,public config:()=>Config=loadConfig){}
  accountId(){return this.activeHandle||this.store.get('activeAccount');}
  /** 只读任务计划与实例；不运行任务，也不访问浏览器。 */
@@ -62,7 +66,7 @@ export class Workflow {
  }
  wake(){if(this.control()!=='running'||this.stopped)return;if(this.busy){this.wakeRequested=true;return;}clearTimeout(this.timer);this.timer=undefined;this.nextTick=0;this.start();}
  configSafeInterval(){try{return this.config().pollSeconds*1000;}catch{return 60000;}}
- stop(){this.controlRevision++;this.stopped=true;clearInterval(this.watchdogTimer);this.watchdogTimer=undefined;clearTimeout(this.timer);this.timer=undefined;this.services.scheduler?.cancelBusiness();this.abort?.abort();}
+ stop(){this.nextControlRevision();this.stopped=true;clearInterval(this.watchdogTimer);this.watchdogTimer=undefined;clearTimeout(this.timer);this.timer=undefined;this.services.scheduler?.cancelBusiness();this.abort?.abort();}
  async waitIdle(){const until=Date.now()+100000;while(this.busy||this.services.scheduler?.busy){if(Date.now()>until)throw new Error('当前操作尚未结束，继续保持暂停');await new Promise(r=>setTimeout(r,100));}}
  private assertControl(revision:number){if(revision!==this.controlRevision)throw new Error('控制请求已被较新的操作替代');}
  /** 只串行实际控制RPC；不能持锁等待工作轮次，否则轮次内的安全暂停会死锁。 */
@@ -71,20 +75,20 @@ export class Workflow {
   this.browserControlTail=operation.catch(()=>{});return operation;
  }
  private async drain(target:'paused'|'manual'){
-  const revision=++this.controlRevision;
+  const revision=this.nextControlRevision();
   this.store.set('control','draining');this.services.scheduler?.cancelBusiness();this.abort?.abort();
   try{await this.waitIdle();this.assertControl(revision);await this.browserControl(target,revision);this.assertControl(revision);this.store.set('control',target);this.services.health?.recordControl(target,this.accountId());}
   catch(e){if(revision===this.controlRevision){this.store.set('control','paused');await this.browserControl('paused',revision).catch(()=>{});this.store.log('control-error','控制操作失败，已保持暂停，可重新尝试','error');}throw e;}
  }
  async pause(){await this.drain('paused');this.store.log('pause','自动处理已暂停');}
  async takeover(){await this.drain('manual');this.store.log('takeover','已移交人工；自动任务停止');}
- async release(){if(this.control()!=='manual')throw new Error('当前不处于人工接管');const revision=++this.controlRevision;try{await this.browserControl('paused',revision);this.assertControl(revision);}finally{if(revision===this.controlRevision)this.store.set('control','paused');}this.services.posting?.invalidate('人工接管已释放，能力需重新确认');this.services.health?.recordControl('paused',this.accountId());this.store.log('release','人工连接已关闭，等待显式恢复');}
+ async release(){if(this.control()!=='manual')throw new Error('当前不处于人工接管');this.store.set('control','draining');const revision=this.nextControlRevision();try{await this.browserControl('paused',revision);this.assertControl(revision);}finally{if(revision===this.controlRevision)this.store.set('control','paused');}this.services.posting?.invalidate('人工接管已释放，能力需重新确认');this.services.health?.recordControl('paused',this.accountId());this.store.log('release','人工连接已关闭，等待显式恢复');}
  async resume(){
   if(this.control()==='manual')throw new Error('请先释放人工接管');if(this.control()==='draining')throw new Error('正在排空，请稍后重试');
-  const revision=++this.controlRevision;await this.waitIdle();this.assertControl(revision);const c=this.config(),handle=loggedInHandle(await this.transport.identity());this.assertControl(revision);if(!handle)throw new Error('请先登录 X 并完成人工验证');
+  const revision=this.nextControlRevision();await this.waitIdle();this.assertControl(revision);const c=this.config(),handle=loggedInHandle(await this.transport.identity());this.assertControl(revision);if(!handle)throw new Error('请先登录 X 并完成人工验证');
   await this.browserControl('auto',revision);this.assertControl(revision);this.store.set('watchdogFailure:'+handle,'0');this.activeHandle=handle;this.store.set('activeAccount',handle);this.store.set('control','running');this.services.health?.recordControl('running',handle);this.store.log('resume',JSON.stringify({accountId:handle,mode:c.mode}));
  }
- async safetyPause(reason:string){const revision=++this.controlRevision;this.store.set('control','paused');this.services.posting?.invalidate(reason);this.services.health?.recordControl('paused',this.accountId());await this.browserControl('paused',revision).catch(()=>{});if(revision===this.controlRevision)this.store.log('safety-pause',reason,'error');}
+ async safetyPause(reason:string){const revision=this.nextControlRevision();this.store.set('control','paused');this.services.posting?.invalidate(reason);this.services.health?.recordControl('paused',this.accountId());await this.browserControl('paused',revision).catch(()=>{});if(revision===this.controlRevision)this.store.log('safety-pause',reason,'error');}
  cooldown(channel:Channel){return Number(this.store.get('cooldown:'+channel+':'+this.accountId(),this.store.get('cooldown:'+channel,'0')));}
  sentCount(channel:Channel){
   const account=this.accountId();if(!this.services.outbox)return this.store.sentCount(channel,account);
@@ -108,6 +112,7 @@ export class Workflow {
    if(r.status==='confirmed')this.store.update(e.id,'confirmed',{receipt:r});else if(r.status==='rejected'){this.store.update(e.id,'failed',{receipt:r,error:r.reason});this.rejectChannel(e.channel);}else if(r.status==='not_submitted')this.store.update(e.id,'draft',{receipt:r,error:r.reason});
   }
   for(const row of this.services.outbox?.pendingUnknown(handle)??[]){
+   if(!row.text)continue; // 隐私核对材料到期后保持unknown，不能重造意图或空正文回查。
    let r:Receipt={status:'unknown'};
    if(row.kind==='post'&&this.transport.lookupPost)r=await this.stage('lookup',roundId,()=>this.transport.lookupPost!(row.text,handle,row.id));
    else if(row.event){const e={...JSON.parse(row.event),outboxId:row.id};r=await this.stage('lookup',roundId,()=>this.transport.lookup(e,row.text,handle),e);}
@@ -119,6 +124,7 @@ export class Workflow {
   if(!this.services.health)return;
   try{
    const c=this.config(),host=this.services.scheduler?.host,hostHealth=host?.latest('health'),result=hostHealth?.result as any;
+   this.services.outbox?.prune(Date.now()-c.retentionDays*86400000);
    const browser=readBrowser&&this.transport.health?await this.transport.health().catch(()=>null):this.services.health.get(this.accountId()).browser;
    if(this.stopped&&readBrowser)return;
    const window=this.replyHours();
@@ -164,8 +170,9 @@ export class Workflow {
   }
  }
  private async generateDraft(e:Event,c:Config,persona:any,memoryPolicy:any,daily:any,roundId:string,merged:Event[]=[],personaIdentity?:{id?:string;name?:string;revision?:number}){
+  const privacyRevision=memoryPrivacyRevision(this.store,this.accountId(),e.userId,e.channel);
   const frozenIdentity=personaIdentity??{...this.services.persona?.activeIdentity?.(),revision:this.services.persona?.get().revision};
-  return generateReply({config:c,accountId:this.accountId(),persona,personaService:this.services.persona,generator:this.generator,
+  const generated=await generateReply({config:c,accountId:this.accountId(),persona,personaService:this.services.persona,generator:this.generator,
    conversation:()=>this.transport.context(e,this.accountId(),{signal:this.abort?.signal}),
    memory:()=>this.services.memory?this.services.memory.context(e.userId,e.channel,this.accountId(),Date.now(),memoryPolicy):this.store.context(e.userId,e.channel,this.accountId()),
    recentReplies:()=>recentReplySamples(this.store,this.accountId(),e.channel,e.conversationId),dailyState:daily?.state?.content??'暂无当日日程',
@@ -173,6 +180,8 @@ export class Workflow {
    personaIdentity:()=>frozenIdentity,
    snapshot:(event,data)=>captureGenerationSnapshot(this.store,event,data),stage:(name,fn)=>this.stage(name,roundId,fn,e)
   },e,{merged});
+  generated.draft.privacyRevision=privacyRevision;
+  return generated;
  }
  private async sendDraft(e:Event,text:string,handle:string,roundId:string,c:Config,callId?:string,approved=false){
   const epoch=this.store.epoch(e.userId,handle);
@@ -186,18 +195,22 @@ export class Workflow {
   if(this.control()!=='running'||this.abort?.signal.aborted){restore();return;}
   const finalWindow=this.replyHours();if(!finalWindow.open){restore();const current=this.store.getMessage(e.id);if(current)this.store.update(e.id,current.status,{draft:{...JSON.parse(current.draft??'{}'),waitReason:finalWindow.reason}});return;}
   if(!this.store.getMessage(e.id,handle)||this.store.forgotten(e.userId,handle)||this.store.epoch(e.userId,handle)!==epoch){restore();return;}
+  const currentDraft=JSON.parse(this.store.getMessage(e.id,handle)?.draft??'{}'),privacyRevision=String(currentDraft.privacyRevision??'0');
+  if(privacyRevision!==memoryPrivacyRevision(this.store,handle,e.userId,e.channel)){this.store.update(e.id,'queued',{draft:null,error:'记忆或关联已变化，等待重新生成'});return;}
   const capability=this.services.posting?.get().reply,validation=validatePostingText(text,e.channel==='public'?'reply':'dm',{accountId:handle,capability});
   if(!validation.allowed){const row=this.store.getMessage(e.id);this.store.update(e.id,'draft',{draft:{...JSON.parse(row.draft),validation},error:validation.reason});return;}
   const kind=e.channel==='public'?'reply':'dm',existing=this.services.outbox?.source(handle,kind,e.id);
   if(existing?.status==='prepared'&&existing.text!==text)this.services.outbox!.retext(existing.id,text);
-  const outbox=this.services.outbox?.prepare({accountId:handle,kind,sourceId:e.id,targetId:e.platformId,event:e,text,capability});
-  const sending={...e,...(outbox?{outboxId:outbox.id}:{})};
+  const frozenEvent={...e,privacyRevision};
+  const outbox=this.services.outbox?.prepare({accountId:handle,kind,sourceId:e.id,targetId:e.platformId,event:frozenEvent,text,capability});
+  const sending={...frozenEvent,...(outbox?{outboxId:outbox.id}:{})};
   if(!rpcResourceOK({event:sending,text,handle,requestId:outbox?.id??e.id,runtimeHealth:healthSettings(c.health)})){const invalid={...validation,allowed:false,code:'rpc-resource-limit',reason:'完整浏览器请求超过资源保护边界'};if(outbox){this.store.db.prepare("UPDATE outbox SET validation_json=? WHERE id=? AND status='prepared'").run(JSON.stringify(invalid),outbox.id);this.services.outbox!.cancel(outbox.id);}const row=this.store.getMessage(e.id);if(row)this.store.update(e.id,'draft',{draft:{...JSON.parse(row.draft??'{}'),validation:invalid},error:'完整浏览器请求超过资源保护边界，未提交'});return;}
   if(outbox){if(outbox.status==='prepared'&&outbox.text!==text)this.services.outbox!.retext(outbox.id,text);this.services.outbox!.validate(outbox.id,capability);if(!this.services.outbox!.begin(outbox.id,capability)){restore();return;}}
   this.store.update(e.id,'sending');let receipt:Receipt;
   try{receipt=await this.stage('sending',roundId,()=>this.transport.send(sending,text,handle,{signal:this.abort?.signal}),e);}catch(error){receipt={status:'unknown',reason:'提交结果未知，等待回查；'+failureSummary(error,'未取得可靠提交回执')};if((error as any)?.browserPaused)await this.safetyPause('浏览器已安全暂停，请检查后显式恢复');}
   if(outbox){const settled=this.services.outbox!.settle(outbox.id,receipt);receipt=settled.receipt?JSON.parse(settled.receipt):{status:'unknown'};}
-  this.store.update(e.id,receipt.status==='confirmed'?'confirmed':receipt.status==='rejected'?'failed':receipt.status==='not_submitted'?'draft':'unknown',{receipt,error:receipt.reason});
+  if(receipt.status==='not_submitted'&&privacyRevision!==memoryPrivacyRevision(this.store,handle,e.userId,e.channel))this.store.update(e.id,'queued',{draft:null,receipt,error:'记忆或关联已变化，旧结果未提交，等待重新生成'});
+  else this.store.update(e.id,receipt.status==='confirmed'?'confirmed':receipt.status==='rejected'?'failed':receipt.status==='not_submitted'?'draft':'unknown',{receipt,error:receipt.reason});
   if(receipt.status==='confirmed'&&this.services.memory)try{this.services.memory.recordExperience({accountId:handle,userId:e.userId,channel:e.channel,text:text.slice(0,1200),kind:'interaction',sourceMessageId:e.id,receipt});}catch{}
   if(receipt.browserPaused||receipt.restricted)await this.safetyPause(receipt.restricted?'工作账号受到平台限制，请人工检查':'浏览器已安全暂停，请检查后显式恢复');
   if(receipt.status==='rejected'){this.rejectChannel(e.channel);if(/automat|自动化/i.test(receipt.reason??''))this.services.health?.recordAutomationBlock(handle,e.channel);}
@@ -273,6 +286,7 @@ export class Workflow {
      try{
       const {draft,result,validation}=await this.generateDraft(e,c,persona,memoryPolicy,daily,roundId,merged?.context??[],personaIdentity);
       if(this.store.forgotten(e.userId,handle)||this.store.epoch(e.userId,handle)!==epoch)continue;
+      if(draft.privacyRevision!==memoryPrivacyRevision(this.store,handle,e.userId,e.channel)){if(this.store.getMessage(e.id,handle))this.store.update(e.id,'queued',{error:'记忆或关联已变化，旧生成结果已丢弃'});continue;}
       const previous=JSON.parse(row.draft??'{}'),review=!!previous.review;
       if(draft.action==='skip'){
        this.services.triage?.recordSkip(e,handle,draft.category);

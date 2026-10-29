@@ -1,3 +1,4 @@
+import {allowTestModelServer} from './model-network-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
@@ -20,7 +21,7 @@ async function fixture(options:{status?:number;text?:string;finish?:string}={}){
    res.write('data: '+JSON.stringify({...chunk,choices:[{index:0,delta:{},finish_reason:options.finish??'stop'}],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}})+'\n\n');res.end('data: [DONE]\n\n');
   });
  });
- await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));allowTestModelServer(server);
  const model:Config['model']={provider:'custom',api:'openai-completions',baseUrl:'http://127.0.0.1:'+(server.address() as any).port+'/v1',id:'json-format-fixture',reasoning:false,reasoningLevel:'off',vision:false};
  return {model,requests,close:()=>new Promise<void>(resolve=>server.close(()=>resolve()))};
 }

@@ -7,8 +7,9 @@ import { loadConfig } from './config.js';
 import { ReplyTriage } from './reply-triage.js';
 import { mkdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import {Outbox} from './outbox.js';
 const data=process.env.DATA_DIR||'/data';const s=new Store(data+'/workflow.sqlite');
-const generator=new PiGenerator(s),memory=new MemoryService(s,generator);
+const outbox=new Outbox(s),generator=new PiGenerator(s),memory=new MemoryService(s,generator);
 const [command,arg,arg2]=process.argv.slice(2);
 try{
  if(command==='status')console.log(JSON.stringify({control:s.get('control'),stats:{...s.stats(),usage:billingTotals(s.db)},config:loadConfig()},null,2));
@@ -23,6 +24,7 @@ try{
  }
  else if(command==='model-check'){const c=loadConfig();const r=await connectionCheck(generator,c.model,modelKey(c.model),c.model.reasoning?c.model.reasoningLevel:'off',{purpose:'model-test',source:'cli'});console.log(JSON.stringify({ok:r.ok,error:r.errorMessage,input:r.input,output:r.output,cache:r.cache,callId:r.callId,usage:r.usage,cost:r.cost,pricingStatus:r.pricingStatus}));}
  else if(command==='backup'){
+  outbox.prune(Date.now()-loadConfig().retentionDays*86400000);
   mkdirSync(data+'/backups',{recursive:true});const path=data+'/backups/workflow-'+new Date().toISOString().replace(/[:.]/g,'-')+'.sqlite';
   s.db.exec("VACUUM INTO '"+path+"'");const copy=new DatabaseSync(path,{readOnly:true});console.log(JSON.stringify({path,integrity:copy.prepare('PRAGMA integrity_check').get()}));copy.close();
  }else throw Error('命令：status | drafts | forget 用户ID | remember 用户ID | retry 消息ID | summarize 用户ID public/private | model-check | backup | apply-forget-ledger');

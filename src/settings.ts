@@ -1,3 +1,4 @@
+import {modelTarget} from './model-egress.js';
 // Panel-managed settings (expected handle, model) and per-slot model keys.
 // Stored under the writable data volume; config.json stays read-only.
 import { readFileSync, writeFileSync, renameSync, mkdirSync, chmodSync, unlinkSync, existsSync } from 'node:fs';
@@ -113,18 +114,7 @@ export function keyHints():Record<string,string> {
   return out;
 }
 
-const BLOCKED_HOSTS = new Set(['browser', 'app', 'localhost', '0.0.0.0', '::1']);
-export function checkBaseUrl(raw:string):URL {
-  let u:URL;
-  try { u = new URL(String(raw ?? '').trim()); } catch { throw new Error('模型地址无效：无法解析'); }
-  if (!['http:', 'https:'].includes(u.protocol)) throw new Error('模型地址无效：只支持 http 或 https');
-  if (u.username || u.password) throw new Error('模型地址无效：地址里不能带账号密码');
-  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  if (BLOCKED_HOSTS.has(h) || /^127\./.test(h) || /^169\.254\./.test(h) || /^::ffff:(7f|a9fe)/.test(h)) {
-    throw new Error('模型地址无效：不能指向本机、内部服务或云元数据地址');
-  }
-  return u;
-}
+export function checkBaseUrl(raw:string):URL {return modelTarget(String(raw??''),{base:true});}
 
 export function toConfigModel(p:PanelModel):Config['model'] {
   return { provider: p.provider, api: p.api ?? '', baseUrl: p.baseUrl, id: p.id, reasoning: p.reasoningLevel !== 'off', reasoningLevel: p.reasoningLevel, vision: false, source: 'panel', custom: p.custom };

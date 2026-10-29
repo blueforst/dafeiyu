@@ -10,7 +10,7 @@ import type { CompletionResult } from '../src/model.js';
 import { writeExampleConfig } from './config-fixture.js';
 
 const KEY = 'sk-test-123456789';
-const custom = (over: Record<string, unknown> = {}) => ({ provider: 'custom', baseUrl: 'http://mock.local/v1', api: 'openai-completions', id: 'my-model', reasoningLevel: 'off', maxTokens: 1024, timeoutMs: 60000, ...over });
+const custom = (over: Record<string, unknown> = {}) => ({ provider: 'custom', baseUrl: 'http://mock.example/v1', api: 'openai-completions', id: 'my-model', reasoningLevel: 'off', maxTokens: 1024, timeoutMs: 60000, ...over });
 const okResult = (over: Partial<CompletionResult> = {}): CompletionResult => ({ text: 'MODEL_OK', input: 5, output: 2, cache: 0, stopReason: 'toolUse', latencyMs: 30,toolCalls:[{type:'toolCall',id:'check',name:'connection_check',arguments:{ok:true}}], ...over });
 
 function setup(opts: { run?: any; discover?: any } = {}) {
@@ -50,7 +50,7 @@ test('保存自定义模型和 Key：之后只返回末四位，任何响应都�
     assert.equal(put.statusCode, 200, put.body);
     const get = await t.req('GET', '/api/model');
     assert.equal(get.json().source, 'panel');
-    assert.equal(get.json().keys['custom@mock.local'], '••••6789');
+    assert.equal(get.json().keys['custom@mock.example'], '••••6789');
     assert.ok(!put.body.includes(KEY));
     assert.ok(!get.body.includes(KEY));
   } finally { await t.close(); }
@@ -118,7 +118,7 @@ test('测试和拉取同一时间只允许一个，第二个返回 409', async (
   try {
     const [a, b] = await Promise.all([
       t.req('POST', '/api/model/test', { settings: custom(), apiKey: KEY }),
-      t.req('POST', '/api/model/discover', { provider: 'custom', baseUrl: 'http://mock.local/v1', api: 'openai-completions', apiKey: KEY }),
+      t.req('POST', '/api/model/discover', { provider: 'custom', baseUrl: 'http://mock.example/v1', api: 'openai-completions', apiKey: KEY }),
     ]);
     assert.deepEqual([a.statusCode, b.statusCode].sort(), [200, 409]);
   } finally { await t.close(); }
@@ -139,7 +139,7 @@ test('拉取列表时沿用该地址已保存的 Key', async () => {
   const t = setup({ discover: async (input: any) => { usedKey = input.apiKey; return { models: [{ id: 'x', known: false }], total: 1 }; } });
   try {
     await t.req('PUT', '/api/model', { settings: custom(), apiKey: KEY });
-    const r = await t.req('POST', '/api/model/discover', { provider: 'custom', baseUrl: 'http://mock.local/v1', api: 'openai-completions' });
+    const r = await t.req('POST', '/api/model/discover', { provider: 'custom', baseUrl: 'http://mock.example/v1', api: 'openai-completions' });
     assert.equal(r.statusCode, 200);
     assert.equal(usedKey, KEY);
     assert.ok(!r.body.includes(KEY));

@@ -1,3 +1,4 @@
+import {allowTestModelServer} from './model-network-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,mkdirSync,writeFileSync,rmSync } from 'node:fs';
@@ -25,7 +26,7 @@ function fixture(){
 }
 async function httpFixture(handler:(res:ServerResponse,body:any)=>void){
  const seen:any[]=[];const server=createServer((req,res)=>{let raw='';req.on('data',part=>raw+=part);req.on('end',()=>{const body=JSON.parse(raw||'{}');seen.push({url:req.url,headers:req.headers,body});handler(res,body);});});
- await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));allowTestModelServer(server);
  return {base:'http://127.0.0.1:'+(server.address() as any).port,seen,async close(){await new Promise<void>(resolve=>server.close(()=>resolve()));}};
 }
 function completion(res:ServerResponse,text:string){

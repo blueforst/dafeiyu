@@ -1,3 +1,4 @@
+import {modelFetch,modelTarget} from './model-egress.js';
 // pi model catalog for the panel, and the runtime model each request uses.
 import type { Api, Model } from '@earendil-works/pi-ai';
 import { createModels, createProvider, getSupportedThinkingLevels, type Models } from '@earendil-works/pi-ai/models';
@@ -143,7 +144,8 @@ async function fetchDiscoveredIds(req:{url:string; headers:Record<string,string>
   return [...new Set(idsFrom(body))];
 }
 
-export async function discoverModels(input:DiscoverInput, fetchImpl:typeof fetch = fetch):Promise<{models:DiscoveredModel[]; total:number; api?:'openai-completions'|'anthropic-messages'}> {
+export async function discoverModels(input:DiscoverInput, fetchImpl:typeof fetch = modelFetch):Promise<{models:DiscoveredModel[]; total:number; api?:'openai-completions'|'anthropic-messages'}> {
+  modelTarget(input.baseUrl,{base:true});
   const builtin = input.provider !== 'custom';
   let ids:string[];
   let detectedApi:'openai-completions'|'anthropic-messages'|undefined;

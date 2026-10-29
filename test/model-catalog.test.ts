@@ -1,3 +1,4 @@
+import {allowTestModelServer} from './model-network-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -26,7 +27,7 @@ async function mockSse(fn: (port: number, seen: Seen[]) => Promise<void>) {
       res.end('data: [DONE]\n\n');
     });
   });
-  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));allowTestModelServer(server);
   try { await fn((server.address() as any).port, seen); } finally { await new Promise<void>(r => server.close(() => r())); }
 }
 
@@ -104,7 +105,7 @@ test('Command Code 的 Claude 请求使用 Messages 与 Bearer Key，地址不�
       res.end();
     });
   });
-  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));allowTestModelServer(server);
   try {
     const r = await runCompletion(deepseek({ provider: 'commandcode', id: 'claude-sonnet-4-6', baseUrl: 'http://127.0.0.1:' + (server.address() as any).port + '/provider/v1', reasoning: false }), 'cmd-test-key', '系统', '你好');
     assert.equal(seen.url.split('?')[0], '/provider/v1/messages');

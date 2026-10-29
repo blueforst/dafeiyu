@@ -15,6 +15,7 @@ import twitterText from 'twitter-text';
 import { ModelLibraryService } from './model-library.js';
 import { readPanelSettings } from './settings.js';
 import { freezeReplayModel,type FrozenReplayModel,type ReplayPrice } from './replay-model.js';
+import {forbiddenOutboundContent,outboundContent} from './outbound-content.js';
 
 /** 由应用的加法迁移统一注册；模块不另占迁移编号。 */
 export const REPLAY_SCHEMA = `
@@ -62,7 +63,6 @@ export function eraseReplayScope(store:Store,userId:string,accountId:string,befo
 }
 /** 人工改记忆后旧召回失效；回放永远重新调用当前允许范围的召回。 */
 export function invalidateReplayMemory(store:Store,accountId:string,userId:string,channel?:Channel):void {
- if(!hasTable(store.db,'generation_snapshots'))return;
  const affected=new Map<string,Channel|undefined>([[userId,channel]]);
  if(hasTable(store.db,'identity_links')){
   const links=store.db.prepare('SELECT private_user_id,public_user_id FROM identity_links WHERE account_id=? AND (private_user_id=? OR public_user_id=?)').all(accountId,userId,userId) as any[];
@@ -70,13 +70,16 @@ export function invalidateReplayMemory(store:Store,accountId:string,userId:strin
  }
  for(const [identity,scope] of affected){
   const privateOnly=scope==='private',args=privateOnly?[accountId,identity,'private']:[accountId,identity];
-  const rows=store.db.prepare('SELECT message_id,body_json FROM generation_snapshots WHERE account_id=? AND user_id=?'+(privateOnly?' AND channel=?':'')).all(...args) as any[];
+  const rows=hasTable(store.db,'generation_snapshots')?store.db.prepare('SELECT message_id,body_json FROM generation_snapshots WHERE account_id=? AND user_id=?'+(privateOnly?' AND channel=?':'')).all(...args) as any[]:[];
   for(const row of rows){const body=parse(row.body_json);delete body.memory;body.memoryInvalidated=true;store.db.prepare('UPDATE generation_snapshots SET body_json=? WHERE message_id=?').run(JSON.stringify(body),row.message_id);}
-  store.db.prepare('DELETE FROM replay_items WHERE account_id=? AND user_id=?'+(privateOnly?' AND channel=?':'')).run(...args);
+  if(hasTable(store.db,'replay_items'))store.db.prepare('DELETE FROM replay_items WHERE account_id=? AND user_id=?'+(privateOnly?' AND channel=?':'')).run(...args);
   for(const visible of privateOnly?['private']:['public','private']){const key=memoryRevisionKey(accountId,identity,visible);store.set(key,String(Number(store.get(key,'0'))+1));}
+  // 生产草稿同样受召回权限约束；不能批准或恢复已撤销背景生成的正文。
+  store.db.prepare("UPDATE messages SET status='queued',draft=NULL,error='记忆或关联已变化，等待重新生成',updated_at=? WHERE account_id=? AND user_id=? AND status IN ('generating','draft','approved')"+(privateOnly?' AND channel=?':'')).run(Date.now(),...args);
  }
 }
 const memoryRevisionKey=(accountId:string,userId:string,channel:string)=>'replay:memory-revision:'+JSON.stringify([accountId,userId,channel]);
+export const memoryPrivacyRevision=(store:Store,accountId:string,userId:string,channel:Channel)=>store.get(memoryRevisionKey(accountId,userId,channel),'0');
 export function pruneReplayData(store:Store,before:number):void {
  if(!hasTable(store.db,'generation_snapshots'))return;
  store.db.prepare('DELETE FROM generation_snapshots WHERE created_at<? OR NOT EXISTS(SELECT 1 FROM messages WHERE messages.id=generation_snapshots.message_id AND messages.account_id=generation_snapshots.account_id)').run(before);
@@ -93,7 +96,7 @@ function replayDraft(raw:string,channel:Channel):{draft:Draft;validationError?:s
   // 保留与正式解析相同的大小保护，不能借评估入口持久化无限原文。
   if(Buffer.byteLength(raw,'utf8')>128*1024)throw error;
   const value=parse(raw.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''),null);
-  if(!value||value.action!=='reply'||typeof value.text!=='string'||!value.text.trim()||typeof value.reason!=='string'||!/https?:\/\/|www\.|@[a-z0-9_]{1,15}/i.test(value.text))throw error;
+  if(!value||value.action!=='reply'||typeof value.text!=='string'||!value.text.trim()||typeof value.reason!=='string'||!forbiddenOutboundContent(value.text))throw error;
   const text=channel==='public'?value.text.trim().normalize('NFC'):value.text.trim();
   if(channel==='public'?!publicResourceOK(text):text.length>4000)throw error;
   return {draft:{action:'reply',text,reason:value.reason.slice(0,300)},validationError:'回复包含禁用链接或账号提及'};
@@ -104,7 +107,7 @@ export type QualityInput = { action:'reply'|'skip';text:string;channel:Channel;t
 export type QualityMetrics = { total:number;replies:number;skipped:number;skipRate:number;averageLength:number;openingRepeatRate:number;topOpenings:Array<{text:string;count:number}>;kaomojiPerTen:number;emojiPerTen:number;tildePerTen:number;stepsRate:number;forbiddenLinks:number;forbiddenMentions:number;publicLengthViolations:number };
 export function qualityMetrics(items:QualityInput[]):QualityMetrics {
  const replies=items.filter(x=>x.action==='reply'),n=replies.length,counts=new Map<string,number>();let length=0,kaomoji=0,emoji=0,tilde=0,steps=0,links=0,mentions=0,long=0;
- for(const item of replies){const text=item.text??'',key=opening(text);counts.set(key,(counts.get(key)??0)+1);length+=Array.from(text).length;const e=expressions(text);kaomoji+=Number(e.kaomoji);emoji+=Number(e.emoji);tilde+=Number(e.tilde);steps+=Number(hasSteps(text));links+=Number(/https?:\/\/|www\./i.test(text));mentions+=Number(/@[a-z0-9_]{1,15}/i.test(text));long+=Number(item.channel==='public'&&twitterText.parseTweet(text.normalize('NFC')).weightedLength>280);}
+ for(const item of replies){const text=item.text??'',key=opening(text);counts.set(key,(counts.get(key)??0)+1);length+=Array.from(text).length;const e=expressions(text);kaomoji+=Number(e.kaomoji);emoji+=Number(e.emoji);tilde+=Number(e.tilde);steps+=Number(hasSteps(text));links+=Number(outboundContent(text).links);mentions+=Number(outboundContent(text).mentions);long+=Number(item.channel==='public'&&twitterText.parseTweet(text.normalize('NFC')).weightedLength>280);}
  // 重复组内全部条目计入，20 条中同一开头出现 6 次即为 30%。
  const repeated=[...counts.values()].filter(c=>c>1).reduce((a,b)=>a+b,0);
  return {total:items.length,replies:n,skipped:items.length-n,skipRate:items.length?(items.length-n)/items.length:0,averageLength:n?length/n:0,openingRepeatRate:n?repeated/n:0,topOpenings:[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,5).map(([text,count])=>({text,count})),kaomojiPerTen:n?kaomoji/n*10:0,emojiPerTen:n?emoji/n*10:0,tildePerTen:n?tilde/n*10:0,stepsRate:n?steps/n:0,forbiddenLinks:links,forbiddenMentions:mentions,publicLengthViolations:long};

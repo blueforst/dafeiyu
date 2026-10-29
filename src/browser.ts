@@ -228,6 +228,12 @@ export async function readCompliance(page:Page,handle:string,navigate:(page:Page
 }
 export async function startBrowserServer(options:{launch?:typeof launchBrowser}={}){
  const secret=readSecret('browser_key');if(!secret)throw new Error('缺少浏览器内部凭据');
+ async function authorizeSubmission(event:Event,text:string,handle:string,requestId:string){
+  const privacyRevision=(event as Event&{privacyRevision?:string}).privacyRevision;
+  if(typeof privacyRevision!=='string'||event.outboxId!==requestId)throw new BrowserOperationError('pre-submit-failed','target-validate');
+  const response=await fetch('http://app:8080/internal/submission-authority',{method:'POST',headers:{'x-browser-key':secret,'content-type':'application/json'},body:JSON.stringify({requestId,handle,sourceId:event.id,targetId:event.channel==='private'?event.conversationId:platformId(event),channel:event.channel,textHash:hash(text),privacyRevision}),signal:AbortSignal.timeout(5000)});
+  if(!response.ok||(await response.json() as any).allowed!==true)throw new BrowserOperationError('pre-submit-failed','target-validate');
+ }
  const profile=process.env.PROFILE_DIR||'/profile';mkdirSync(profile,{recursive:true});
  let shuttingDown=false,internalRestart=false;
  let mode='paused',effectiveHealth=healthSettings();const serial=new Serial();let round=0;let context:BrowserContext;const launch=options.launch??launchBrowser;
@@ -335,8 +341,8 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
  app.post('/control',async(req,reply)=>{
   const next=(req.body as any)?.mode;if(!['manual','paused','auto'].includes(next))return reply.code(400).send({error:'控制模式无效'});
   return serial.run(async()=>{
-   if(mode==='manual'&&next!=='manual')await exec('x11vnc',['-display',process.env.DISPLAY||':99','-R','disconnect:all'],{timeout:5000});
-   if(mode==='manual'&&next!=='manual'){capabilities.invalidate('人工接管已释放，旧能力证据失效');await adoptChatPage();}mode=next;return {mode};
+   const leaving=mode==='manual'&&next!=='manual';if(leaving)mode='paused';
+   if(leaving){await exec('x11vnc',['-display',process.env.DISPLAY||':99','-R','disconnect:all'],{timeout:5000});capabilities.invalidate('人工接管已释放，旧能力证据失效');await adoptChatPage();}mode=next;return {mode};
   });
  });
  function requestHealth(req:any){return healthSettings(req.body?.runtimeHealth??effectiveHealth);}
@@ -457,7 +463,7 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
    attempt!.setStage('editor-validate');const validation=await validationFor(text,'reply',handle);if(!validation.allowed)return attempt!.block(validation);
    const submit=dialog.getByTestId('tweetButton');if(await submit.count()!==1||!await submit.isEnabled())return attempt!.block({...validation,allowed:false,code:'editor-unavailable',reason:'编辑器未允许提交，未保存提交意图'});
    toastsBefore=await p.getByTestId('toast').allTextContents();
-   attempt!.beforeIntent();journal.intent(requestId,'reply',handle,target,text);attempt!.setStage('submit-click');
+   await authorizeSubmission(e,text,handle,requestId);attempt!.beforeIntent();journal.intent(requestId,'reply',handle,target,text);attempt!.setStage('submit-click');
    responseRows=await capture(p,async()=>{await dialog.getByTestId('tweetButton').click({timeout:15000});});
   }else{
    attempt!.setStage('dm-validate');p=await getDM();const snap=await readDM(p,e.conversationId,handle),native=e.privateContract==='xchat-native-v2';
@@ -477,7 +483,7 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
     const evidence:NativeSubmitEvidence={contract:'xchat-native-v2',selfUserId:actor.userId,baselineIds:[...new Set(snap.all.map(row=>row.id).filter(id=>typeof id==='string'&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)))],targetUuid:target,browserSession};
     const observer=await observeNativePending(p,{conversationId:e.conversationId,selfUserId:actor.userId,text,baselineIds:evidence.baselineIds,startedAt:Date.now(),key:'__rolePending_'+randomUUID().replace(/-/g,'')});
     try{
-     attempt!.beforeIntent();journal.intent(requestId,'dm',handle,e.conversationId,text,evidence);attempt!.setStage('submit-click');await submit.click({timeout:15000});
+     await authorizeSubmission(e,text,handle,requestId);attempt!.beforeIntent();journal.intent(requestId,'dm',handle,e.conversationId,text,evidence);attempt!.setStage('submit-click');await submit.click({timeout:15000});
      for(let count=0;count<15;count++){
       const state=await observer.read();if(state?.conflict){journal.nativePendingConflict(requestId);throw new Error('本次出现多个本地待发送消息，保持结果未知');}
       if(state?.pending.length===1){journal.bindNativePending(requestId,state.pending[0]);break;}
@@ -486,7 +492,7 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
      await p.waitForTimeout(500);const stable=await observer.read();if(stable?.conflict){journal.nativePendingConflict(requestId);throw new Error('本次本地待发送消息出现冲突，保持结果未知');}
     }finally{await observer.dispose();}
    }else{
-    attempt!.beforeIntent();journal.intent(requestId,'dm',handle,e.conversationId,text);attempt!.setStage('submit-click');
+    await authorizeSubmission(e,text,handle,requestId);attempt!.beforeIntent();journal.intent(requestId,'dm',handle,e.conversationId,text);attempt!.setStage('submit-click');
     await p.locator('[data-testid="dmComposerSendButton"]').click({timeout:15000});
    }
   }

@@ -61,13 +61,14 @@
         "measuredLength": 40,
         "limit": 280,
         "unit": "weighted-characters",
-        "policyRevision": "posting-policy-v1",
+        "policyRevision": "posting-policy-v2",
         "capabilityRevision": null,
         "checkedAt": 1793162040000
       },
       "format": {
         "issues": []
-      }
+      },
+      "privacyRevision": "0"
     }
   },
   {
@@ -132,13 +133,14 @@
         "measuredLength": 20,
         "limit": 4000,
         "unit": "javascript-characters",
-        "policyRevision": "posting-policy-v1",
+        "policyRevision": "posting-policy-v2",
         "capabilityRevision": null,
         "checkedAt": 1793162040000
       },
       "format": {
         "issues": []
-      }
+      },
+      "privacyRevision": "0"
     }
   }
 ]

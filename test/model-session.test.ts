@@ -1,3 +1,4 @@
+import {allowTestModelServer} from './model-network-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
@@ -16,7 +17,7 @@ test('OpenCode 各协议均发送稳定会话头和应用身份，独立测试�
       res.end(JSON.stringify({ error: { message: '会话头验收，请求已捕获' } }));
     });
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));allowTestModelServer(server);
   try {
     const baseUrl = 'http://127.0.0.1:' + (server.address() as any).port;
     for (const provider of ['opencode', 'opencode-go']) {
@@ -27,8 +28,8 @@ test('OpenCode 各协议均发送稳定会话头和应用身份，独立测试�
         const sessionId = 'role-test-' + provider + '-' + api;
         for (let turn = 0; turn < 2; turn++) {
           const before = seen.length;
-          await runCompletion(model, 'session-test-key', '系统', '测试', { sessionId });
-          assert.equal(seen.length, before + 1, provider + '/' + api);
+          const result=await runCompletion(model, 'session-test-key', '系统', '测试', { sessionId });
+          assert.equal(seen.length, before + 1, provider + '/' + api+' '+result.errorMessage);
           assert.equal(seen.at(-1)!['x-opencode-session'], sessionId, provider + '/' + api);
           assert.match(String(seen.at(-1)!['user-agent']), /^role-workflow\//);
         }

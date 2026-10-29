@@ -1,3 +1,4 @@
+import {allowTestModelServer} from './model-network-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
@@ -11,7 +12,7 @@ async function mock(status: number, body: unknown, fn: (base: string, seen: Seen
     res.writeHead(status, { 'Content-Type': typeof body === 'string' ? 'text/plain' : 'application/json' });
     res.end(typeof body === 'string' ? body : JSON.stringify(body));
   });
-  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));allowTestModelServer(server);
   try { await fn('http://127.0.0.1:' + (server.address() as any).port, seen); } finally { await new Promise<void>(r => server.close(() => r())); }
 }
 
@@ -104,7 +105,7 @@ test('自定义服务商未指定协议时：优先尝试 OpenAI 兼容，失败
       res.end('not openai');
     }
   });
-  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));allowTestModelServer(server);
   try {
     const base = 'http://127.0.0.1:' + (server.address() as any).port;
     const r = await discoverModels({ provider: 'custom', baseUrl: base, apiKey: 'k1' });

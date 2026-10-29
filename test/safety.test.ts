@@ -1,3 +1,4 @@
+import {allowTestModelServer} from './model-network-fixture.js';
 import {fakeConverse} from './tool-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -87,7 +88,7 @@ test('Pi 适配器经过真实本地兼容接口完成请求与用量解析',asy
  const path=mkdtempSync(tmpdir()+'/role-pi-');mkdirSync(path+'/secrets');writeFileSync(path+'/secrets/model_api_key','unit-test-key');const previous=process.env.SECRETS_DIR;process.env.SECRETS_DIR=path+'/secrets';
  let authorized=false;
  const server=createServer((req,res)=>{authorized=req.headers.authorization==='Bearer unit-test-key';req.resume();req.on('end',()=>{res.writeHead(200,{'Content-Type':'text/event-stream'});const chunk={id:'chatcmpl-test',object:'chat.completion.chunk',created:1,model:'unit-model',choices:[{index:0,delta:{role:'assistant',content:'{"action":"reply","text":"测试通过","reason":""}'},finish_reason:null}]};res.write('data: '+JSON.stringify(chunk)+'\n\n');res.write('data: '+JSON.stringify({...chunk,choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:12,completion_tokens:8,total_tokens:20}})+'\n\n');res.end('data: [DONE]\n\n');});});
- await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address() as any;const c=structuredClone(config);c.model.baseUrl='http://127.0.0.1:'+address.port+'/v1';c.model.id='unit-model';c.model.timeoutMs=10000;
+ await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));allowTestModelServer(server);const address=server.address() as any;const c=structuredClone(config);c.model.baseUrl='http://127.0.0.1:'+address.port+'/v1';c.model.id='unit-model';c.model.timeoutMs=10000;
  try{const result=await new PiGenerator().complete(c,'系统规则','测试消息');assert.equal(parseDraft(result.text).text,'测试通过');assert.ok(authorized);assert.equal(result.input,12);assert.equal(result.output,8);}finally{await new Promise<void>(r=>server.close(()=>r()));if(previous===undefined)delete process.env.SECRETS_DIR;else process.env.SECRETS_DIR=previous;rmSync(path,{recursive:true,force:true});}
 });
 

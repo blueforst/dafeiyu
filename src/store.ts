@@ -37,6 +37,7 @@ function nativeEvidence(row:{account_id:string;channel:Channel;platform_id?:unkn
 export class Store {
  db:DatabaseSync;ledgerPath:string;
  private forgetHandlers:ForgetHandler[]=[];
+ private pruneHandlers:Array<(before:number)=>void>=[];
  constructor(path:string){
   mkdirSync(dirname(path),{recursive:true});this.ledgerPath=dirname(path)+'/forget-ledger.json';this.db=new DatabaseSync(path);
   this.db.exec(`
@@ -54,6 +55,7 @@ export class Store {
   this.replayForgetLedger();
  }
  registerForgetHandler(handler:ForgetHandler){this.forgetHandlers.push(handler);}
+ registerPruneHandler(handler:(before:number)=>void){this.pruneHandlers.push(handler);}
  private ledger():Record<string,boolean>{
   let raw:string;try{raw=readFileSync(this.ledgerPath,'utf8');}catch(error:any){if(error?.code==='ENOENT')return {};throw error;}
   const value=JSON.parse(raw);if(!value||typeof value!=='object'||Array.isArray(value)||Object.values(value).some(v=>typeof v!=='boolean'))throw new Error('独立遗忘记录损坏，停止处理');return value;
@@ -81,6 +83,12 @@ export class Store {
   const value=JSON.parse(raw);if(!value||typeof value!=='object'||Array.isArray(value)||Object.values(value).some(v=>v!==true))throw new Error('独立遗忘来源记录损坏，停止处理');return value;
  }
  private sourceKey(accountId:string,channel:string,platformId:string,sourceId:string){return JSON.stringify([accountId,channel,platformId?'platform':'source',platformId||sourceId]);}
+ /** 恢复旧库时出站可能没有event，而消息已先被遗忘重放删除；按独立来源账本核对。 */
+ forgottenSource(accountId:string,channel:Channel,sourceId:string,platformId=''):boolean {
+  const ledger=this.sourceLedger(),prefix='event:'+encodeURIComponent(accountId)+':'+channel+':';let native='';
+  if(sourceId.startsWith(prefix))try{native=decodeURIComponent(sourceId.slice(prefix.length));}catch{}
+  return [accountId,''].some(account=>!!ledger[this.sourceKey(account,channel,'',sourceId)]||[platformId,native].filter(Boolean).some(id=>!!ledger[this.sourceKey(account,channel,id,sourceId)]));
+ }
  private ignoreForgottenSources(userId:string,accountId:string){
   const rows=this.db.prepare('SELECT account_id,channel,platform_id,source_id,id,body FROM messages WHERE user_id=?'+(accountId?' AND account_id=?':'')).all(...(accountId?[userId,accountId]:[userId])) as any[];
   if(!rows.length)return;
@@ -94,9 +102,9 @@ export class Store {
  nextTimestamp(now=Date.now()):number{const at=Math.max(now,Number(this.get('ingestionClock','0'))+1);this.set('ingestionClock',String(at));return at;}
  private knownAccounts(userId:string){return (this.db.prepare('SELECT account_id FROM account_users WHERE id=? UNION SELECT account_id FROM messages WHERE user_id=? AND account_id<>\'\' UNION SELECT account_id FROM memory WHERE user_id=? AND account_id<>\'\'').all(userId,userId,userId) as {account_id:string}[]).map(row=>row.account_id);}
  private erase(userId:string,accountId:string,before?:number){
+  for(const handler of this.forgetHandlers)handler(userId,accountId,before);
   if(before===undefined){this.db.prepare('DELETE FROM messages WHERE user_id=? AND account_id=?').run(userId,accountId);this.db.prepare('DELETE FROM memory WHERE user_id=? AND account_id=?').run(userId,accountId);}
   else{this.db.prepare('DELETE FROM messages WHERE user_id=? AND account_id=? AND ingested_at<=?').run(userId,accountId,before);this.db.prepare('DELETE FROM memory WHERE user_id=? AND account_id=? AND updated_at<=?').run(userId,accountId,before);}
-  for(const handler of this.forgetHandlers)handler(userId,accountId,before);
  }
  private parseScope(key:string):[string,string]{
   if(!key.startsWith('scope:'))return ['',key];
@@ -154,11 +162,11 @@ export class Store {
  }
  pending(limit=2,accountId?:string){return this.db.prepare("SELECT * FROM messages WHERE status='queued'"+(accountId===undefined?'':' AND account_id=?')+" ORDER BY CASE WHEN json_valid(draft) AND json_extract(draft,'$.review')=1 THEN 0 ELSE 1 END,created_at DESC LIMIT ?").all(...(accountId===undefined?[limit]:[accountId,limit])) as any[];}
  unknown(accountId?:string){return this.db.prepare("SELECT * FROM messages WHERE status='unknown'"+(accountId===undefined?'':' AND account_id=?')+' ORDER BY created_at LIMIT 10').all(...(accountId===undefined?[]:[accountId])) as any[];}
- update(id:string,status:string,values:{draft?:Draft;receipt?:Receipt;error?:string}={},accountId?:string){
+ update(id:string,status:string,values:{draft?:Draft|null;receipt?:Receipt;error?:string}={},accountId?:string){
   const row=this.getMessage(id,accountId);if(!row)return;
   const processed=['confirmed','draft','skipped','failed'].includes(status)&&!row.processed_seq?Math.max(Number(this.get('processedSequence','0')),Number((this.db.prepare('SELECT MAX(processed_seq) AS n FROM messages').get() as any).n??0))+1:row.processed_seq;
   if(processed>Number(this.get('processedSequence','0')))this.set('processedSequence',String(processed));
-  this.db.prepare('UPDATE messages SET status=?,draft=COALESCE(?,draft),receipt=COALESCE(?,receipt),error=?,updated_at=?,processed_seq=? WHERE id=?').run(status,values.draft?JSON.stringify(values.draft):null,values.receipt?JSON.stringify(values.receipt):null,values.error||null,Math.max(Date.now(),row.updated_at+1),processed,row.id);
+  this.db.prepare('UPDATE messages SET status=?,draft=CASE WHEN ? THEN ? ELSE draft END,receipt=COALESCE(?,receipt),error=?,updated_at=?,processed_seq=? WHERE id=?').run(status,values.draft!==undefined?1:0,values.draft?JSON.stringify(values.draft):null,values.receipt?JSON.stringify(values.receipt):null,values.error||null,Math.max(Date.now(),row.updated_at+1),processed,row.id);
  }
  /** 只读历史兼容查找：不从内部id/source_id或正文散列推平台ID，不改变归属或回填列。 */
  findByPlatformId(accountId:string,channel:Channel,platformId:string):any|undefined {
@@ -211,5 +219,5 @@ export class Store {
  logs(limit=100){return this.db.prepare('SELECT * FROM logs ORDER BY id DESC LIMIT ?').all(limit);}
  stats(){return {messages:this.db.prepare('SELECT channel,status,count(*) AS count FROM messages GROUP BY channel,status').all(),usage:this.db.prepare('SELECT SUM(input_tokens) AS input,SUM(output_tokens) AS output,SUM(cache_read) AS cache FROM usage').get(),oldestQueued:(this.db.prepare("SELECT MIN(created_at) AS at FROM messages WHERE status='queued'").get() as any)?.at};}
  usage(input:number,output:number,cache:number){this.db.prepare('INSERT INTO usage(at,input_tokens,output_tokens,cache_read) VALUES(?,?,?,?)').run(Date.now(),input,output,cache);}
- prune(days:number){this.db.prepare("DELETE FROM messages WHERE created_at<? AND status NOT IN ('sending','unknown')").run(Date.now()-days*86400000);this.db.prepare('DELETE FROM logs WHERE at<?').run(Date.now()-30*86400000);}
+ prune(days:number){const before=Date.now()-days*86400000;for(const handler of this.pruneHandlers)handler(before);this.db.prepare("DELETE FROM messages WHERE created_at<? AND status NOT IN ('sending','unknown')").run(before);this.db.prepare('DELETE FROM logs WHERE at<?').run(Date.now()-30*86400000);}
 }

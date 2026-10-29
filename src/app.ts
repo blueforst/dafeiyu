@@ -1,5 +1,4 @@
 import Fastify from 'fastify';
-import proxy from '@fastify/http-proxy';
 import staticFiles from '@fastify/static';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -41,6 +40,8 @@ import {registerPersonaLibraryRoutes} from './persona-library-routes.js';
 import {ChatTestService} from './chat-test.js';
 import {registerChatTestRoutes} from './chat-test-routes.js';
 import {upgradeSavedPersonas} from './persona-upgrade.js';
+import {submissionAllowed} from './submission-authority.js';
+import {registerDesktopProxy} from './desktop-proxy.js';
 export async function startApp(){
  const app=Fastify({logger:false,bodyLimit:16384});const data=process.env.DATA_DIR||'/data';mkdirSync(data,{recursive:true});
  const store=new Store(data+'/workflow.sqlite');store.boot();
@@ -71,6 +72,11 @@ export async function startApp(){
  workflow.services.experiences=experiences;workflow.services.manualImports=imports;
  app.addHook('onRequest',async(req,reply)=>{
   if(req.url==='/healthz')return;
+  if(req.url==='/internal/submission-authority'&&req.method==='POST'){
+   const supplied=Buffer.from(String(req.headers['x-browser-key']||'')),expected=Buffer.from(readSecret('browser_key'));
+   if(!expected.length||supplied.length!==expected.length||!timingSafeEqual(supplied,expected))return reply.code(401).send({error:'未授权'});
+   return;
+  }
   const supplied=Buffer.from(String(req.headers['x-ingress-key']||'')),expected=Buffer.from(ingress);
   if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))return reply.code(401).send({error:'未授权'});
   if(req.method!=='GET'&&req.method!=='HEAD'&&req.headers['x-workflow-control']!=='1')return reply.code(403).send({error:'缺少控制请求标记'});
@@ -80,6 +86,7 @@ export async function startApp(){
  });
  app.setErrorHandler((err:any,req,reply)=>{const code=Number(err.statusCode);if(code>=400&&code<500)return reply.code(code).send({error:code===413?'请求体超过大小限制':'请求参数无效'});store.log('api-error','请求处理失败','warn');reply.code(500).send({error:'请求失败，请查看日志'});});
  app.get('/healthz',async()=>({ok:true}));
+ app.post('/internal/submission-authority',async req=>({allowed:submissionAllowed(store,workflow.control(),workflow.accountId(),req.body)}));
  app.get('/api/status',async()=>{
   let config:any;let configError='';try{const c=loadConfig();config={mode:c.mode,model:{provider:c.model.provider,id:c.model.id,api:c.model.api,source:c.model.source,baseUrlHost:(()=>{try{return new URL(c.model.baseUrl).hostname;}catch{return '';}})(),configured:!!c.model.id&&!!c.model.baseUrl&&!!modelKey(c.model)},publicPerHour:c.publicPerHour,privatePerHour:c.privatePerHour};}catch(err){configError=redact(err);}
   let browser:any;try{browser=await transport.identity();observedAccount=loggedInHandle(browser);}catch(err){browser={loggedIn:false,reason:redact(err)};observedAccount='';}
@@ -112,7 +119,7 @@ export async function startApp(){
  registerHealthRoutes(app,{health,accountId});
  registerReplayRoutes(app,{store,replay});
  registerPromptHintsRoutes(app,{store});
- await app.register(proxy,{upstream:'http://browser:6080',prefix:'/desktop',rewritePrefix:'/',websocket:true,preHandler:async(req,reply)=>{if(workflow.control()!=='manual')return reply.code(423).send({error:'请先点击人工接管，再打开浏览器桌面'});}});
+ await registerDesktopProxy(app,workflow);
  await app.register(staticFiles,{root:new URL('../public',import.meta.url).pathname,prefix:'/',index:'index.html'});
  let closing=false,readyTimer:ReturnType<typeof setTimeout>|undefined;
  const readyLoop=async()=>{if(closing)return;try{await transport.control('paused');if(!closing)workflow.start();}catch{if(!closing)readyTimer=setTimeout(readyLoop,3000);}};await readyLoop();

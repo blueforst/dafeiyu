@@ -1,4 +1,5 @@
 import twitterText from 'twitter-text';
+import {forbiddenOutboundContent} from './outbound-content.js';
 
 export type PostingOperation='post'|'reply';
 export type PostingUnit='weighted-characters'|'unicode-codepoints'|'javascript-characters';
@@ -11,7 +12,7 @@ export type PostingValidation={
  allowed:boolean;operation:PostingOperation|'dm';measuredLength:number;limit:number;unit:PostingUnit;
  policyRevision:string;capabilityRevision:string|null;reason?:string;code?:string;checkedAt:number;
 };
-export const POSTING_POLICY_REVISION='posting-policy-v1';
+export const POSTING_POLICY_REVISION='posting-policy-v2';
 export const PUBLIC_RESOURCE_CODEPOINTS=25000;
 export const BROWSER_RPC_BODY_LIMIT=262144;
 export const CAPABILITY_TTL_MS=15*60*1000;
@@ -37,7 +38,7 @@ export function validatePostingText(text:unknown,operation:PostingOperation|'dm'
  base.measuredLength=operation==='dm'?value.length:twitterText.parseTweet(value).weightedLength;
  if(operation!=='dm'&&!publicResourceOK(value))return fail('resource-limit','公开正文超过 25,000 个 Unicode 码点的输入保护边界');
  if(operation==='dm'&&value.length>4000)return fail('length-limit','私信超过 4,000 个 JavaScript 字符');
- if(/https?:\/\/|www\.|@[a-z0-9_]{1,15}/i.test(value))return fail('forbidden-content','正文包含禁用链接或额外账号提及');
+ if(forbiddenOutboundContent(value))return fail('forbidden-content','正文包含禁用链接或额外账号提及');
  if(operation!=='dm'){
   if(value!==normalizePublicText(value))return fail('normalization-required','公开正文须在冻结前统一为 NFC');
   const adapter=options.capability?.adapterRevision?verifiedLongAdapters.get(options.capability.adapterRevision):undefined;

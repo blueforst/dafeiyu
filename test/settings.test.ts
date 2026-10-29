@@ -44,8 +44,10 @@ test('Base URL 拒绝本机、元数据地址、内部服务和带凭据的地�
   for (const bad of ['http://localhost:1', 'http://127.0.0.2/v1', 'http://169.254.169.254', 'http://browser:3001', 'http://app:8080', 'http://u:p@x.example', 'ftp://x.example']) {
     assert.throws(() => checkBaseUrl(bad), /模型地址无效/, bad);
   }
-  assert.equal(checkBaseUrl('http://mock-model:8080/v1').hostname, 'mock-model');
-  assert.equal(checkBaseUrl('http://192.168.1.10:11434/v1').port, '11434');
+  assert.throws(()=>checkBaseUrl('http://mock-model:8080/v1'));
+  assert.throws(()=>checkBaseUrl('http://192.168.1.10:11434/v1'));
+  const previous=process.env.MODEL_INTERNAL_TARGETS;process.env.MODEL_INTERNAL_TARGETS='http://mock-model:8080,http://192.168.1.10:11434';
+  try{assert.equal(checkBaseUrl('http://mock-model:8080/v1').hostname,'mock-model');assert.equal(checkBaseUrl('http://192.168.1.10:11434/v1').port,'11434');assert.throws(()=>checkBaseUrl('http://192.168.1.10:8080/v1'));}finally{if(previous===undefined)delete process.env.MODEL_INTERNAL_TARGETS;else process.env.MODEL_INTERNAL_TARGETS=previous;}
 });
 
 test('面板设置覆盖 config.json 的模型，内置服务商不受三种协议限制', () => {

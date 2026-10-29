@@ -13,6 +13,7 @@ services:
       DATA_DIR: /data
       CONFIG_PATH: /config/config.json
       BROWSER_ENDPOINT: http://browser:3001
+      MODEL_INTERNAL_TARGETS: ${MODEL_INTERNAL_TARGETS:-}
       MAINTENANCE_DIR: /maintenance
     group_add:
       - "${MAINTENANCE_GID:?请先设置宿主 role-maintenance 组的 GID}"

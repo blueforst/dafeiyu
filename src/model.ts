@@ -1,3 +1,5 @@
+import {withModelEgress,modelTarget} from './model-egress.js';
+import {forbiddenOutboundContent} from './outbound-content.js';
 import type { Api, Model, Context, Tool, ToolCall, AssistantMessage } from '@earendil-works/pi-ai';
 import { randomUUID } from 'node:crypto';
 import { readSecret } from './config.js';
@@ -12,7 +14,7 @@ export function parseDraftStructure(raw:string):Draft {
  const s=raw.trim().replace(/^\x60\x60\x60(?:json)?\s*/i,'').replace(/\s*\x60\x60\x60$/,'');
  const x=JSON.parse(s);
  if(!x||!['reply','skip'].includes(x.action)||typeof x.text!=='string'||typeof x.reason!=='string')throw new Error('模型输出未通过结构校验');
- if(x.action==='reply'&&(!x.text.trim()||/https?:\/\/|www\.|@[a-z0-9_]{1,15}/i.test(x.text)))throw new Error('回复为空或包含禁用链接及账号提及');
+ if(x.action==='reply'&&(!x.text.trim()||forbiddenOutboundContent(x.text)))throw new Error('回复为空或包含禁用链接及账号提及');
  const category=['harassment','spam','no_reply','other'].includes(x.category)?x.category:'other';
  return {action:x.action,text:x.text.trim(),reason:x.reason.slice(0,300),...(x.action==='skip'?{category}:{})};
 }
@@ -53,6 +55,8 @@ export async function freezeCompletionModel(model:Config['model']):Promise<Resol
 
 export async function runCompletion(m:Config['model'], key:string, system:string, user:string, opts:CompletionOptions = {}):Promise<CompletionResult> {
  const { model, models,pricingKnown } = opts.resolvedModel??await resolveRuntimeModel(m);
+ if(m.baseUrl)modelTarget(m.baseUrl,{base:true});
+ if(model.baseUrl)modelTarget(model.baseUrl,{base:true});
  const level = opts.reasoning ?? (m.reasoning ? m.reasoningLevel : 'off');
  const context:Context = opts.context??{ systemPrompt: system, messages: [{ role: 'user', content: user, timestamp: Date.now() }] };
  const maxTokens = fitContext(requestMaxTokens(opts.maxTokens ?? model.maxTokens, model, level),model.contextWindow,inputEstimate(context));
@@ -65,7 +69,7 @@ export async function runCompletion(m:Config['model'], key:string, system:string
   return {...payload,response_format:{type:'json_object'}};
  }:undefined;
  // 工作流传入稳定会话；独立连接测试使用新会话。pi 按服务商和地址添加对应会话头。
- const r = await models.completeSimple(model, context, { apiKey: key, sessionId: opts.sessionId || 'role-workflow-' + randomUUID(), identity: { userAgent: { custom: 'role-workflow/0.1' } }, headers: m.provider === 'commandcode' ? { Authorization: 'Bearer ' + key } : undefined, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,onPayload,maxRetries:0,...(opts.toolChoice?{toolChoice:opts.toolChoice}:{}) });
+ const r = await withModelEgress(()=>models.completeSimple(model, context, { apiKey: key, transport:'sse', sessionId: opts.sessionId || 'role-workflow-' + randomUUID(), identity: { userAgent: { custom: 'role-workflow/0.1' } }, headers: m.provider === 'commandcode' ? { Authorization: 'Bearer ' + key } : undefined, maxTokens, reasoning: level === 'off' ? undefined : level as any, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,onPayload,maxRetries:0,...(opts.toolChoice?{toolChoice:opts.toolChoice}:{}) }));
  // Pi 的错误占位 usage 可能全为零；没有实际返回的用量不视为免费。
  const meaningful=Object.entries(r.usage||{}).some(([k,v])=>k!=='cost'&&typeof v==='number'&&v>0);
  // Pi 在成功但上游没有 usage 时也保留初始化零值，无法以 stopReason 证明返回过用量。
