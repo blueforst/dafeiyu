@@ -1,7 +1,7 @@
 // 真实生产三页纯只读验收；不拦截成 mock，不发送控制/保存/模型请求，不连接桌面。
 import {observer} from '/opt/role-camoufox/launch.mjs';
 import assert from 'node:assert/strict';
-import {readPersonaSection} from './persona-editor-driver.mjs';
+import {readPersonaSection,pickPersonaItem} from './persona-editor-driver.mjs';
 import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 
@@ -67,7 +67,7 @@ async function ready(path){
  await navigation();await safeDOM();
 }
 async function go(path){await page.goto(BASE+'/#/'+path,{waitUntil:'domcontentloaded'});await ready(path);}
-async function shot(label){const name='production-workspace-'+label+'.png';await page.screenshot({path:OUT+'/'+name,fullPage:true,mask:[page.locator('.feed-conversations,.feed-thread,.feed-inspector,.feed-memory'),page.locator('#memory-users,#memory-detail,#program-logs'),page.locator('.ws-shell[data-page="persona"] textarea,.ws-shell[data-page="persona"] .ws-rule-list')]});result.screenshots.push(name);}
+async function shot(label){await page.evaluate(()=>{window.scrollTo(0,0);document.body.scrollTop=0;});const name='production-workspace-'+label+'.png';await page.screenshot({path:OUT+'/'+name,fullPage:true,mask:[page.locator('.feed-conversations,.feed-thread,.feed-inspector,.feed-memory'),page.locator('#memory-users,#memory-detail,#program-logs'),page.locator('.ws-shell[data-page="persona"] textarea,.ws-shell[data-page="persona"] .ws-rule-list,.pe-preview,.pe-readonly,.call-account,.call-detail-grid dd')]});result.screenshots.push(name);}
 async function assertRunValues(){
  const current=await read('/api/program');for(const key of NUMBERS){assert.ok(Number.isInteger(current.settings[key]),'运行配置缺少整数 '+key);assert.equal(Number(await page.locator('input[data-setting="'+key+'"]').inputValue()),current.settings[key],key+' 页面值与只读接口不一致');}
  assert.ok(current.settings.privatePerDay>=1&&current.settings.privatePerDay<=500);assert.equal(await page.locator('#program-mode-'+current.settings.mode).isChecked(),true);
@@ -94,6 +94,50 @@ try{
  await step('1440、1280、860、375浅深关键页面只读截图',async()=>{for(const scheme of ['light','dark'])for(const width of [1440,1280,860,375]){await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:1000});for(const path of ['feed','persona','settings/run']){await go(path);if(path==='settings/run')await assertRunValues();await shot(path.replace('/','-')+'-'+scheme+'-'+width);}}});
  await step('第三版卡片、模型参数精简、单一时效与自定义模型协议迁移真实读回',async()=>{const presets=await read('/api/persona/presets'),model=await read('/api/model'),triageCfg=await read('/api/triage/settings'),progCfg=await read('/api/program');assert.equal(presets.version,3);for(const persona of [activePersona.persona,...presets.items.map(x=>x.persona)])for(const card of persona.triggers){assert.equal(Object.hasOwn(card,'match'),false);assert.equal(Object.hasOwn(card,'keywords'),false);}for(const field of ['maxTokens','timeoutMs']){assert.equal(Object.hasOwn(model.settings,field),false);for(const provider of model.library.providers)for(const item of provider.models)assert.equal(Object.hasOwn(item.params,field),false);}const customModels=[];for(const provider of model.library.providers)if(provider.provider==='custom')for(const item of provider.models){assert.ok(['openai-completions','openai-responses','anthropic-messages'].includes(item.api),`自定义模型 ${provider.key}/${item.id} 缺少协议属性`);customModels.push({provider:provider.key,id:item.id,api:item.api});}assert.equal(triageCfg.maxAgeHours,3);assert.equal(progCfg.settings.maxAgeHours,3);assert.equal(Object.hasOwn(triageCfg.settings,'normalMaxAgeHours'),false);await page.setViewportSize({width:1440,height:1000});await go('persona');assert.equal(await page.getByRole('heading',{name:'始终生效',exact:true}).count(),1);assert.equal(await page.getByRole('heading',{name:'触发卡',exact:true}).count(),1);assert.equal(await page.getByLabel('触发方式',{exact:true}).count(),0);await shot('cards-editor');await go('settings/triage');const triageAdv=page.locator('[data-settings-view="triage"] details.ws-advanced[data-advanced-id="triage"]');if(await triageAdv.getAttribute('open')===null)await triageAdv.locator('>summary').click();await page.getByLabel('同文重复降优先阈值',{exact:true}).waitFor();assert.equal(Number(await page.getByLabel('消息时效（小时）',{exact:true}).inputValue()),3);assert.match(await page.locator('[data-settings-view="triage"]').textContent(),/广告.*过滤/);await shot('duplicate-triage');await go('settings/model');await page.locator('#model-search').fill(model.effective.id);const row=page.locator('.model-row').filter({hasText:model.effective.id}).first();await row.hover();await row.getByRole('button',{name:'编辑',exact:true}).click();const modal=page.getByRole('dialog');await modal.waitFor();assert.equal(await modal.getByLabel('回复长度上限（token）',{exact:true}).count(),0);assert.equal(await modal.getByLabel('超时（秒）',{exact:true}).count(),0);await modal.getByLabel(/^推理强度/).waitFor();await shot('model-params');await modal.getByRole('button',{name:'关闭',exact:true}).click();result.cardsVersion=3;result.migration={maxAgeHours:triageCfg.maxAgeHours,customModels};});
  await step('新版动态和既有试聊会话只读排版，不发送或修改',async()=>{const users=await read('/api/chat-test/users');result.chatUsersHashBefore=hash(users);await page.setViewportSize({width:1440,height:1000});await go('feed');if(await page.locator('.feed-item').count()){assert.ok(await page.locator('.feed-thread.ws-thread').count());assert.ok(await page.locator('.feed-item .ws-reply').count());assert.equal(await page.locator('.feed-user-meta').count(),0);}await shot('layout-feed');const first=users.items?.[0];if(!first)throw new Error('缺少已有试聊会话，不能用新增用户代替只读验收');await page.goto(BASE+'/#/persona/chat/'+encodeURIComponent(first.id));await page.locator('.chat-dock').waitFor();assert.equal(await page.locator('#chat-test-channel[role=radiogroup] input[type=radio]').count(),2);assert.equal(await page.locator('#chat-test-message').evaluate(n=>getComputedStyle(n).resize),'none');assert.equal(await page.locator('.ws-conversation .ws-turn-footer').count(),0);for(const color of ['light','dark'])for(const width of [1440,375]){await page.emulateMedia({colorScheme:color});await page.setViewportSize({width,height:1000});await safeDOM();const name='production-layout-chat-'+color+'-'+width+'.png';await page.screenshot({path:OUT+'/'+name,fullPage:true,mask:[page.locator('.ws-conversation,.ws-right>.ws-content,.ws-left>.ws-content'),page.locator('#chat-test-message')]});result.screenshots.push(name);}const after=await read('/api/chat-test/users');assert.equal(hash(after),result.chatUsersHashBefore);result.chatUsersHashAfter=hash(after);});
+ await step('本轮设置页真实布局与四宽浅深只读截图',async()=>{
+  for(const scheme of ['light','dark'])for(const width of [1440,1280,860,375]){
+   await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:868});
+   for(const id of IDS){
+    await go('settings/'+id);
+    assert.equal(await page.locator('.ws-main>.ws-content').evaluate(el=>el.scrollWidth>el.clientWidth+1),false,id+' 主区横向溢出 '+scheme+' '+width);
+    if(width===1440){
+     if(id==='model')assert.ok(await page.locator('.model-toolbar').evaluate(el=>el.getBoundingClientRect().height<=42),'模型工具栏换行');
+     if(id==='logs')assert.ok(await page.locator('.log-toolbar').evaluate(el=>el.getBoundingClientRect().height<=42),'日志筛选换行');
+     if(id==='browser')assert.ok(await page.locator('.desk-placeholder').evaluate(el=>el.getBoundingClientRect().width/el.parentElement.getBoundingClientRect().width>=.95),'桌面占位未铺满');
+     if(id==='run')assert.ok(await page.locator('.settings-run .ws-cols>.ws-card').evaluateAll(els=>Math.abs(els[0].getBoundingClientRect().height-els[1].getBoundingClientRect().height)<2),'运行双卡未对齐');
+     if(id==='billing'){
+      assert.ok(await page.locator('.usage-calls>summary').evaluate(el=>el.getBoundingClientRect().height<=68),'计费流水收起过高');
+      assert.ok(await page.locator('.usage-heatmap').evaluate(svg=>{const cells=[...svg.querySelectorAll('.heat-cell')].map(el=>el.getBoundingClientRect());return (Math.max(...cells.map(r=>r.right))-Math.min(...cells.map(r=>r.left)))/svg.getBoundingClientRect().width>=.92;}),'热力格未铺满');
+     }
+    }
+    await shot('settings-ui-'+id+'-'+scheme+'-'+width);
+   }
+  }
+ });
+ await step('人设目录实际内容、只读模板与侧栏节点稳定',async()=>{
+  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1440,height:868});await go('persona');
+  const key='p:'+activePersona.id,current=await page.locator('[data-persona-nav="'+key+'"]').elementHandle(),count=await page.locator('[data-persona-nav]').count(),preset=page.locator('[data-persona-nav^="preset:"]').first();
+  await preset.scrollIntoViewIfNeeded();const scroll=await page.locator('.ws-left>.ws-content').evaluate(n=>n.scrollTop);await preset.click();await page.locator('#persona-preset-create').waitFor();
+  assert.equal(await current.evaluate(n=>n.isConnected),true);assert.equal(await page.locator('[data-persona-nav]').count(),count);assert.equal(await page.locator('.ws-left>.ws-content').evaluate(n=>n.scrollTop),scroll);assert.equal(await preset.evaluate(n=>document.activeElement===n),true);assert.equal(await page.locator('.pe-detail textarea,.pe-detail input').count(),0);
+  await page.locator('[data-persona-nav="'+key+'"]').click();await page.locator('#persona-save').waitFor();assert.equal(await current.evaluate(n=>n.isConnected),true);
+  const index=Math.min(1,activePersona.persona.sections.length-1);
+  for(const scheme of ['light','dark'])for(const width of [375,860,1100,1280,1440]){
+   await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:868});await pickPersonaItem(page,'s:'+index);const input=page.locator('#persona-section-'+index);
+   assert.equal(hash(await input.inputValue()),hash(activePersona.persona.sections[index].content));const box=await input.boundingBox();assert.ok(box.height>=300);assert.equal(await input.evaluate(n=>getComputedStyle(n).resize),'vertical');await safeDOM();await shot('persona-directory-'+scheme+'-'+width);
+   await pickPersonaItem(page,'fixed');assert.equal(await page.locator('#fixed-rules').evaluate(n=>n.matches('div.pe-readonly')&&getComputedStyle(n).borderTopWidth==='0px'),true);await shot('persona-fixed-'+scheme+'-'+width);
+  }
+  result.personaDirectory={sidebarNodesStable:true,focusPreserved:true,scrollPreserved:true,contentHashVerified:true,widths:[375,860,1100,1280,1440]};
+ });
+ await step('调用流水七列真实记录与鼠标键盘原位展开',async()=>{
+  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1440,height:868});await go('settings/billing');await page.locator('.usage-calls-summary>strong').click();const row=page.locator('.call-ledger-row').first();await row.waitFor();
+  assert.deepEqual(await page.locator('.call-ledger th').allTextContents(),['时间','状态','模型','账号 / 用途','耗时','Token','费用']);assert.ok((await row.boundingBox()).height<=56);
+  const start=await page.getByLabel('开始日期',{exact:true}).inputValue(),to=await page.getByLabel('结束日期',{exact:true}).inputValue(),end=new Date(to+'T00:00:00Z');end.setUTCDate(end.getUTCDate()+1);
+  const data=await read('/api/billing/calls?'+new URLSearchParams({from:start,to:end.toISOString().slice(0,10)})),first=data.items[0];assert.ok(first);
+  assert.ok((await row.textContent()).includes(first.actualModel||first.model));const before=result.browserRequests.filter(r=>r.path==='/api/billing/calls').length;
+  await row.click();assert.equal(await row.getAttribute('aria-expanded'),'true');assert.ok((await page.locator('.call-ledger-detail:not([hidden])').textContent()).includes(first.id));await row.press('Enter');assert.equal(await row.getAttribute('aria-expanded'),'false');await row.press(' ');assert.equal(await row.getAttribute('aria-expanded'),'true');assert.equal(result.browserRequests.filter(r=>r.path==='/api/billing/calls').length,before);await row.press('Enter');
+  for(const scheme of ['light','dark'])for(const width of [375,1440]){await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:868});await row.scrollIntoViewIfNeeded();await safeDOM();await shot('ledger-'+scheme+'-'+width);await row.press('Enter');await shot('ledger-detail-'+scheme+'-'+width);await row.press('Enter');}
+  result.callLedger={realRecordHash:hash({id:first.id,model:first.actualModel||first.model}),columns:7,expandedWithoutRequest:true,keyboard:true};
+ });
  await step('验收前后配置、人设库、控制与模型调用保持一致',async()=>{final=await snapshot();result.final=final;for(const key of ['control','mode','accountId','configHash','modelHash','personaLibraryHash','personaHash','settingsHash','messageCountsHash','llmCalls'])assert.equal(final[key],initial[key],key+' 在只读验收期间发生变化');assert.equal(final.busy,false);assert.deepEqual(result.blockedWrites,[]);assert.deepEqual(result.forbiddenConnections,[]);assert.deepEqual(result.externalAttempts,[]);assert.ok(result.browserRequests.every(request=>['GET','HEAD'].includes(request.method)));assert.equal(result.settingsItems.length,11);});
 }catch(error){result.errors.push({name:'生产只读验收中止',error:redact(error?.message||error)});}
 finally{

@@ -1,0 +1,22 @@
+// 操作提示生命周期，控制接口全部合成，服务器运行。
+import {observer} from '/opt/role-camoufox/launch.mjs';
+import assert from 'node:assert/strict';
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {personaWorkspaceFixture} from './persona-workspace-fixture.mjs';
+const BASE=process.env.PANEL_URL||'http://127.0.0.1:8083',OUT=process.env.ARTIFACT_DIR||'/artifacts';mkdirSync(OUT,{recursive:true});
+const report={evidence:'服务器隔离 Camoufox，合成控制接口，无生产操作',checks:[],errors:[]};
+const browser=await observer(),page=await browser.newPage({viewport:{width:1280,height:868}});page.setDefaultTimeout(12000);await personaWorkspaceFixture(page);let control='paused',release=null,hold=false,fail=false;
+await page.route('**/api/status',r=>r.fulfill({json:{control,busy:false,accountId:'fixture',browser:{loggedIn:true,handle:'fixture'},config:{mode:'auto',model:{configured:true,id:'fixture'}},cooldown:{}}}));
+await page.route('**/api/control/*',async route=>{if(hold)await new Promise(resolve=>release=resolve);if(fail){fail=false;return route.fulfill({status:409,json:{error:'合成控制失败'}});}const action=route.request().url().split('/').at(-1);control={resume:'running',pause:'paused',takeover:'manual',release:'paused'}[action];await route.fulfill({json:{ok:true,control}});});
+page.on('pageerror',e=>report.errors.push({name:'页面异常',error:String(e)}));
+async function check(name,fn){console.log('开始 '+name);try{await fn();report.checks.push(name);console.log('通过 '+name);}catch(e){report.errors.push({name,error:e.stack||String(e)});}}
+async function start(){await page.getByRole('button',{name:'启动',exact:true}).click();await page.waitForFunction(()=>document.getElementById('notice')?.textContent==='已启动');}
+const toast=()=>page.locator('#notice');
+await page.goto(BASE+'/#/persona');await page.locator('#persona-save').waitFor();
+await check('启动成功3.2秒后自动收起',async()=>{await start();assert.equal(await toast().isVisible(),true);await page.mouse.move(1,1);await toast().waitFor({state:'hidden',timeout:5000});});
+await check('暂停成功和关闭按钮可立即收起',async()=>{await page.getByRole('button',{name:'暂停',exact:true}).click();await page.waitForFunction(()=>document.getElementById('notice')?.textContent==='已暂停');await page.getByRole('button',{name:'关闭提示',exact:true}).click();assert.equal(await toast().isVisible(),false);});
+await check('新提示替换旧提示，旧计时器不会关闭新消息',async()=>{await start();await page.waitForTimeout(2100);await page.getByRole('button',{name:'暂停',exact:true}).click();await page.waitForFunction(()=>document.getElementById('notice')?.textContent==='已暂停');await page.mouse.move(1,1);await page.waitForTimeout(1500);assert.equal(await toast().isVisible(),true);await toast().waitFor({state:'hidden',timeout:3000});});
+await check('悬停和键盘聚焦暂停倒计时，离开继续',async()=>{await start();await toast().hover();await page.waitForTimeout(3600);assert.equal(await toast().isVisible(),true);await page.getByRole('button',{name:'关闭提示',exact:true}).focus();await page.mouse.move(1,1);await page.waitForTimeout(3600);assert.equal(await toast().isVisible(),true);await page.locator('#persona-save').focus();await toast().waitFor({state:'hidden',timeout:5000});await page.getByRole('button',{name:'暂停',exact:true}).click();await page.getByRole('button',{name:'关闭提示',exact:true}).click();});
+await check('进行中排空提示保持，完成后替换并自动消失',async()=>{await start();hold=true;await page.getByRole('button',{name:'暂停',exact:true}).click();await page.waitForFunction(()=>document.getElementById('notice')?.textContent==='正在等待当前操作结束…');await page.mouse.move(1,1);await page.waitForTimeout(3600);assert.equal(await toast().isVisible(),true);hold=false;release();await page.waitForFunction(()=>document.getElementById('notice')?.textContent==='已暂停');await toast().waitFor({state:'hidden',timeout:5000});});
+await check('错误提示8秒收起且键盘可关闭',async()=>{fail=true;await page.getByRole('button',{name:'启动',exact:true}).click();await page.getByText('合成控制失败',{exact:true}).waitFor();await page.mouse.move(1,1);await page.waitForTimeout(3500);assert.equal(await toast().isVisible(),true);await toast().waitFor({state:'hidden',timeout:6000});fail=true;await page.getByRole('button',{name:'启动',exact:true}).click();await page.getByRole('button',{name:'关闭提示',exact:true}).focus();await page.keyboard.press('Enter');assert.equal(await toast().isVisible(),false);});
+await browser.close();writeFileSync(OUT+'/notice-ui-acceptance.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));if(report.errors.length)process.exitCode=1;

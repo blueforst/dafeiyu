@@ -543,3 +543,10 @@ body.workspace .notice{pointer-events:none;top:calc(var(--ws-top-height,57px) + 
  .pe-menu{margin-left:auto}.pe-preset-summary{display:none}
 }
 @media(hover:none){.pe-drag-handle{opacity:1}}
+/* 操作提示有期限并可关闭；悬停或键盘聚焦时暂停倒计时。 */
+.notice:has(.notice-close){display:flex;align-items:flex-start;gap:12px;padding-right:8px}
+body.workspace .notice:has(.notice-close){pointer-events:auto}
+.notice-text{min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.notice-close{flex:none;margin-left:auto;width:22px;height:22px;padding:0;border:0;border-radius:var(--r-sm);background:none;color:inherit;cursor:pointer;line-height:22px;font-size:18px}
+.notice-close::before{content:'×'}.notice-close:hover{background:var(--ws-hover)}
+.notice-close:focus-visible{outline:2px solid var(--ws-brand);outline-offset:2px}
