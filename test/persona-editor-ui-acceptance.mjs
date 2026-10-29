@@ -11,6 +11,8 @@ page.setDefaultTimeout(10000);page.on('pageerror',e=>report.errors.push({name:'�
 const current=fx.items[0],style=('中文为主，跟随对方语言。自然回应，不编造记忆；短句，避免重复开头和收尾。\n'.repeat(12)).slice(0,384);current.persona.sections[1].content=style;
 current.persona.triggers.unshift({id:'steps',title:'不给步骤',condition:'对方聊到下列说法或类似意思时使用：想要详细教程',content:'不写教程和操作步骤，自然交流。',enabled:true,order:0});current.persona.triggers[1].order=1;
 const input=()=>page.locator('#persona-section-1');
+// 切换视口后先复位文档滚动，保留各业务滚动区；避免旧聚焦位置使顶部截图裁切。
+async function shot(options){await page.evaluate(()=>{window.scrollTo(0,0);document.body.scrollTop=0;});return page.screenshot(options);}
 async function check(name,fn){console.log('开始 '+name);try{await fn();report.checks.push(name);console.log('通过 '+name);}catch(e){report.errors.push({name,error:e.stack||String(e)});console.log('失败 '+name+' '+e.message);}}
 async function saved(){await page.locator('#persona-save').click();await page.waitForFunction(()=>!document.querySelector('.ws-main .ws-header-content')?.textContent.includes('未保存'));}
 await check('三组目录、统计、预览与选中分隔',async()=>{
@@ -51,7 +53,7 @@ await check('五宽浅深实际几何与截图：输入铺满、384字完整显�
  for(const scheme of ['light','dark'])for(const width of [375,860,1100,1280,1440]){
   await page.emulateMedia({colorScheme:scheme});await page.setViewportSize({width,height:868});await pickPersonaItem(page,'s:1');await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
   const g=await page.evaluate(()=>{const host=document.querySelector('.pe-host'),toc=document.querySelector('.pe-toc'),field=document.querySelector('.pe-fields'),input=document.querySelector('#persona-section-1'),a=input.getBoundingClientRect(),b=field.getBoundingClientRect();return{overflow:document.documentElement.scrollWidth>innerWidth+1,mainOverflow:host.scrollWidth>host.clientWidth+1,toc:getComputedStyle(toc).display,tocWidth:toc.getBoundingClientRect().width,inputHeight:a.height,bottomGap:b.bottom-a.bottom,scroll:input.scrollHeight,client:input.clientHeight,resize:getComputedStyle(input).resize};});report.geometry.push({scheme,width,...g});assert.equal(g.overflow,false);assert.equal(g.mainOverflow,false);assert.ok(g.inputHeight>=300,JSON.stringify(g));assert.ok(g.bottomGap<=25,JSON.stringify(g));assert.equal(g.resize,'vertical');if(width>=1100)assert.ok(g.scroll<=g.client+1,'384字未完整显示');if(width===1100)assert.equal(g.tocWidth,260);if(width<=860){assert.equal(g.toc,'none');assert.deepEqual(await page.locator('.pe-mobile-controls optgroup').evaluateAll(n=>n.map(x=>x.label)),['始终生效','触发卡','只读']);}
-  for(const key of ['s:1','t:steps','fixed']){await pickPersonaItem(page,key);const file='persona-editor-'+key.replace(':','-')+'-'+scheme+'-'+width+'.png';await page.screenshot({path:OUT+'/'+file,fullPage:true});report.screenshots.push(file);}
+  for(const key of ['s:1','t:steps','fixed']){await pickPersonaItem(page,key);const file='persona-editor-'+key.replace(':','-')+'-'+scheme+'-'+width+'.png';await shot({path:OUT+'/'+file,fullPage:true});report.screenshots.push(file);}
  }
 });
 await check('输入框保留手动纵向拉伸与邻项导航',async()=>{await page.setViewportSize({width:1440,height:868});await pickPersonaItem(page,'s:1');await input().evaluate(n=>{n.style.height='800px';});assert.ok((await input().boundingBox()).height>=799);await pickPersonaItem(page,'s:3');await page.getByRole('button',{name:'下一项 '+fx.items[0].persona.triggers[0].title,exact:true}).click();assert.equal(await page.locator('.pe-header>b').textContent(),fx.items[0].persona.triggers[0].title);});
