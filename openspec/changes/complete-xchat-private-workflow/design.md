@@ -30,7 +30,7 @@
 
 ## Open Questions
 
-已取得入站公开 getter、请求入口和接受控件的实际证据；平台 SDK 区分 Received／Pending／Sent 及服务器序号。实现与隔离测试见 docs/新Chat私信处理.md。真实接受后的 composer、实际出站及双方回执仍须正常生产路径验收，不能以 SDK 和合成 DOM 代替。
+已取得入站公开 getter、请求入口和接受控件的实际证据；平台 SDK 区分 Received／Pending／Sent 及服务器序号。0.1.28.1 已确认真实接受后的空 composer、五条入站和实际上下文，真实模型回复、实际出站及双方回执仍须正常生产路径验收，不能以 SDK 和合成 DOM 代替。实现与隔离测试见 docs/新Chat私信处理.md。
 
 ## 2026-10-30 收件与回复分离
 
