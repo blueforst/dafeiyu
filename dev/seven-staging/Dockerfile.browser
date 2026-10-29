@@ -1,4 +1,0 @@
-# 复用已经在服务器验证的 0.1.12 Camoufox 运行环境，仅更新本次工作流代码。
-FROM role-workflow-seven-builder:dev AS compiled
-FROM role-workflow-browser:0.1.12
-COPY --from=compiled /app/dist /app/dist

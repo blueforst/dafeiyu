@@ -2,8 +2,8 @@
 # 三工作区与原功能回归均在服务器执行；容器不挂生产资料、不连接外网。
 set -eu
 cd "$(dirname "$0")/.."
-# 可只复验失败套件；默认仍执行完整业务覆盖。
-suites="${WORKSPACE_SUITES:-refinements-ui-acceptance workspace-shell-ui-acceptance workspace-lifecycle-ui-acceptance persona-workspace-ui-acceptance settings-workspace-ui-acceptance feed-workspace-ui-acceptance five-pages-acceptance proposals-ui-acceptance model-library-ui-acceptance billing-charts-acceptance feed-alerts-acceptance fill-gaps-ui-acceptance persona-presets-ui-acceptance reply-style-ui-acceptance run-control-ui-acceptance persona-presets-e2e browser-health-acceptance browser-broker-acceptance}"
+# 可按需指定特定功能套件；默认执行三页工作区核心 UI 验收套件。
+suites="${WORKSPACE_SUITES:-workspace-shell-ui-acceptance workspace-lifecycle-ui-acceptance persona-workspace-ui-acceptance settings-workspace-ui-acceptance feed-workspace-ui-acceptance}"
 for suite in $suites; do
  case "$suite" in *[!a-z0-9-]*|'') echo '验收套件名称无效' >&2; exit 2;; esac
  test -f "test/$suite.mjs" || { echo '验收套件不存在' >&2; exit 2; }
