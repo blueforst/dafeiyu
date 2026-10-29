@@ -41,7 +41,7 @@ export async function readNativeRequestInbox(page:Page,kind:'requests'|'other'):
   const empties=Array.from(panel.querySelectorAll('[data-testid="dm-message-requests-empty"]')).filter(ownedUI),back=panel.querySelectorAll('[data-testid="dm-message-requests-back"]');
   const otherHeader=kind==='other'&&back.length===1&&back[0].parentElement?.textContent?.trim()==='Other';
   const emptyText=empties.length===1?(empties[0].textContent??'').trim().replace(/\s+/g,' '):'';
-  if(empties.length===1&&empties[0].getClientRects().length>0&&!empties[0].querySelector('a,button,input')&&!listboxes.some(node=>node.querySelector('a[href]'))&&!invalid&&(kind==='requests'?/^No message requests\s+You don.t have any message requests from accounts in your network$/.test(emptyText):otherHeader&&/^No message requests(?:\s+.{1,600})?$/.test(emptyText)))return {...base,state:'empty'};
+  if(empties.length===1&&empties[0].getClientRects().length>0&&!empties[0].querySelector('a,button,input')&&!listboxes.some(node=>node.querySelector('a[href]'))&&!invalid&&(kind==='requests'?/^No message requests\s*You don.t have any message requests from accounts in your network$/.test(emptyText):otherHeader&&/^No message requests(?:\s+.{1,600})?$/.test(emptyText)))return {...base,state:'empty'};
   return {...base,invalid};
  },{kind,expectedPath:paths[kind]});
 }
