@@ -14,9 +14,28 @@ free_kib=$(df -Pk /var/lib/docker | awk 'NR==2{print $4}')
 test "$free_kib" -ge 3145728 || { echo 'Docker磁盘不足3GiB，不启动重任务' >&2;exit 75; }
 builder=role-workflow-limited
 job=role-workflow-heavy-$$
-cleanup(){ if test "$mode" = build;then docker buildx stop "$builder" >/dev/null 2>&1 || true;else docker rm -f "$job" >/dev/null 2>&1 || true;fi; }
+owner=$$
+watchdog_pid=''
+stop_job(){ if test "$mode" = build;then docker buildx stop "$builder" >/dev/null 2>&1 || true;else docker rm -f "$job" >/dev/null 2>&1 || true;fi; }
+cleanup(){ if test -n "$watchdog_pid";then kill "$watchdog_pid" >/dev/null 2>&1 || true;fi;stop_job; }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
+watch_host(){
+ count=0
+ while sleep 1;do
+  remaining_mem=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)
+  count=$((count+1))
+  if test "$((count%5))" -eq 0;then remaining=$(df -Pk /var/lib/docker | awk 'NR==2{print $4}');else remaining=3145728;fi
+  if test "${remaining_mem:-0}" -lt 1024 || test "${remaining:-0}" -lt 3145728;then
+   echo '宿主可用内存跌破1GiB或Docker磁盘余量跌破3GiB，停止本轮任务以保护生产' >&2
+   stop_job
+   kill -TERM "$owner" >/dev/null 2>&1 || true
+   return
+  fi
+ done
+}
+# 监控及其sleep不得继承锁，否则短任务退出后下一个合法任务会被误拦截。
+watch_host 9>&- & watchdog_pid=$!
 if test "$mode" = build;then
  test "$limit" = 640 || { echo '构建器固定640MiB' >&2;exit 2; }
  for arg in "$@";do case "$arg" in --builder|--builder=*|--push|--memory*|--cpu*|--load|--output*|-o) echo '构建器、输出和资源限制由入口统一设置' >&2;exit 2;; esac;done
