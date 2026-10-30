@@ -5,8 +5,8 @@ version="${1:?用法：upgrade.sh 新版本号}"
 case "$version" in *[!A-Za-z0-9._-]*|'') echo "版本号无效" >&2; exit 2;; esac
 mkdir -p /var/lib/role-workflow/releases
 # 构建期先通过测试；运行中的实例不使用源码挂载。
-docker build --target runtime -t "role-workflow-app:$version" .
-docker build --target browser -t "role-workflow-browser:$version" .
+sh dev/server-heavy.sh build --target runtime -t "role-workflow-app:$version" .
+sh dev/server-heavy.sh build --target browser -t "role-workflow-browser:$version" .
 python3 - <<'PY'
 import pathlib,urllib.request,json
 k=pathlib.Path('/var/lib/role-workflow/secrets/app/ingress_key').read_text().strip()

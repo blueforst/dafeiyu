@@ -148,9 +148,13 @@ export class BrowserResourceGuard {
   if(this.restarting||['send','post','lookup','lookupPost','lookup-post','control','health'].includes(operation)){this.state.recoveryDeferredReason='protected-operation';return this.snapshot();}
   if(control!=='auto'){this.state.recoveryDeferredReason='control-not-auto';return this.snapshot();}
   if(operation!=='prepare-round'||gate.safePoint!==true){this.state.recoveryDeferredReason='unsafe-point';return this.snapshot();}
-  if(this.state.protectedReasons.length){this.state.recoveryDeferredReason='protected-session';this.state.businessBlocked=!!this.state.resourceFault||this.state.protectedReasons.includes('unsettled-outbox');
+  if(this.state.protectedReasons.length){this.state.recoveryDeferredReason='protected-session';
+   // 延后轮换不等于全局停工。未知出站由工作流按通道防重发，不能因此饿死其他通道。
+   // 真实故障、无法测量或已到临界内存时仍只允许回查，且始终保留受保护会话。
+   const unsettled=this.state.protectedReasons.includes('unsettled-outbox'),critical=state.memory.ratio===null||state.memory.ratio>=BROWSER_RECOVERY_POLICY.criticalMemoryRatio;
+   this.state.businessBlocked=!!this.state.resourceFault||(unsettled&&critical);
    if(this.state.resourceFault&&!this.state.protectedReasons.includes('unsettled-outbox'))this.fault(this.state.resourceFault);
-   // unknown 出站必须仍可回查；prepare-round 的 businessBlocked 让调用方只走回查路径。
+   // 临界压力下unknown仍可回查；不能通过关闭会话或重新提交来解除保护。
    if(memoryHigh&&this.pressureConfirmed()&&(state.memory.ratio??0)>=BROWSER_RECOVERY_POLICY.criticalMemoryRatio&&!this.state.protectedReasons.includes('unsettled-outbox'))this.fault('protected-session-pressure');
    return this.snapshot();
   }

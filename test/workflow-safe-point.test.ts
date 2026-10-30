@@ -7,7 +7,7 @@ import {Store} from '../src/store.js';
 import {Workflow} from '../src/workflow.js';
 import {Outbox} from '../src/outbox.js';
 import {Program} from '../src/program.js';
-import {RuntimeHealth,type BrowserResourceHealth} from '../src/unattended-health.js';
+import {RuntimeHealth,BrowserResourceGuard,type BrowserResourceHealth} from '../src/unattended-health.js';
 import type {Transport} from '../src/transport.js';
 import type {Config,Event,Receipt} from '../src/types.js';
 import type {CollectionResult} from '../src/collection-health.js';
@@ -42,6 +42,21 @@ test('未收束出站传入保护且仍能回查，blocked不采集不发送并�
 
 test('blocked时排队消息保留queued，不因保护跳过、生成或另建出站',async()=>{
  const f=fixture();try{const row=f.add(f.event('301'),'queued');f.resource.businessBlocked=true;await f.begin();await f.workflow.tick();assert.equal(f.store.getMessage(row.id,'worker')?.status,'queued');assert.equal(f.counts().generations,0);assert.equal(f.counts().sends,0);assert.equal(f.counts().collections,0);assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM outbox').get()?.n,0);assert.equal(f.workflow.control(),'running');}finally{f.close();}
+});
+
+test('真实资源guard配合旧公开unknown时，新私信正常生成发送一次且旧出站不重发',async()=>{
+ const f=fixture();let restarts=0,now=0;const guard=new BrowserResourceGuard({clock:()=>now,readMemory:()=>({bytes:1600,limitBytes:2000,ratio:.8,source:'cgroup'}),identity:async()=>({handle:'worker',loggedIn:true,needsHuman:false}),restart:async()=>{restarts++;return {handle:'worker',loggedIn:true,needsHuman:false};}});
+ try{const original=f.event('801'),source=f.add(original,'unknown'),old=f.outbox.prepare({accountId:'worker',kind:'reply',sourceId:source.id,targetId:original.platformId,event:{...original,id:source.id,accountId:'worker'},text:'不可重复的旧公开回复'});f.outbox.begin(old.id);f.outbox.settle(old.id,{status:'unknown'});const target=f.add(f.event('private802','private'),'queued');
+  f.transport.prepareRound=async(handle,options)=>guard.before('prepare-round','auto',handle,{safePoint:true,protectedReasons:options?.unsettledOutbox?['unsettled-outbox','chat-unlocked']:['chat-unlocked']});await f.begin();await f.workflow.tick();
+  assert.equal(f.store.getMessage(target.id,'worker')?.status,'confirmed');assert.equal(f.counts().generations,1);assert.equal(f.counts().sends,1);assert.equal(f.counts().lookups,1);assert.equal(f.outbox.get(old.id)?.status,'unknown');assert.equal(f.outbox.get(old.id)?.text,'不可重复的旧公开回复');assert.equal(restarts,0);now=31000;await f.workflow.tick();assert.equal(f.counts().sends,1);assert.equal(f.counts().generations,1);assert.equal(f.outbox.get(old.id)?.status,'unknown');assert.equal(restarts,0);
+ }finally{f.close();}
+});
+
+test('真实资源guard在临界内存下仍只回查旧unknown，私信不生成也不重启会话',async()=>{
+ const f=fixture();let restarts=0;const guard=new BrowserResourceGuard({readMemory:()=>({bytes:1980,limitBytes:2000,ratio:.99,source:'cgroup'}),identity:async()=>({handle:'worker',loggedIn:true,needsHuman:false}),restart:async()=>{restarts++;return {handle:'worker',loggedIn:true,needsHuman:false};}});
+ try{const original=f.event('901'),source=f.add(original,'unknown'),old=f.outbox.prepare({accountId:'worker',kind:'reply',sourceId:source.id,targetId:original.platformId,event:{...original,id:source.id,accountId:'worker'},text:'临界压力下仍不可重复的旧公开回复'});f.outbox.begin(old.id);f.outbox.settle(old.id,{status:'unknown'});const target=f.add(f.event('private902','private'),'queued');
+  f.transport.prepareRound=async(handle,options)=>guard.before('prepare-round','auto',handle,{safePoint:true,protectedReasons:options?.unsettledOutbox?['unsettled-outbox','chat-unlocked']:['chat-unlocked']});await f.begin();await f.workflow.tick();assert.equal(f.store.getMessage(target.id,'worker')?.status,'queued');assert.equal(f.counts().generations,0);assert.equal(f.counts().sends,0);assert.equal(f.counts().collections,0);assert.equal(f.counts().lookups,1);assert.equal(f.outbox.get(old.id)?.status,'unknown');assert.equal(restarts,0);
+ }finally{f.close();}
 });
 
 test('prepare返回browserPaused错误则安全暂停，不进入回查后面的任何新业务',async()=>{

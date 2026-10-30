@@ -31,6 +31,26 @@ test('未收束出站保持可回查并阻止新业务，发送与回查边界�
  for(const operation of ['send','post','lookup','lookupPost','lookup-post'])await f.guard.before(operation,'auto','worker',safe);assert.equal(f.restarts,0);
 });
 
+test('75%以上非临界压力遇旧unknown只延后轮换，不全局阻塞新业务',async()=>{
+ const f=fixture();for(const elapsed of [0,31000]){f.advance(elapsed);const state=await f.guard.before('prepare-round','auto','worker',{...safe,protectedReasons:['unsettled-outbox','chat-unlocked']});assert.equal(state.businessBlocked,false);assert.equal(state.recoveryDeferredReason,'protected-session');assert.equal(state.pendingRecoveryReason,'memory-threshold');assert.equal(f.restarts,0);}
+});
+
+test('低内存仅运行时长到期遇旧unknown不会全局停工',async()=>{
+ const f=fixture();f.ratio(.4);f.advance(25*3600000);const state=await f.guard.before('prepare-round','auto','worker',{...safe,protectedReasons:['unsettled-outbox','chat-unlocked']});assert.equal(state.pendingRecoveryReason,'runtime-threshold');assert.equal(state.businessBlocked,false);assert.equal(state.recoveryDeferredReason,'protected-session');assert.equal(f.restarts,0);
+});
+
+test('unknown在95%时立即只回查，压力降至非临界后可处理其他通道且不重启',async()=>{
+ const f=fixture();f.ratio(.95);let state=await f.guard.before('prepare-round','auto','worker',{...safe,protectedReasons:['unsettled-outbox','chat-unlocked']});assert.equal(state.businessBlocked,true);f.advance(31000);state=await f.guard.before('prepare-round','auto','worker',{...safe,protectedReasons:['unsettled-outbox','chat-unlocked']});assert.equal(state.businessBlocked,true);f.ratio(.8);state=await f.guard.before('prepare-round','auto','worker',{...safe,protectedReasons:['unsettled-outbox','chat-unlocked']});assert.equal(state.businessBlocked,false);assert.equal(f.restarts,0);
+});
+
+test('已有明确资源故障时即使非临界unknown也不能解锁新业务',async()=>{
+ const f=fixture();await f.guard.before('prepare-round','auto','worker',safe);f.advance(31000);await f.guard.before('prepare-round','auto','worker',safe);f.advance(60000);await assert.rejects(f.guard.before('prepare-round','auto','worker',safe));const state=await f.guard.before('prepare-round','auto','worker',{...safe,protectedReasons:['unsettled-outbox','chat-unlocked']});assert.equal(state.businessBlocked,true);assert.equal(state.resourceFault,'memory-pressure-recurred');assert.equal(f.restarts,1);
+});
+
+test('运行时长到期且内存无法测量时，unknown仍保持只回查',async()=>{
+ let restarts=0,now=0;const guard=new BrowserResourceGuard({clock:()=>now,readMemory:()=>({bytes:null,limitBytes:null,ratio:null,source:'unavailable'}),identity:async()=>identity,restart:async()=>{restarts++;return identity;}});now=25*3600000;const state=await guard.before('prepare-round','auto','worker',{...safe,protectedReasons:['unsettled-outbox','chat-unlocked']});assert.equal(state.businessBlocked,true);assert.equal(state.recoveryDeferredReason,'protected-session');assert.equal(restarts,0);
+});
+
 test('一小时最多两次实际恢复，间隔满足也不能无限重启掩盖资源问题',async()=>{
  let now=0,ratio=.8,restarts=0;const guard=new BrowserResourceGuard({clock:()=>now,readMemory:()=>({bytes:ratio*2000,limitBytes:2000,ratio,source:'cgroup'}),identity:async()=>identity,restart:async()=>{restarts++;ratio=.3;return identity;}});
  for(let attempt=0;attempt<2;attempt++){ratio=.8;await guard.before('prepare-round','auto','worker',safe);now+=31000;await guard.before('prepare-round','auto','worker',safe);now+=BROWSER_RECOVERY_POLICY.minRestartIntervalMs+1000;}

@@ -12,6 +12,8 @@
 
 # OpenSpec
 
+- 本轮现网小补丁基于0.1.28.1／a0dba43，管理员已授权补回最新私信并恢复后续自动运行，费用上限一美元。所有构建和测试使用dev/server-heavy.sh的共享锁、640MiB硬限额、无额外swap和单CPU，不并发重任务。浏览器仅替换同源dist，不升级内核或混入未发布安全候选；保留profile、journal和旧unknown。
+
 - 需求、架构和跨模块变更采用 OpenSpec，先阅读 `openspec/README.md` 与 `openspec/config.yaml`。
 - 七页生产基线提案为 `openspec/changes/add-seven-page-production-bot/`；按 `proposal.md`、完整增量规格、`design.md`、`tasks.md` 理解范围。旧七页计划保留为来源，后续修改同步到提案，避免两份设计分叉。
 - `openspec/specs/` 只记录现有行为；尚未实现的需求保留在 change 的增量规格中，不能因规划完成就提前同步或归档。
