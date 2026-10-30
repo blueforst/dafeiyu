@@ -66,6 +66,16 @@ test('整体管理 API：鉴权、请求体边界、配置修订及计费口径'
    assert.equal(workflow.control(),'paused');
   });
 
+  await t.test('最终提交授权只接受浏览器凭据，其他管理接口仍要求入口及控制鉴权',async()=>{
+   const request={method:'POST' as const,url:'/internal/submission-authority',payload:{}};
+   for(const headers of [{},authenticated,writable,{'x-browser-key':'wrong'}])assert.equal((await app.inject({...request,headers})).statusCode,401);
+   const authorized=await app.inject({...request,headers:{'x-browser-key':browserKey}});
+   assert.equal(authorized.statusCode,200);assert.deepEqual(authorized.json(),{allowed:false});
+   assert.equal((await app.inject({url:request.url,headers:{'x-browser-key':browserKey}})).statusCode,401);
+   assert.equal((await app.inject({method:'POST',url:'/api/control/resume',headers:{'x-browser-key':browserKey},payload:{}})).statusCode,401);
+   assert.equal(workflow.control(),'paused');
+  });
+
   await t.test('授权后的十三组新 GET 正常读取，默认开关与暂停一致',async()=>{
    const status=await app.inject({url:'/api/status',headers:authenticated});assert.equal(status.statusCode,200);assert.equal(status.json().accountId,'integrationbot');
    const allowed=reads.filter(url=>!url.endsWith('/missing-id'));
