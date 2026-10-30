@@ -92,3 +92,17 @@
 0.1.28.3精确封存已通过真实管理鉴权及冻结行不变检查。正常通知和自帖来源已取得真实目标，跨帖输入进入实际快照，但发帖页编辑器早期为零、稍后因背景Home水合变为两个；公开目标则被inline_reply_offscreen常驻进度误判加载。以上均在保存平台提交意图前返回not_submitted，原cancelled记录及失败费用保留。
 
 0.1.28.4只将主动发帖限制到唯一可见活动modal，等待编辑/提交条件、核对正文并冻结同一按钮；目标及采集共用primaryColumn加载范围，排除实际取证的回复占位及侧栏。保留真实主区加载、原生请求挂起/失败、唯一目标、作者、正文、时间和父链校验。新正常测试槽位及新来言用于复验，不给旧终态换来源或重新排队。
+
+0.1.28.4进入生产后的真实复验仍在editor-validate失败。fill仅改变可见DOM而未同步Draft内部状态，不能由页面上出现正文推断编辑器或平台已接受。0.1.28.5采用Range定位、Backspace、可编辑叶节点光标及keyboard.insertText，完整743项及最终类型检查／编译／composer DOM十一项通过，已于北京时间17:58成对发布并读回healthy。
+
+0.1.28.5真实主动帖取得HTTP200及平台ID2116107431386448273，Ceyi独立读回全文、作者及自动化标记；应用出站仍unknown。根帖原生数据省略parent且conversation为自身，0.1.28.6解析及同ID冲突候选待验证，仅沿原journal和原出站回查，不重发或自动追加封存。通知quality filter已获授权关闭且正规account-check读回off；profile仍unknown，public-page-error仍待页面证据。尚无本轮公开confirmed，真实发送、来源矩阵、费用和清理继续按任务清单分别验收。
+
+后续0.1.28.6／ddf505e32be5998562014c1a2c6bf129c36779ba已完成根帖关系、同ID冲突及实际UserName管理者结构的解析修复。完整748项、账号DOM72项（零写／零外部）及根帖broker两项（每场景一次点击／零外网模型）通过。账号DOM首轮反复navigate在640MiB隔离OOM，68项通过，失败保留；同URL复用document后72项通过，未提高限额。83份dist仅browser.js和account-compliance-dom.js变化，于18:18成对healthy；新正规account-check读回confirmed／confirmed／off并面板三项通过，原根帖沿原journal回查confirmed，没有重发。
+
+A3在0.1.28.6阶段已可见但原出站仍unknown，原生自动提及前缀证据保留。0.1.28.7候选reply-fallback首轮1/2的后续独立诊断确认：生产helper已找到并点击正确Replies标签，失败源为Camoufox isolated-world下fixture的exposeBinding不可用，阻断夹具导航和计数。最终仅fixture改用同源/fixture/replies-tab-click fetch，未放宽生产helper；完成最终756项、公开DOM十五项及broker四项，再以cc0c9e17c456d58bc627ffaaae6dca571f65a484成对发布healthy。A3沿原journal及本人Replies回查confirmed，原意图不变；A4经正常own-post-replies、独立B经正常mentions各一次模型调用取得confirmed，原根帖加三条回复共四笔实际出站。
+
+生产实际快照中，A3精确含R/S/M2三条draft其他帖来言且无reply；A4含已确认A3 bot前文；独立B含A3／A4各一次confirmed／other-public-thread与真实已发reply，当前消息在近期往来均为零次。不同线程目标保持独立，未注入私信正文或把cancelled草稿冒充已发。搜索只有confirmed-empty，正例仍未验。
+
+最终11/11条新增公开内容已逐条UI删除并核对原链接不存在，两条旧Ciallo仍可读，私信6行摘要、四笔公开confirmed与原目标及旧unknown／精确审核指纹保留。全批18次模型调用Pi估算$0.00691941、保守峰价$0.0228705，未知价格及pending为零。19:24:09读回running／auto、30秒间隔及原时段额度恢复，两轮completed且error为空；账号三项通过，资源随内存波动仍attention，按正常安全边界处理。
+
+health中的businessBlocked为可能被lookup重置的缓存字段，不能据其false证明临界内存下允许新业务。精确封存旧unknown仍是prepare-round受保护项，私信保护也保持；没有引入资源豁免或强制重启建议。最终报告只记录已完成轮次与正常采集事实，不承诺随后临界内存不停工。搜索正例任务继续留空，不提前归档。

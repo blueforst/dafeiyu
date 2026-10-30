@@ -12,9 +12,11 @@
 
 # OpenSpec
 
-- 2026-10-30 公开链路：0.1.28.3／e647f69已成对发布，精确旧unknown已按管理员授权封存，原状态及出站行不变；跨帖实际生成输入已验证。首次真实发帖与公开回复均在平台提交前被编辑器/目标就绪校验拦截，失败记录及费用保留；0.1.28.4发送返修候选正在隔离验证，不复活已cancelled出站。两份独立提案为review-legacy-unknown-outbound和add-cross-thread-public-context；真实验收使用本机Ceyi登录的cn4bie与John2q1u互动，成功后只清理本轮新增公开内容，私信保留。采集轮次间隔已通过正规API改30秒。
+- 2026-10-30 公开链路正式0.1.28.7／cc0c9e17c456d58bc627ffaaae6dca571f65a484已成对healthy，最终完整756项、公开DOM十五项、broker四项通过。主动根帖及A3／A4／B共四笔真实公开出站confirmed，原根帖与A3均沿原journal回查且未重发；A4正常own-post-replies、B正常mentions，各单次真实reply调用。A3／A4／B生产快照分别验证跨帖来言、已确认assistant前文、独立新线程与当前去重，未冒充draft已发、未注入私信正文。搜索仅confirmed-empty，搜索正例未验，不能称所有来源均通过。详见docs/发布记录/2026-10-30-0.1.28.7.md。
+- reply-fallback broker首轮1/2已独立诊断为Camoufox isolated-world下fixture exposeBinding不可用，生产helper实际找到并点击了正确Replies标签。最终仅fixture改用同源/fixture/replies-tab-click fetch，未为夹具放宽生产helper；失败过程保留。
+- 本轮11/11新增公开内容已逐条UI删除并核对原链接不存在；原两条Ciallo仍Ceyi可读。最终审计确认私信6行摘要、四笔公开confirmed与目标、旧unknown及精确审核指纹保留；两容器83份dist均匹配已验证编译产物，调试监听关闭。累计18次模型调用，Pi估算$0.00691941、保守峰价$0.0228705，未知价格及pending为零；预算进程已退出。19:24:09为running／auto、30秒间隔，恢复后两轮completed且error空，第三轮当时running，公开／私信采集正常；额度与原08:00–23:30时段恢复。账号三项confirmed／confirmed／off，但资源随内存波动仍attention，按正常安全边界处理；health缓存businessBlocked=false不证明临界新业务准入，旧unknown及私信prepare保护保留，不强制绕过恢复。最终截图及精确证据见0.1.28.7记录，不称全局全绿。
 
-- 本轮0.1.28.2已成对发布，运行源码bd489e0基于0.1.28.1／a0dba43。全套720项、独立真实平台读回及四条前文实际上下文通过，私信仅发送一条；两次模型请求估算$0.0008244，峰价保守$0.0025896。最新running／auto、时效3小时，旧公开unknown保留；Other来源unverified单独待验证。详见docs/发布记录/2026-10-30-0.1.28.2.md。所有构建和测试使用dev/server-heavy.sh的共享锁、640MiB硬限额、无额外swap和单CPU，不并发重任务。浏览器仅替换同源dist，不升级内核或混入未发布安全候选；保留profile、journal和旧unknown。
+- 0.1.28.2历史发布与私信验收快照：运行源码bd489e0基于0.1.28.1／a0dba43。全套720项、独立真实平台读回及四条前文实际上下文通过，当次私信仅发送一条；两次模型请求估算$0.0008244，峰价保守$0.0025896。当时恢复running／auto、时效3小时，旧公开unknown保留；当时Other来源unverified单独待验证，后续结果见最新实施记录。详见docs/发布记录/2026-10-30-0.1.28.2.md。所有构建和测试使用dev/server-heavy.sh的共享锁、640MiB硬限额、无额外swap和单CPU，不并发重任务。浏览器仅替换同源dist，不升级内核或混入未发布安全候选；保留profile、journal和旧unknown。
 
 - 需求、架构和跨模块变更采用 OpenSpec，先阅读 `openspec/README.md` 与 `openspec/config.yaml`。
 - 七页生产基线提案为 `openspec/changes/add-seven-page-production-bot/`；按 `proposal.md`、完整增量规格、`design.md`、`tasks.md` 理解范围。旧七页计划保留为来源，后续修改同步到提案，避免两份设计分叉。
