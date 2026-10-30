@@ -12,6 +12,10 @@
 
 # OpenSpec
 
+- 0.1.28.9冷启动修复候选已完成服务器804项、health16项、七场景独立容器验收，等待完整机器字段与composer连续两次严格通过，原20／30秒证据预算及控制优先保留；正确composer只用剩余timeout。第7夹具在约10.125秒匹配两条原消息后保持auto续采集。实际发布与自然恢复仍未验，不以隔离通过覆盖0.1.28.8真实失败；详见docs/发布记录/2026-10-30-0.1.28.9.md。
+
+- 2026-10-30 轮末自动维护0.1.28.8／a5eea5ff468d96d988ce100ab7fa01ad5401a15d已成对healthy，20:57守住未变化的控制基线后恢复running／auto、30秒。最终794项、health DOM16项、六个独立容器broker场景通过；后者仅夹具采用无头限内容进程，生产启动／内核不改，不能冒充生产真实自动恢复证据。prepare仅采样与准入，完整常规业务和scheduler await后busy内finish；精确旧审核及已解锁Chat有限soft维护例外，hard保护不豁免。成功保持原运行状态，最新人工控制优先，失败暂停不重启循环。原Chat最多三条摘要至少一条完全匹配且composer可编辑才成功，不能用empty inbox。真实第二轮21:00自然触发但verify-chat失败，已安全暂停；之后目视原Chat可读，正在修复冷启动完整验证等待，任务5组未完成；旧搜索正例仍未验，不能扩称全部来源通过。详见docs/发布记录/2026-10-30-0.1.28.8.md。
+
 - 2026-10-30 公开链路正式0.1.28.7／cc0c9e17c456d58bc627ffaaae6dca571f65a484已成对healthy，最终完整756项、公开DOM十五项、broker四项通过。主动根帖及A3／A4／B共四笔真实公开出站confirmed，原根帖与A3均沿原journal回查且未重发；A4正常own-post-replies、B正常mentions，各单次真实reply调用。A3／A4／B生产快照分别验证跨帖来言、已确认assistant前文、独立新线程与当前去重，未冒充draft已发、未注入私信正文。搜索仅confirmed-empty，搜索正例未验，不能称所有来源均通过。详见docs/发布记录/2026-10-30-0.1.28.7.md。
 - reply-fallback broker首轮1/2已独立诊断为Camoufox isolated-world下fixture exposeBinding不可用，生产helper实际找到并点击了正确Replies标签。最终仅fixture改用同源/fixture/replies-tab-click fetch，未为夹具放宽生产helper；失败过程保留。
 - 本轮11/11新增公开内容已逐条UI删除并核对原链接不存在；原两条Ciallo仍Ceyi可读。最终审计确认私信6行摘要、四笔公开confirmed与目标、旧unknown及精确审核指纹保留；两容器83份dist均匹配已验证编译产物，调试监听关闭。累计18次模型调用，Pi估算$0.00691941、保守峰价$0.0228705，未知价格及pending为零；预算进程已退出。19:24:09为running／auto、30秒间隔，恢复后两轮completed且error空，第三轮当时running，公开／私信采集正常；额度与原08:00–23:30时段恢复。账号三项confirmed／confirmed／off，但资源随内存波动仍attention，按正常安全边界处理；health缓存businessBlocked=false不证明临界新业务准入，旧unknown及私信prepare保护保留，不强制绕过恢复。最终截图及精确证据见0.1.28.7记录，不称全局全绿。

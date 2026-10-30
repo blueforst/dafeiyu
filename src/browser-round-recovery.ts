@@ -3,6 +3,7 @@ import type {ChatInspection} from './chat-dom.js';
 import type {NativeComposer} from './xchat-composer.js';
 
 export type BrowserChatRecoveryCode='checkpoint-invalid'|'identity-mismatch'|'location-mismatch'|'session-unready'|'message-unreliable'|'checkpoint-mismatch';
+export type BrowserChatRecoveryWaitMetadata={attempts:number;elapsedMs:number};
 const reasons:Record<BrowserChatRecoveryCode,string>={
  'checkpoint-invalid':'私信恢复检查点无效',
  'identity-mismatch':'私信恢复账号或参与者不一致',
@@ -12,7 +13,9 @@ const reasons:Record<BrowserChatRecoveryCode,string>={
  'checkpoint-mismatch':'私信恢复未匹配原检查点',
 };
 export class BrowserChatRecoveryError extends Error {
- constructor(readonly code:BrowserChatRecoveryCode){super(reasons[code]);this.name='BrowserChatRecoveryError';}
+ readonly attempts?:number;
+ readonly elapsedMs?:number;
+ constructor(readonly code:BrowserChatRecoveryCode,metadata?:BrowserChatRecoveryWaitMetadata){super(reasons[code]);this.name='BrowserChatRecoveryError';if(metadata){this.attempts=metadata.attempts;this.elapsedMs=metadata.elapsedMs;}}
 }
 
 export type BrowserChatRecoveryObservation={
@@ -86,4 +89,56 @@ export function verifyBrowserChatCheckpoint(checkpoint:BrowserChatCheckpoint,obs
  const matchedMessages=before.messages.filter(row=>{const current=byId.get(row.id);return current&&current.nativeSequence===row.nativeSequence&&current.direction===row.direction&&current.timestamp===row.timestamp&&current.senderId===row.senderId&&current.textHash===row.textHash;}).length;
  if(!matchedMessages)return fail('checkpoint-mismatch');
  return {restored:true,matchedMessages};
+}
+
+export type BrowserChatCheckpointWaitOptions={
+ deadline:number;
+ /** 底层读取须沿用同一deadline；不以丢弃未退出Promise的方式释放浏览器串行锁。 */
+ read:()=>BrowserChatRecoveryObservation|Promise<BrowserChatRecoveryObservation>;
+ now?:()=>number;
+ wait?:(milliseconds:number)=>Promise<void>;
+};
+export type BrowserChatCheckpointWaitResult<T>=BrowserChatRecoveryWaitMetadata&{value:T};
+
+const transientCodes=new Set<BrowserChatRecoveryCode>(['session-unready','message-unreliable','checkpoint-mismatch']);
+function humanProtection(observation:BrowserChatRecoveryObservation){
+ const ui=observation?.inspection?.ui,protection=observation?.inspection?.chatProtection;
+ return ui?.state==='locked'||Number(ui?.lockInputs)>0||protection?.unlockPending===true||protection?.needsHuman===true;
+}
+
+/** 同一调用预算内等待两次完整证明；重读只等待水合，不改变任何身份或消息匹配条件。 */
+async function waitForCheckpoint<T>(options:BrowserChatCheckpointWaitOptions,evaluate:(observation:BrowserChatRecoveryObservation)=>T,precheck?:()=>unknown):Promise<BrowserChatCheckpointWaitResult<T>>{
+ const now=options.now??Date.now,wait=options.wait??(milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds))),start=now();
+ let attempts=0,consecutive=0,lastCode:BrowserChatRecoveryCode='session-unready';
+ const metadata=():BrowserChatRecoveryWaitMetadata=>({attempts,elapsedMs:Math.max(0,now()-start)});
+ const failure=(code:BrowserChatRecoveryCode)=>new BrowserChatRecoveryError(code,metadata());
+ try{precheck?.();}catch(error){if(error instanceof BrowserChatRecoveryError)throw failure(error.code);throw error;}
+ if(!Number.isFinite(options.deadline))throw failure('session-unready');
+ while(now()<options.deadline){
+  let immediate=false;
+  try{
+   attempts++;
+   const observation=await options.read();
+   // read可等待DOM；返回时必须重新检查，不能在预算外认领一次成功。
+   if(now()>=options.deadline)throw failure(lastCode);
+   immediate=humanProtection(observation);
+   const value=evaluate(observation);
+   if(now()>=options.deadline)throw failure(lastCode);
+   if(++consecutive>=2)return {value,...metadata()};
+  }catch(error){
+   if(!(error instanceof BrowserChatRecoveryError))throw error;
+   lastCode=error.code;consecutive=0;
+   if(immediate||!transientCodes.has(error.code)||now()>=options.deadline)throw failure(error.code);
+  }
+  const remaining=options.deadline-now();if(remaining<=0)break;
+  await wait(Math.min(200,remaining));
+ }
+ throw failure(lastCode);
+}
+
+export function waitForBrowserChatCheckpointCapture(options:BrowserChatCheckpointWaitOptions):Promise<BrowserChatCheckpointWaitResult<BrowserChatCheckpoint>>{
+ return waitForCheckpoint(options,captureBrowserChatCheckpoint);
+}
+export function waitForBrowserChatCheckpointVerification(checkpoint:BrowserChatCheckpoint,options:BrowserChatCheckpointWaitOptions):Promise<BrowserChatCheckpointWaitResult<ReturnType<typeof verifyBrowserChatCheckpoint>>>{
+ return waitForCheckpoint(options,observation=>verifyBrowserChatCheckpoint(checkpoint,observation),()=>checkedCheckpoint(checkpoint));
 }

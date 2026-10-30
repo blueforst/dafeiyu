@@ -4,7 +4,8 @@ const editorSelector='[contenteditable="true"][role="textbox"],textarea';
 const sendSelector='button[aria-label="Send"],button[title="Send"],button[data-testid*="-send-"],button[data-testid$="-send"]';
 export type NativeComposer={state:'ready'|'unknown';editorTestId:string;sendTestId:string;editorCount:number;sendCount:number};
 /** 接受确认核对同会话的唯一可编辑 composer；填入正文后才要求唯一发送控件。 */
-export async function readNativeComposer(page:Page,conversationId:string):Promise<NativeComposer>{
+export async function readNativeComposer(page:Page,conversationId:string,options:{timeoutMs?:number}={}):Promise<NativeComposer>{
+ if(options.timeoutMs!==undefined&&(!Number.isFinite(options.timeoutMs)||options.timeoutMs<=0))throw new Error('私信输入框读取预算已结束');
  return page.locator('[data-testid="xchatEmbedRoute"]').evaluate((host,{conversationId,editorSelector,sendSelector})=>{
   const unknown:NativeComposer={state:'unknown',editorTestId:'',sendTestId:'',editorCount:0,sendCount:0};
   if(location.origin!=='https://x.com'||!['/i/chat/'+conversationId,'/i/chat/requests/'+conversationId,'/i/chat/requests/other/'+conversationId].includes(location.pathname))return unknown;
@@ -24,7 +25,7 @@ export async function readNativeComposer(page:Page,conversationId:string):Promis
   const sendTestId=buttons[0].getAttribute('data-testid')??'';
   if([editorTestId,sendTestId].some(id=>id&&!/^[A-Za-z0-9_-]{1,120}$/.test(id)))return counts;
   return {...counts,state:'ready',editorTestId,sendTestId};
- },{conversationId,editorSelector,sendSelector});
+ },{conversationId,editorSelector,sendSelector},options.timeoutMs===undefined?undefined:{timeout:Math.max(1,Math.min(30000,options.timeoutMs))});
 }
 export async function nativeComposerLocators(page:Page,conversationId:string,options:{requireSubmit?:boolean}={}):Promise<{input:Locator;submit:Locator;proof:NativeComposer}>{
  const proof=await readNativeComposer(page,conversationId);if(proof.state!=='ready')throw Error('新 Chat 输入框或发送控件尚未可靠绑定');

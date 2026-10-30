@@ -13,7 +13,7 @@ import type { Event,Identity,Receipt } from './types.js';
 import { validatePostingText,type PostingValidation } from './posting-policy.js';
 import { BrowserPostingCapabilities } from './posting-capabilities.js';
 import { BrowserResourceGuard,BrowserRecoveryFailure,detectAccountRestriction,classifyPlatformRejection,healthSettings,waitForIdentityReady,type ComplianceObservation,type BrowserProtectionReason,type BrowserMemory,type BrowserRecoveryStage } from './unattended-health.js';
-import {captureBrowserChatCheckpoint,verifyBrowserChatCheckpoint,type BrowserChatCheckpoint} from './browser-round-recovery.js';
+import {BrowserChatRecoveryError,waitForBrowserChatCheckpointCapture,waitForBrowserChatCheckpointVerification,type BrowserChatCheckpoint,type BrowserChatRecoveryObservation} from './browser-round-recovery.js';
 import {readNativeComposer} from './xchat-composer.js';
 import {BrowserOperationError,safeBrowserDiagnostic,browserOperationReason,type BrowserOperationStage} from './browser-operation.js';
 import {SubmissionAttempt,type DiagnosticValidation} from './submission-boundary.js';
@@ -281,6 +281,19 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser;r
  function assertRecoveryControl(stage:BrowserRecoveryStage){
   if(!activeRecovery||activeRecovery.cancelled()||activeRecovery.generation!==requestedControlGeneration||mode!=='auto')throw new BrowserRecoveryFailure('control-changed',stage);
  }
+ function reportChatRecoveryFailure(stage:'precheck-chat'|'verify-chat',error:unknown,observation?:BrowserChatRecoveryObservation){
+  const rows=Array.isArray(observation?.inspection.all)?observation.inspection.all:[],ui=observation?.inspection.ui;
+  console.warn(JSON.stringify({event:'browser-chat-recovery-unverified',roundId:activeRecovery?.roundId??null,stage,code:error instanceof BrowserChatRecoveryError?error.code:'observation-failed',attempts:error instanceof BrowserChatRecoveryError?error.attempts??0:0,durationMs:error instanceof BrowserChatRecoveryError?error.elapsedMs??0:0,observation:observation?{contract:observation.inspection.contract,ui:ui?{state:ui.state,loading:ui.loading,lockInputs:ui.lockInputs,traversalTruncated:ui.traversalTruncated===true}:null,composerState:observation.composer?.state??'unknown',rowCount:rows.length,unreliableRows:rows.filter(row=>row?.timestampReliable!==true).length,blockedRows:rows.filter(row=>!Array.isArray(row?.blockedCodes)||row.blockedCodes.length>0).length,unknownDirectionRows:rows.filter(row=>row?.direction==='unknown').length,mediaRows:rows.filter(row=>row?.media!==false).length}:null}));
+ }
+ async function readRecoveryChat(page:Page,conversationId:string,selfUserId:string,stage:'precheck-chat'|'verify-chat',deadline:number):Promise<BrowserChatRecoveryObservation>{
+  assertRecoveryControl(stage);if(Date.now()>=deadline)throw new BrowserChatRecoveryError('session-unready');
+  const inspection=await inspectPrivateConversation(page,conversationId,{selfUserId,deadline});
+  assertRecoveryControl(stage);if(Date.now()>=deadline)throw new BrowserChatRecoveryError('session-unready');
+  // 结构未就绪或已明确锁定时，直接交给完整门禁判定，不再等待不存在的composer。
+  const readable=inspection.contract==='xchat-native-v2'&&inspection.ui?.state==='ready'&&!inspection.chatProtection.unlockPending&&!inspection.chatProtection.needsHuman;
+  const composer=readable?await readNativeComposer(page,conversationId,{timeoutMs:Math.max(1,deadline-Date.now())}):{state:'unknown' as const};
+  assertRecoveryControl(stage);return {selfUserId,url:page.url(),inspection,composer};
+ }
  async function adoptChatPage(){
   const candidates=context.pages().filter(isChatPage),selected=candidates.at(-1);
   if(selected&&(!dmPage||dmPage.isClosed()||selected!==dmPage))dmPage=selected;
@@ -295,12 +308,12 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser;r
    if(context.pages().some(isChatPage)){
     reportStage?.('precheck-chat');assertRecoveryControl('precheck-chat');
     if(!recoveryChatTarget||!actor.userId)throw new BrowserRecoveryFailure('chat-checkpoint-missing','precheck-chat');
-    try{
+    let observed:BrowserChatRecoveryObservation|undefined;try{
      const page=await getDM(),deadline=Date.now()+20000;await navigate(page,recoveryChatTarget,deadline);
      const conversationId=new URL(recoveryChatTarget).pathname.split('/').at(-1)!;
-     const inspection=await inspectPrivateConversation(page,conversationId,{selfUserId:actor.userId,deadline}),composer=await readNativeComposer(page,conversationId);
-     checkpoint=captureBrowserChatCheckpoint({selfUserId:actor.userId,url:page.url(),inspection,composer});
-    }catch(error){if(error instanceof BrowserRecoveryFailure)throw error;throw new BrowserRecoveryFailure('chat-recovery-unverified','precheck-chat');}
+     const prepared=await waitForBrowserChatCheckpointCapture({deadline,read:async()=>observed=await readRecoveryChat(page,conversationId,actor.userId!,'precheck-chat',deadline)});checkpoint=prepared.value;
+     console.log(JSON.stringify({event:'browser-chat-recovery-checkpoint',roundId:activeRecovery?.roundId??null,stage:'precheck-chat',checkpointMessages:checkpoint.messages.length,attempts:prepared.attempts,durationMs:prepared.elapsedMs}));
+    }catch(error){if(error instanceof BrowserRecoveryFailure)throw error;reportChatRecoveryFailure('precheck-chat',error,observed);throw new BrowserRecoveryFailure('chat-recovery-unverified','precheck-chat');}
    }
    assertRecoveryControl('close-context');reportStage?.('close-context');await context.close();reportStage?.('launch-context');context=await launch(profile,proxy);supervise();publicPage=context.pages().find(page=>!isChatPage(page))||await context.newPage();dmPage=context.pages().filter(isChatPage).at(-1);privateProtection={hasUnlockedSession:false,unlockPending:false,needsHuman:false};browserSession=randomUUID();capabilities.invalidate('浏览器上下文重启，旧能力证据失效');
    assertRecoveryControl('navigate-home');
@@ -310,12 +323,12 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser;r
    assertRecoveryControl('verify-identity');
    if(checkpoint){
     reportStage?.('verify-chat');
-    try{
+    let observed:BrowserChatRecoveryObservation|undefined;try{
      const page=await getDM(),deadline=Date.now()+30000;await navigate(page,checkpoint.canonicalUrl,deadline);
-     const inspection=await inspectPrivateConversation(page,checkpoint.conversationId,{selfUserId:checkpoint.selfUserId,deadline}),composer=await readNativeComposer(page,checkpoint.conversationId);
-     verifyBrowserChatCheckpoint(checkpoint,{selfUserId:restored.userId??'',url:page.url(),inspection,composer});
+     const verified=await waitForBrowserChatCheckpointVerification(checkpoint,{deadline,read:async()=>observed=await readRecoveryChat(page,checkpoint!.conversationId,restored.userId??'','verify-chat',deadline)});
      assertRecoveryControl('verify-chat');privateProtection={hasUnlockedSession:true,unlockPending:false,needsHuman:false};
-    }catch(error){if(error instanceof BrowserRecoveryFailure)throw error;privateProtection={hasUnlockedSession:false,unlockPending:true,needsHuman:true};throw new BrowserRecoveryFailure('chat-recovery-unverified','verify-chat');}
+     console.log(JSON.stringify({event:'browser-chat-recovery-verified',roundId:activeRecovery?.roundId??null,stage:'verify-chat',checkpointMessages:checkpoint.messages.length,matchedMessages:verified.value.matchedMessages,attempts:verified.attempts,durationMs:verified.elapsedMs}));
+    }catch(error){if(error instanceof BrowserRecoveryFailure)throw error;reportChatRecoveryFailure('verify-chat',error,observed);privateProtection={hasUnlockedSession:false,unlockPending:true,needsHuman:true};throw new BrowserRecoveryFailure('chat-recovery-unverified','verify-chat');}
    }
    assertRecoveryControl('verify-identity');const finalActor=await check(expectedHandle??'');
    if(actor.userId&&finalActor.userId!==actor.userId)throw new BrowserRecoveryFailure('identity-mismatch','verify-identity');

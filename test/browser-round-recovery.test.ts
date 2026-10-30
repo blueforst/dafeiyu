@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {BrowserChatRecoveryError,captureBrowserChatCheckpoint,verifyBrowserChatCheckpoint,type BrowserChatRecoveryCode,type BrowserChatRecoveryObservation,type BrowserChatCheckpoint} from '../src/browser-round-recovery.js';
+import {BrowserChatRecoveryError,captureBrowserChatCheckpoint,verifyBrowserChatCheckpoint,waitForBrowserChatCheckpointCapture,waitForBrowserChatCheckpointVerification,type BrowserChatRecoveryCode,type BrowserChatRecoveryObservation,type BrowserChatCheckpoint} from '../src/browser-round-recovery.js';
 import type {ChatObservedMessage} from '../src/chat-dom.js';
 
 const self='222',peer='111',conversationId=peer+'-'+self,url='https://x.com/i/chat/'+conversationId,at=Date.UTC(2026,9,30,9);
@@ -75,4 +75,94 @@ test('检查点自身的版本、上限、摘要、地址及字段损坏均使�
 test('错误只暴露固定码和固定说明，不带正文、地址参数或传入异常内容',()=>{
  const input=observed([row(1,{text:'不应出现在错误中的正文'})]);input.url=url+'?secret=private';
  assert.throws(()=>captureBrowserChatCheckpoint(input),error=>{assert.ok(error instanceof BrowserChatRecoveryError);assert.equal(error.code,'location-mismatch');assert.doesNotMatch(error.message,/私密正文|不应出现在错误|secret|private|https:/);return true;});
+});
+
+function simulatedClock(){
+ let time=0;const waits:number[]=[];
+ return {now:()=>time,wait:async(milliseconds:number)=>{waits.push(milliseconds);time+=milliseconds;},advance:(milliseconds:number)=>{time+=milliseconds;},waits};
+}
+
+test('捕获等待较早行完成原生绑定，末行先可靠也不能提前取得检查点',async()=>{
+ const clock=simulatedClock();let reads=0;
+ const result=await waitForBrowserChatCheckpointCapture({...clock,deadline:2000,read:()=>{
+  reads++;return observed([row(1,clock.now()<600?{timestampReliable:false,blockedCodes:['chat-native-model-unverified']}:{}),row(2)]);
+ }});
+ assert.equal(reads,5);assert.equal(result.attempts,5);assert.equal(result.elapsedMs,800);
+ assert.deepEqual(result.value,captureBrowserChatCheckpoint(observed()));assert.deepEqual(clock.waits,[200,200,200,200]);
+});
+
+test('恢复验证等待已接受composer延后就绪，仍需两次完整的原消息证明',async()=>{
+ const checkpoint=captureBrowserChatCheckpoint(observed()),clock=simulatedClock();
+ const result=await waitForBrowserChatCheckpointVerification(checkpoint,{...clock,deadline:2000,read:()=>{
+  const input=observed();if(clock.now()<600)input.composer.state='unknown';return input;
+ }});
+ assert.deepEqual(result,{value:{restored:true,matchedMessages:2},attempts:5,elapsedMs:800});
+});
+
+test('首次完整证明不能直接成功，捕获与恢复均要求相隔一次等待的连续两次通过',async()=>{
+ const captureClock=simulatedClock(),captured=await waitForBrowserChatCheckpointCapture({...captureClock,deadline:1000,read:observed});
+ assert.equal(captured.attempts,2);assert.equal(captured.elapsedMs,200);assert.deepEqual(captureClock.waits,[200]);
+ const verifyClock=simulatedClock(),verified=await waitForBrowserChatCheckpointVerification(captured.value,{...verifyClock,deadline:1000,read:observed});
+ assert.deepEqual(verified,{value:{restored:true,matchedMessages:2},attempts:2,elapsedMs:200});
+});
+
+test('两次好观察之间出现新的不可靠行会重置连续成功次数，不能跳过该行',async()=>{
+ const checkpoint=captureBrowserChatCheckpoint(observed()),clock=simulatedClock();
+ const result=await waitForBrowserChatCheckpointVerification(checkpoint,{...clock,deadline:2000,read:()=>observed(clock.now()===200?[row(1),row(2),row(3,{blockedCodes:['chat-native-time-unverified'],timestampReliable:false})]:[row(1),row(2)])});
+ assert.deepEqual(result,{value:{restored:true,matchedMessages:2},attempts:4,elapsedMs:600});
+});
+
+test('新消息先出现而旧检查点稍后加载时重读，始终要求原消息完整匹配',async()=>{
+ const checkpoint=captureBrowserChatCheckpoint(observed([row(1)])),clock=simulatedClock();
+ const result=await waitForBrowserChatCheckpointVerification(checkpoint,{...clock,deadline:2000,read:()=>observed(clock.now()<400?[row(3)]:[row(1),row(3)])});
+ assert.deepEqual(result,{value:{restored:true,matchedMessages:1},attempts:4,elapsedMs:600});
+});
+
+test('持续找不到完全一致的旧消息只等待原预算，固定错误仅附尝试次数和耗时',async()=>{
+ const checkpoint=captureBrowserChatCheckpoint(observed([row(1)])),clock=simulatedClock();let reads=0;
+ await assert.rejects(waitForBrowserChatCheckpointVerification(checkpoint,{...clock,deadline:550,read:()=>{reads++;return observed([row(1,{text:'已变化的私密正文'})]);}}),error=>{
+  assert.ok(error instanceof BrowserChatRecoveryError);assert.equal(error.code,'checkpoint-mismatch');assert.equal(error.attempts,3);assert.equal(error.elapsedMs,550);
+  assert.doesNotMatch(JSON.stringify(error)+error.message,/私密正文|https:|textHash|11111111/);return true;
+ });
+ assert.equal(reads,3);assert.deepEqual(clock.waits,[200,200,150]);
+});
+
+test('已到截止时间不读取，读取本身耗尽预算也不能接受完整结果',async()=>{
+ const clock=simulatedClock();let reads=0;
+ await assert.rejects(waitForBrowserChatCheckpointCapture({...clock,deadline:0,read:()=>{reads++;return observed();}}),error=>error instanceof BrowserChatRecoveryError&&error.code==='session-unready'&&error.attempts===0&&error.elapsedMs===0);
+ assert.equal(reads,0);
+ await assert.rejects(waitForBrowserChatCheckpointCapture({...clock,deadline:500,read:()=>{reads++;clock.advance(501);return observed();}}),error=>error instanceof BrowserChatRecoveryError&&error.code==='session-unready'&&error.attempts===1&&error.elapsedMs===501);
+ assert.equal(reads,1);assert.deepEqual(clock.waits,[]);
+});
+
+test('PIN或人工解锁保护出现时立即失败，不把锁定状态当普通水合继续等',async()=>{
+ const checkpoint=captureBrowserChatCheckpoint(observed());
+ const changes:Array<(input:BrowserChatRecoveryObservation)=>void>=[
+  input=>{input.inspection.ui!.state='locked';},input=>{input.inspection.ui!.lockInputs=1;},input=>{input.inspection.chatProtection.unlockPending=true;},input=>{input.inspection.chatProtection.needsHuman=true;},
+ ];
+ for(const change of changes){
+  const clock=simulatedClock();let reads=0;
+  await assert.rejects(waitForBrowserChatCheckpointVerification(checkpoint,{...clock,deadline:2000,read:()=>{const input=observed();if(++reads===2)change(input);return input;}}),error=>error instanceof BrowserChatRecoveryError&&error.code==='session-unready'&&error.attempts===2&&error.elapsedMs===200);
+  assert.equal(reads,2);assert.deepEqual(clock.waits,[200]);
+ }
+});
+
+test('错账号、错地址及损坏检查点立即失败，不消耗重试预算',async()=>{
+ const checkpoint=captureBrowserChatCheckpoint(observed());
+ for(const code of ['identity-mismatch','location-mismatch'] as const){
+  const clock=simulatedClock();let reads=0;
+  await assert.rejects(waitForBrowserChatCheckpointVerification(checkpoint,{...clock,deadline:2000,read:()=>{reads++;const input=observed();if(code==='identity-mismatch')input.selfUserId=peer;else input.url+='?private=secret';return input;}}),error=>error instanceof BrowserChatRecoveryError&&error.code===code&&error.attempts===1&&error.elapsedMs===0);
+  assert.equal(reads,1);assert.deepEqual(clock.waits,[]);
+ }
+ const clock=simulatedClock();let reads=0;
+ await assert.rejects(waitForBrowserChatCheckpointVerification({...checkpoint,messages:[]},{...clock,deadline:2000,read:()=>{reads++;return observed();}}),error=>error instanceof BrowserChatRecoveryError&&error.code==='checkpoint-invalid'&&error.attempts===0&&error.elapsedMs===0);
+ assert.equal(reads,0);assert.deepEqual(clock.waits,[]);
+});
+
+test('控制中止等非helper异常原样传播，读取和等待阶段都不吞掉',async()=>{
+ const checkpoint=captureBrowserChatCheckpoint(observed()),clock=simulatedClock(),controlError=Object.assign(new Error('受控取消'),{code:'control-changed'});let reads=0;
+ await assert.rejects(waitForBrowserChatCheckpointVerification(checkpoint,{...clock,deadline:2000,read:()=>{if(++reads===2)throw controlError;return observed();}}),error=>error===controlError);
+ assert.equal(reads,2);assert.deepEqual(clock.waits,[200]);
+ const waitError=new Error('等待已取消');
+ await assert.rejects(waitForBrowserChatCheckpointCapture({deadline:1000,now:()=>0,read:observed,wait:async()=>{throw waitError;}}),error=>error===waitError);
 });
