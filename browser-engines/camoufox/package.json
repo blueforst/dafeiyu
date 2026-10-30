@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "camoufox": "0.5.9-beta.5",
+    "camoufox": "0.5.9-beta.6",
     "playwright-core": "1.62.0"
   }
 }
