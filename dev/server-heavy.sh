@@ -15,8 +15,9 @@ test "$free_kib" -ge 3145728 || { echo 'Docker磁盘不足3GiB，不启动重任
 builder=role-workflow-limited
 job=role-workflow-heavy-$$
 owner=$$
+started=$(date +%s)
 watchdog_pid=''
-stop_job(){ if test "$mode" = build;then docker buildx stop "$builder" >/dev/null 2>&1 || true;else docker rm -f "$job" >/dev/null 2>&1 || true;fi; }
+stop_job(){ if test "$mode" = build;then timeout --kill-after=5s 20s docker buildx stop "$builder" >/dev/null 2>&1 || true;else timeout --kill-after=5s 20s docker rm -f "$job" >/dev/null 2>&1 || true;fi; }
 cleanup(){ if test -n "$watchdog_pid";then kill "$watchdog_pid" >/dev/null 2>&1 || true;fi;stop_job; }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
@@ -26,8 +27,8 @@ watch_host(){
   remaining_mem=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)
   count=$((count+1))
   if test "$((count%5))" -eq 0;then remaining=$(df -Pk /var/lib/docker | awk 'NR==2{print $4}');else remaining=3145728;fi
-  if test "${remaining_mem:-0}" -lt 1024 || test "${remaining:-0}" -lt 3145728;then
-   echo '宿主可用内存跌破1GiB或Docker磁盘余量跌破3GiB，停止本轮任务以保护生产' >&2
+  if test "${remaining_mem:-0}" -lt 1024 || test "${remaining:-0}" -lt 3145728 || test "$(($(date +%s)-started))" -ge 1200;then
+   echo '宿主余量不足或任务超过20分钟，停止本轮任务以保护生产' >&2
    stop_job
    kill -TERM "$owner" >/dev/null 2>&1 || true
    return
@@ -45,8 +46,8 @@ if test "$mode" = build;then
   docker buildx create --name "$builder" --driver docker-container --driver-opt memory=640m,memory-swap=640m,cpu-period=100000,cpu-quota=100000,restart-policy=no --buildkitd-config "$config"
   rm -f "$config"
  fi
- docker buildx inspect "$builder" --bootstrap >/dev/null
- docker inspect buildx_buildkit_role-workflow-limited0 | python3 -c 'import sys,json;d=json.load(sys.stdin)[0];h=d["HostConfig"];assert h["Memory"]==671088640 and h["MemorySwap"]==671088640 and h["CpuQuota"]==100000 and h["CpuPeriod"]==100000,"构建器真实资源限制不符";print("BuildKit限制核对通过：640MiB，无额外swap，单核")'
+ timeout --kill-after=10s 120s docker buildx inspect "$builder" --bootstrap >/dev/null
+ docker inspect buildx_buildkit_role-workflow-limited0 | python3 -c 'import sys,json;d=json.load(sys.stdin)[0];h=d["HostConfig"];assert h["Memory"]==671088640 and h["MemorySwap"]==671088640 and h["CpuQuota"]==100000 and h["CpuPeriod"]==100000 and h["CgroupnsMode"]=="private","构建器真实资源限制不符";print("BuildKit限制核对通过：640MiB，无额外swap，单核，独立cgroup命名空间")'
  timeout --signal=TERM --kill-after=30s 1200s docker buildx build --builder "$builder" --load "$@"
 else
  for arg in "$@";do case "$arg" in --memory*|--cpu*|--cgroup*|--pids-limit*|--name*|--oom*|--privileged|--pid|--pid=*|--restart*|--detach|-d|--rm) echo '任务名称、后台模式和资源限制由入口统一设置' >&2;exit 2;; esac;done
