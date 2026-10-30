@@ -76,8 +76,20 @@ function finite(value:number|undefined,fallback:number,min:number,max:number){re
 
 /** 只旁观页面自己发起的原生读取；不读取认证头、不构造或重放平台接口。 */
 export function observeNativeReads(page:Page,relations=new PublicRelations()){
- const requests=new Set<unknown>(),parsing=new Set<object>();let failures=0,generation=0,responses=0;
- const started=(request:any)=>{try{const url=new URL(request.url());if(url.origin==='https://x.com'&&/^\/i\/api\/(?:graphql\/|2\/)/.test(url.pathname)&&['fetch','xhr'].includes(request.resourceType()))requests.add(request);}catch{}};
+ const requests=new Set<unknown>(),parsing=new Set<object>();let failures=0,generation=0,responses=0,awaitMainCommit=false;
+ const clear=()=>{generation++;requests.clear();parsing.clear();relations.clear();failures=0;responses=0;};
+ const started=(request:any)=>{try{
+  // goto 提交前旧文档仍可能发出读取；它们被新导航截断，不能冒充新来源的失败。
+  if(request.resourceType()==='document'&&typeof request.isNavigationRequest==='function'&&request.isNavigationRequest()&&typeof request.frame==='function'&&typeof page.mainFrame==='function'&&request.frame()===page.mainFrame()){
+   clear();awaitMainCommit=true;return;
+  }
+  if(awaitMainCommit)return;
+  const url=new URL(request.url());
+  // 实际只返回查看者徽标计数的辅助读取可能独立429；它不提供时间线或父链证据。
+  const badgeCounts=/^\/i\/api\/graphql\/[^/]+\/ViewerBadgeCounts\/?$/.test(url.pathname);
+  if(url.origin==='https://x.com'&&!badgeCounts&&/^\/i\/api\/(?:graphql\/|2\/)/.test(url.pathname)&&['fetch','xhr'].includes(request.resourceType()))requests.add(request);
+ }catch{}};
+ const committed=(frame:unknown)=>{if(awaitMainCommit&&typeof page.mainFrame==='function'&&frame===page.mainFrame()){clear();awaitMainCommit=false;}};
  const finished=(request:unknown)=>requests.delete(request);
  const failed=(request:unknown)=>{if(requests.delete(request))failures++;};
  const response=(value:any)=>{try{
@@ -86,9 +98,9 @@ export function observeNativeReads(page:Page,relations=new PublicRelations()){
   void Promise.resolve().then(()=>value.json()).then(data=>{if(observedGeneration===generation)relations.observe(data);}).catch(()=>{}).finally(()=>parsing.delete(token));
  }catch{}};
  const enabled=typeof page.on==='function'&&typeof page.off==='function';
- if(enabled){page.on('request',started);page.on('requestfinished',finished);page.on('requestfailed',failed);page.on('response',response);}
- const reset=()=>{generation++;requests.clear();parsing.clear();relations.clear();failures=0;responses=0;};
- return {relations,count:()=>requests.size+parsing.size,failures:()=>failures,reset,dispose:()=>{reset();if(enabled){page.off('request',started);page.off('requestfinished',finished);page.off('requestfailed',failed);page.off('response',response);}}};
+ if(enabled){page.on('request',started);page.on('requestfinished',finished);page.on('requestfailed',failed);page.on('response',response);page.on('framenavigated',committed);}
+ const reset=()=>{clear();awaitMainCommit=false;};
+ return {relations,count:()=>requests.size+parsing.size,failures:()=>failures,reset,dispose:()=>{reset();if(enabled){page.off('request',started);page.off('requestfinished',finished);page.off('requestfailed',failed);page.off('response',response);page.off('framenavigated',committed);}}};
 }
 
 /**

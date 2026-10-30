@@ -17,3 +17,38 @@ test('缺链、重复父帖、跨线程及父作者冲突均标不完整，DOM�
 test('缺父正文但原生直系作者可验证相关性，账号提及不能匹配前缀或引用',()=>{const e=related('101','100','100','visitor',{replyToHandle:'worker'});assert.equal(relevantPublicMessage(e,'worker',[e]),true);assert.equal(publicAncestors(e,[e]).contextIncomplete,true);assert.equal(relevantPublicMessage(event('102','visitor',{text:'@worker 正文提及'}),'worker',[]),true);assert.equal(relevantPublicMessage(event('102','visitor',{text:'@worker_extra'}),'worker',[]),false);assert.equal(relevantPublicMessage(event('102','visitor',{quote:{handle:'q',platformId:'77',text:'@worker',media:false}}),'worker',[]),false);});
 test('自己的中间回复不吞同根兄弟分支，根帖的后代可确认',()=>{const root=related('100',null,'100','root'),own=related('101','100','100','worker'),child=related('102','101','100'),sibling=related('103','100','100');assert.equal(repliesToPost(child,own,[root,own,child,sibling]),true);assert.equal(repliesToPost(sibling,own,[root,own,child,sibling]),false);assert.equal(repliesToPost(sibling,root,[root,own,child,sibling]),true);});
 test('原生解析计入pending，导航reset与dispose隔离旧响应且不发起请求',async()=>{const page=new EventEmitter() as any,observer=observeNativeReads(page),e=event('101');let resolve!:(data:any)=>void;const req={url:()=> 'https://x.com/i/api/graphql/fixture/TweetDetail',resourceType:()=> 'fetch'};page.emit('request',req);page.emit('response',{request:()=>req,status:()=>200,json:()=>new Promise(r=>{resolve=r;})});page.emit('requestfinished',req);await Promise.resolve();assert.equal(observer.count(),1);observer.reset();resolve(nativeRelation(e,'100','100'));await new Promise(r=>setImmediate(r));assert.equal(observer.relations.enrich([e])[0].conversationIdReliable,false);const fresh={...req};page.emit('request',fresh);page.emit('response',{request:()=>fresh,status:()=>200,json:async()=>nativeRelation(e,'100','100')});page.emit('requestfinished',fresh);await new Promise(r=>setImmediate(r));assert.equal(observer.count(),0);assert.equal(observer.relations.enrich([e])[0].conversationIdReliable,true);observer.dispose();assert.equal(page.listenerCount('response'),0);});
+
+test('主文档导航隔离旧读取及提交前的新旧页过渡请求，保留提交后失败守门',()=>{
+ const page=new EventEmitter() as any,main={},child={};page.mainFrame=()=>main;
+ const observer=observeNativeReads(page),read=()=>({url:()=> 'https://x.com/i/api/graphql/fixture/TweetDetail',resourceType:()=> 'fetch'});
+ const navigation=(frame:unknown)=>({resourceType:()=> 'document',isNavigationRequest:()=>true,frame:()=>frame});
+ const old=read();page.emit('request',old);assert.equal(observer.count(),1);
+ page.emit('request',navigation(child));page.emit('framenavigated',child);assert.equal(observer.count(),1);
+ page.emit('request',navigation(main));assert.equal(observer.count(),0);
+ const transition=read();page.emit('request',transition);assert.equal(observer.count(),0);
+ page.emit('requestfailed',old);page.emit('response',{request:()=>transition,status:()=>400});page.emit('requestfailed',transition);assert.equal(observer.failures(),0);
+ page.emit('framenavigated',child);const beforeCommit=read();page.emit('request',beforeCommit);assert.equal(observer.count(),0);
+ page.emit('framenavigated',main);page.emit('requestfailed',old);page.emit('requestfailed',beforeCommit);assert.equal(observer.failures(),0);
+ const fresh=read();page.emit('request',fresh);assert.equal(observer.count(),1);
+ page.emit('response',{request:()=>fresh,status:()=>400});assert.equal(observer.failures(),1);assert.equal(observer.count(),1);
+ page.emit('requestfinished',fresh);assert.equal(observer.count(),0);
+ const failed=read();page.emit('request',failed);page.emit('requestfailed',failed);assert.equal(observer.failures(),2);
+ observer.dispose();for(const name of ['request','response','requestfinished','requestfailed','framenavigated'])assert.equal(page.listenerCount(name),0);
+});
+
+test('主文档提交清空旧异步关系，显式reset可退出未完成导航',async()=>{
+ const page=new EventEmitter() as any,main={};page.mainFrame=()=>main;
+ const observer=observeNativeReads(page),e=event('101'),read=()=>({url:()=> 'https://x.com/i/api/graphql/fixture/TweetDetail',resourceType:()=> 'xhr'}),navigation={resourceType:()=> 'document',isNavigationRequest:()=>true,frame:()=>main};
+ let resolve!:(data:any)=>void;const old=read();page.emit('request',old);page.emit('response',{request:()=>old,status:()=>200,json:()=>new Promise(r=>{resolve=r;})});page.emit('requestfinished',old);await Promise.resolve();assert.equal(observer.count(),1);
+ page.emit('request',navigation);page.emit('framenavigated',main);resolve(nativeRelation(e,'100','100'));await new Promise(r=>setImmediate(r));assert.equal(observer.count(),0);assert.equal(observer.relations.enrich([e])[0].conversationIdReliable,false);
+ page.emit('request',navigation);observer.reset();const fresh=read();page.emit('request',fresh);assert.equal(observer.count(),1);page.emit('response',{request:()=>fresh,status:()=>200,json:async()=>nativeRelation(e,'100','100')});page.emit('requestfinished',fresh);await new Promise(r=>setImmediate(r));assert.equal(observer.relations.enrich([e])[0].conversationIdReliable,true);observer.dispose();
+});
+
+test('仅ViewerBadgeCounts不参与pending失败或关系，真正时间线429仍失败',async()=>{
+ const page=new EventEmitter() as any,observer=observeNativeReads(page),e=event('101'),request=(operation:string)=>({url:()=> 'https://x.com/i/api/graphql/fixture/'+operation,resourceType:()=> 'fetch'});
+ const badge=request('ViewerBadgeCounts');page.emit('request',badge);assert.equal(observer.count(),0);page.emit('response',{request:()=>badge,status:()=>429});page.emit('requestfailed',badge);assert.equal(observer.failures(),0);
+ let parsed=0;const badgeSuccess=request('ViewerBadgeCounts');page.emit('request',badgeSuccess);page.emit('response',{request:()=>badgeSuccess,status:()=>200,json:async()=>{parsed++;return nativeRelation(e,'100','100');}});page.emit('requestfinished',badgeSuccess);await new Promise(r=>setImmediate(r));assert.equal(parsed,0);assert.equal(observer.relations.enrich([e])[0].conversationIdReliable,false);
+ const timeline=request('NotificationsTimeline');page.emit('request',timeline);assert.equal(observer.count(),1);page.emit('response',{request:()=>timeline,status:()=>429});assert.equal(observer.failures(),1);page.emit('requestfinished',timeline);assert.equal(observer.count(),0);
+ const laterBadge=request('ViewerBadgeCounts');page.emit('request',laterBadge);page.emit('response',{request:()=>laterBadge,status:()=>429});page.emit('requestfailed',laterBadge);assert.equal(observer.failures(),1);
+ const similar=request('ViewerBadgeCountsExtra');page.emit('request',similar);assert.equal(observer.count(),1);page.emit('requestfailed',similar);assert.equal(observer.failures(),2);observer.dispose();
+});
