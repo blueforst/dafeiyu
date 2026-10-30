@@ -117,8 +117,21 @@ export class PreflightJournal {
   this.entries=next;return receipt;
  }
 }
-export type PlatformTweet={id:string;handle:string;text:string;timestamp:number;replyTo:string|null|undefined;url:string;complete?:boolean;textSource?:'legacy'|'unverified-long';evidenceConflict?:boolean};
+type ReplyDisplayEvidence={text:string;targetHandle:string;targetUserId:string;range:[number,number];mentionRange:[number,number]};
+export type PlatformTweet={id:string;handle:string;text:string;timestamp:number;replyTo:string|null|undefined;url:string;complete?:boolean;textSource?:'legacy'|'unverified-long';evidenceConflict?:boolean;replyDisplay?:ReplyDisplayEvidence;displayEvidenceConflict?:boolean};
 function sameTweetEvidence(left:PlatformTweet,right:PlatformTweet){return !left.evidenceConflict&&!right.evidenceConflict&&left.id===right.id&&left.handle.toLowerCase()===right.handle.toLowerCase()&&left.text===right.text&&left.timestamp===right.timestamp&&left.replyTo===right.replyTo&&(left.complete!==false)===(right.complete!==false);}
+function replyDisplayEvidence(legacy:any,text:string,replyTo:string|null|undefined):ReplyDisplayEvidence|undefined {
+ const range=legacy.display_text_range,mentions=legacy.entities?.user_mentions;
+ if(typeof replyTo!=='string'||!Array.isArray(range)||range.length!==2||!range.every(Number.isSafeInteger)||range[0]<=0||range[1]!==text.length||range[0]>=range[1]||!Array.isArray(mentions)||mentions.length!==1)return;
+ const mention=mentions[0],indices=mention?.indices,name=mention?.screen_name,userId=mention?.id_str;
+ if(typeof name!=='string'||!/^[A-Za-z0-9_]{1,15}$/.test(name)||typeof userId!=='string'||!/^[1-9]\d{0,39}$/.test(userId)||legacy.in_reply_to_user_id_str!==userId||typeof legacy.in_reply_to_screen_name!=='string'||legacy.in_reply_to_screen_name.toLowerCase()!==name.toLowerCase()||!Array.isArray(indices)||indices.length!==2||!indices.every(Number.isSafeInteger)||indices[0]!==0||indices[1]!==name.length+1||range[0]!==indices[1]+1||text.slice(0,range[0])!=='@'+name+' ')return;
+ // 实据为单个隐藏目标mention和一个ASCII空格；不删除任意@、前后空白或隐藏后缀。
+ return {text:text.slice(range[0],range[1]),targetHandle:name.toLowerCase(),targetUserId:userId,range:[range[0],range[1]],mentionRange:[indices[0],indices[1]]};
+}
+function mergeTweetDisplay(left:PlatformTweet,right:PlatformTweet):PlatformTweet {
+ if(left.displayEvidenceConflict||right.displayEvidenceConflict||JSON.stringify(left.replyDisplay??null)!==JSON.stringify(right.replyDisplay??null))return {...left,replyDisplay:undefined,displayEvidenceConflict:true};
+ return left;
+}
 // 仅解析页面自身已经取得的响应，不构造或调用平台私有接口。
 export function platformTweets(data:unknown):PlatformTweet[] {
  const found=new Map<string,PlatformTweet>();let visited=0;
@@ -135,19 +148,21 @@ export function platformTweets(data:unknown):PlatformTweet[] {
     if(rootMetadataClean&&((!hasParent&&ownConversation)||(hasParent&&parent===null&&(!hasConversation||ownConversation))))replyTo=null;
     else if(hasParent&&typeof parent==='string'&&/^\d+$/.test(parent)&&parent!==ownId&&(!hasConversation||conversation!==ownId))replyTo=parent;
    }
-   const row:PlatformTweet={id:ownId,handle:handle.toLowerCase(),text:legacy.full_text,timestamp,replyTo,url:'https://x.com/'+handle+'/status/'+id,complete:twitterText.parseTweet(legacy.full_text).weightedLength<=280&&legacy.truncated!==true&&!value.note_tweet&&!value.note_tweet_results&&!value.note_tweet_id,textSource:value.note_tweet||value.note_tweet_results||value.note_tweet_id?'unverified-long':'legacy'};
+   const display=replyDisplayEvidence(legacy,legacy.full_text,replyTo);
+   const row:PlatformTweet={id:ownId,handle:handle.toLowerCase(),text:legacy.full_text,timestamp,replyTo,url:'https://x.com/'+handle+'/status/'+id,complete:twitterText.parseTweet(legacy.full_text).weightedLength<=280&&legacy.truncated!==true&&!value.note_tweet&&!value.note_tweet_results&&!value.note_tweet_id,textSource:value.note_tweet||value.note_tweet_results||value.note_tweet_id?'unverified-long':'legacy',...(display?{replyDisplay:display}:{})};
    const previous=found.get(ownId);
    // 冲突标记必须保留到跨响应回执匹配，不能挑最后一份或只保留有利证据。
-   found.set(ownId,!previous||sameTweetEvidence(previous,row)?row:{...previous,replyTo:undefined,complete:false,evidenceConflict:true});
+   found.set(ownId,!previous?row:sameTweetEvidence(previous,row)?mergeTweetDisplay(previous,row):{...previous,replyTo:undefined,complete:false,evidenceConflict:true});
   }
   for(const child of Object.values(value))if(child&&typeof child==='object')Array.isArray(child)?child.slice(0,1000).forEach(x=>walk(x,depth+1)):walk(child,depth+1);
  };walk(data,0);return [...found.values()];
 }
-export function matchTweetReceipt(rows:PlatformTweet[],handle:string,text:string,targetId:string|null,since:number):Receipt {
+export function matchTweetReceipt(rows:PlatformTweet[],handle:string,text:string,targetId:string|null,since:number,targetHandle?:string):Receipt {
  if(!since)return {status:'unknown',reason:'缺少原提交时间，无法可靠确认历史发送'};
  const unique=new Map<string,PlatformTweet|null>();
- for(const row of rows){const previous=unique.get(row.id);if(row.evidenceConflict||unique.has(row.id)&&(!previous||!sameTweetEvidence(previous,row)))unique.set(row.id,null);else unique.set(row.id,row);}
- const candidates=[...unique.values()].filter((x):x is PlatformTweet=>!!x&&!x.evidenceConflict&&x.complete!==false&&x.handle===handle.toLowerCase()&&x.text.trim()===text.trim()&&x.replyTo===targetId&&x.timestamp>=Math.floor(since/1000)*1000&&x.timestamp<=Date.now()+60000);
+ for(const row of rows){const previous=unique.get(row.id);if(row.evidenceConflict||unique.has(row.id)&&(!previous||!sameTweetEvidence(previous,row)))unique.set(row.id,null);else unique.set(row.id,previous?mergeTweetDisplay(previous,row):row);}
+ const bodyMatches=(row:PlatformTweet)=>{const proof=row.replyDisplay;return row.text.trim()===text.trim()||targetId!==null&&typeof targetHandle==='string'&&/^[A-Za-z0-9_]{1,15}$/.test(targetHandle)&&!row.displayEvidenceConflict&&!!proof&&proof.targetHandle===targetHandle.toLowerCase()&&proof.text===text;};
+ const candidates=[...unique.values()].filter((x):x is PlatformTweet=>!!x&&!x.evidenceConflict&&x.complete!==false&&x.handle===handle.toLowerCase()&&bodyMatches(x)&&x.replyTo===targetId&&x.timestamp>=Math.floor(since/1000)*1000&&x.timestamp<=Date.now()+60000);
  return candidates.length===1?{status:'confirmed',id:candidates[0].id,url:candidates[0].url}:{status:'unknown',reason:'尚无唯一且匹配作者、目标、正文及提交时间的平台回执'};
 }
 /** 唯一回执优先；仅本次点击后新增、能明确归属于发送的提示可作为拒绝证据。 */
@@ -302,11 +317,53 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
   }
   const p=await getDM();await navigate(p,e.url);return JSON.stringify((await readDM(p,e.conversationId,handle)).all);
  }
- async function capture(page:Page,fn:()=>Promise<void>):Promise<PlatformTweet[]>{
-  const pending:Promise<PlatformTweet[]>[]=[];
-  const observe=(response:any)=>{let u:URL;try{u=new URL(response.url());}catch{return;}if(u.origin!=='https://x.com'||!/^\/i\/api\//.test(u.pathname)||pending.length>=80)return;pending.push(response.json().then(platformTweets).catch(()=>[]));};
-  page.on('response',observe);
-  try{await fn();await page.waitForTimeout(1200);return (await Promise.all(pending)).flat();}finally{page.off('response',observe);}
+ async function capture(page:Page,fn:()=>Promise<void>,wait?:{deadline:number;receipt:(rows:PlatformTweet[])=>Receipt;finishEmpty?:boolean}):Promise<PlatformTweet[]>{
+  const pending:Promise<PlatformTweet[]>[]=[],rows:PlatformTweet[]=[],requests=new Set<unknown>(),parsing=new Set<unknown>();let active=true,completed=false,failed=false,changedAt=Date.now();
+  // 回查只等待原生主列表/详情读取；侧栏推荐和徽标不能拖住同一回执窗口。
+  const relevant=(request:any)=>{try{const url=new URL(request.url());return url.origin==='https://x.com'&&url.pathname.startsWith('/i/api/graphql/')&&['UserOriginalsTimeline','UserRepliesTimeline','UserTweets','UserTweetsAndReplies','TweetDetail'].includes(url.pathname.split('/').at(-1)??'')&&['fetch','xhr'].includes(request.resourceType());}catch{return false;}};
+  const started=(request:any)=>{if(relevant(request)){requests.add(request);changedAt=Date.now();}};
+  const finished=(request:unknown)=>{if(requests.delete(request)){completed=true;changedAt=Date.now();}};
+  const rejected=(request:unknown)=>{if(requests.delete(request)){completed=true;failed=true;changedAt=Date.now();}};
+  const observe=(response:any)=>{
+   let u:URL;try{u=new URL(response.url());}catch{return;}if(u.origin!=='https://x.com'||!/^\/i\/api\//.test(u.pathname)||pending.length>=80)return;
+   const related=!!wait&&relevant(response.request()),token={};if(related){parsing.add(token);changedAt=Date.now();if(response.status()>=400)failed=true;}
+   const reading=Promise.resolve().then(()=>response.json()).then(platformTweets).catch(()=>{if(related)failed=true;return [];});pending.push(reading);
+   if(wait)void reading.then(value=>{if(active){rows.push(...value);if(value.length)changedAt=Date.now();}}).finally(()=>{if(related){parsing.delete(token);completed=true;changedAt=Date.now();}});
+  };
+  page.on('response',observe);if(wait){page.on('request',started);page.on('requestfinished',finished);page.on('requestfailed',rejected);}
+  try{
+   await fn();if(!wait){await page.waitForTimeout(1200);return (await Promise.all(pending)).flat();}
+   while(Date.now()<wait.deadline){
+    const settled=requests.size===0&&parsing.size===0&&Date.now()-changedAt>=400;
+    if(settled&&(failed||wait.receipt(rows).status==='confirmed'||completed&&wait.finishEmpty!==false))return failed?rows.map(row=>({...row,complete:false,evidenceConflict:true})):rows;
+    await page.waitForTimeout(Math.max(1,Math.min(100,wait.deadline-Date.now())));
+   }
+   // 截止时仍有主列表或JSON在途，不能认领已经看到的部分副本。
+   return failed||requests.size||parsing.size?rows.map(row=>({...row,complete:false,evidenceConflict:true})):rows;
+  }finally{active=false;page.off('response',observe);if(wait){page.off('request',started);page.off('requestfinished',finished);page.off('requestfailed',rejected);}}
+ }
+ async function ownRepliesTab(handle:string,deadline:number){
+  while(Date.now()<deadline){
+   const snapshot=await publicPage.evaluate(handle=>{
+    const path='/'+handle.toLowerCase();if(location.origin!=='https://x.com'||location.pathname.toLowerCase()!==path||location.search||location.hash)return {state:'wrong' as const};
+    const visible=(node:Element)=>!!node.getClientRects().length&&getComputedStyle(node).display!=='none'&&getComputedStyle(node).visibility!=='hidden'&&!node.closest('[hidden],[inert],[aria-hidden="true"]');
+    const owned=(node:Element)=>!node.closest('article,[role="article"],[data-testid="quoteTweet"],[data-testid="card.wrapper"],[role="dialog"],[data-testid="UserDescription"]');
+    const mains=document.querySelectorAll('main');if(mains.length!==1)return {state:'waiting' as const};
+    const all=Array.from(mains[0].querySelectorAll('[role="tablist"]')),lists=all.filter(node=>owned(node)&&visible(node));if(lists.length>1)return {state:'ambiguous' as const};if(lists.length!==1)return {state:'waiting' as const};
+    const list=lists[0],links=Array.from(list.querySelectorAll('a[role="tab"][href]')).filter(node=>{
+     if(node.closest('[role="tablist"]')!==list||!owned(node)||!visible(node)||node.getAttribute('aria-disabled')==='true'||node.hasAttribute('disabled'))return false;
+     try{const url=new URL(node.getAttribute('href')??'',location.origin);return url.origin==='https://x.com'&&!url.username&&!url.password&&!url.search&&!url.hash&&/^\/[A-Za-z0-9_]{1,15}\/with_replies$/.test(url.pathname)&&url.pathname.toLowerCase()===path+'/with_replies';}catch{return false;}
+    });
+    return links.length===1?{state:'ready' as const,listIndex:all.indexOf(list),href:links[0].getAttribute('href')!}:links.length>1?{state:'ambiguous' as const}:{state:'waiting' as const};
+   },handle);
+   if(snapshot.state==='wrong'||snapshot.state==='ambiguous')return;
+   if(snapshot.state==='ready'){
+    const scope=publicPage.locator('main [role="tablist"]').nth(snapshot.listIndex!),tab=scope.locator('a[role="tab"][href='+JSON.stringify(snapshot.href)+']');
+    if(await scope.count()!==1||!await scope.evaluate(node=>!node.closest('article,[role="article"],[data-testid="quoteTweet"],[data-testid="card.wrapper"],[role="dialog"],[data-testid="UserDescription"]'))||await tab.count()!==1||!await tab.isVisible()||!await tab.isEnabled()||await tab.getAttribute('aria-disabled')==='true')return;
+    return tab;
+   }
+   await publicPage.waitForTimeout(Math.max(1,Math.min(100,deadline-Date.now())));
+  }
  }
  async function lookup(e:Event,text:string,requestId:string,handle:string):Promise<Receipt>{
   safeEvent(e);
@@ -316,8 +373,19 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
   if(intent.receipt.status==='confirmed'||intent.receipt.status==='rejected')return intent.receipt;
   if(e.channel==='public'){
    const target=platformId(e);if(intent.targetId!==target)throw new Error('回查目标与原发送意图不符');
-   const rows=await capture(publicPage,()=>navigate(publicPage,e.url));
-   return matchTweetReceipt(rows,handle,text,target,intent.at);
+   const budget=Math.min(30000,effectiveHealth.publicCollectionSeconds*1000,Math.max(1000,effectiveHealth.rpcTimeoutSeconds*1000-3000)),deadline=Date.now()+budget,rows:PlatformTweet[]=[];
+   const match=(next:PlatformTweet[]=[])=>matchTweetReceipt([...rows,...next],handle,text,target,intent.at,e.handle);
+   rows.push(...await capture(publicPage,()=>navigate(publicPage,e.url,deadline),{deadline,receipt:match}));
+   let receipt=match();if(receipt.status==='confirmed'||Date.now()>=deadline)return receipt;
+   // 原目标的默认回复列表可能不展示本条；只沿自己资料页实际存在的Replies tab回查。
+   rows.push(...await capture(publicPage,()=>navigate(publicPage,'https://x.com/'+handle,deadline),{deadline,receipt:match}));
+   receipt=match();if(receipt.status==='confirmed'||Date.now()>=deadline)return receipt;
+   const tab=await ownRepliesTab(handle,deadline);if(!tab)return receipt;
+   rows.push(...await capture(publicPage,async()=>{
+    await tab.click({timeout:Math.max(1,Math.min(5000,deadline-Date.now()))});
+    await publicPage.waitForURL(url=>url.origin==='https://x.com'&&!url.username&&!url.password&&!url.search&&!url.hash&&url.pathname.toLowerCase()==='/'+handle.toLowerCase()+'/with_replies',{timeout:Math.max(1,deadline-Date.now())});
+   },{deadline,receipt:match,finishEmpty:false}));
+   return match();
   }else{
    if(intent.targetId!==e.conversationId)throw new Error('回查私信会话与原发送意图不符');
    const p=await getDM();await navigate(p,e.url);const {all}=await readDM(p,e.conversationId,handle);
@@ -332,7 +400,8 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
   const intent=journal.get(requestId);if(!intent){const blocked=preflight.get(requestId,'post',handle,'',text);if(blocked)return blocked;}if(!intent||!intent.at)return {status:'unknown',reason:'缺少原帖子提交意图'};
   if(intent.kind!=='post'||intent.handle!==handle.toLowerCase()||intent.textHash!==hash(text))throw new Error('帖子回查参数与原意图不符');
   if(intent.receipt.status!=='unknown')return intent.receipt;
-  const rows=await capture(publicPage,()=>navigate(publicPage,'https://x.com/'+handle));
+  const budget=Math.min(15000,effectiveHealth.publicCollectionSeconds*1000,Math.max(1000,effectiveHealth.rpcTimeoutSeconds*1000-3000)),deadline=Date.now()+budget;
+  const rows=await capture(publicPage,()=>navigate(publicPage,'https://x.com/'+handle,deadline),{deadline,receipt:rows=>matchTweetReceipt(rows,handle,text,null,intent.at),finishEmpty:false});
   return matchTweetReceipt(rows,handle,text,null,intent.at);
  }
  const app=Fastify({logger:false,bodyLimit:262144});
@@ -508,7 +577,7 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
   }
   attempt!.setStage('receipt-read');await p.waitForTimeout(1500);
   const toast=await p.locator('[data-testid="toast"]').allTextContents();
-  let r:Receipt=e.channel==='public'?matchTweetReceipt(responseRows,handle,text,target,journal.get(requestId)!.at):{status:'unknown'};
+  let r:Receipt=e.channel==='public'?matchTweetReceipt(responseRows,handle,text,target,journal.get(requestId)!.at,e.handle):{status:'unknown'};
   if(r.status!=='confirmed')try{r=await lookup(e,text,requestId,handle);}catch{r={status:'unknown',reason:'尚未取得可靠回执，保持待回查'};}
   r=resolveSubmissionSignals(r,toastsBefore,toast);journal.settle(requestId,r);return r;
  }));

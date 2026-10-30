@@ -4,6 +4,12 @@ import { mkdtempSync,writeFileSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { TransportJournal,matchTweetReceipt,platformTweets,platformId,validateOutboundText } from '../src/browser.js';
 import type { Event } from '../src/types.js';
+
+function hiddenReply(body='你好，听一首喜欢的歌吧。',targetHandle='guest1'){
+ const at=Date.now()-1000,prefix='@'+targetHandle+' ',text=prefix+body;
+ const raw:any={rest_id:'456',legacy:{id_str:'456',conversation_id_str:'100',in_reply_to_status_id_str:'123',in_reply_to_user_id_str:'9001',in_reply_to_screen_name:targetHandle,full_text:text,created_at:new Date(at).toUTCString(),truncated:false,display_text_range:[prefix.length,text.length],entities:{user_mentions:[{id_str:'9001',screen_name:targetHandle,indices:[0,prefix.length-1]}]}},core:{user_results:{result:{legacy:{screen_name:'Worker'}}}}};
+ return {raw,at,body,text,targetHandle};
+}
 test('浏览器日志按同一出站标识冻结正文与目标，重启保留 unknown',()=>{
  const dir=mkdtempSync(tmpdir()+'/role-journal-');try{
   const journal=new TransportJournal(dir+'/journal.json');const intent=journal.intent('request-1','reply','Worker','123','你好');
@@ -68,6 +74,62 @@ test('根帖补充关系证明不放宽作者、正文、时间、完整性和�
  for(const altered of [platformTweets({...root,legacy:{...root.legacy,truncated:true}}),platformTweets({...root,note_tweet:{note_tweet_results:{result:{text:root.legacy.full_text}}}})])assert.equal(matchTweetReceipt(altered,'worker',root.legacy.full_text,null,at).status,'unknown');
  assert.equal(matchTweetReceipt(rows,'other',root.legacy.full_text,null,at).status,'unknown');assert.equal(matchTweetReceipt(rows,'worker','不同正文',null,at).status,'unknown');assert.equal(matchTweetReceipt(rows,'worker',root.legacy.full_text,null,at+5000).status,'unknown');assert.equal(matchTweetReceipt(rows,'worker',root.legacy.full_text,null,0).status,'unknown');
  const second=platformTweets({...root,rest_id:'457',legacy:{...root.legacy,conversation_id_str:'457'}});assert.equal(matchTweetReceipt([...rows,...second],'worker',root.legacy.full_text,null,at).status,'unknown');
+});
+test('单目标隐藏mention由原生range、实体和回复账号共同证明，原文保留且需传冻结目标handle',()=>{
+ for(const body of ['你好，今天听一首轻松的歌吧。','中文🙂和🚀都完整保留。','第一行🙂\n第二行继续放松。']){
+  const f=hiddenReply(body),rows=platformTweets(f.raw);assert.equal(rows.length,1);assert.equal(rows[0].text,f.text);assert.equal(rows[0].replyDisplay?.text,body);assert.deepEqual(rows[0].replyDisplay?.range,[8,f.text.length]);assert.deepEqual(rows[0].replyDisplay?.mentionRange,[0,7]);
+  assert.equal(matchTweetReceipt(rows,'worker',body,'123',f.at,'guest1').status,'confirmed');assert.equal(matchTweetReceipt(rows,'worker',body,'123',f.at,'GUEST1').status,'confirmed');
+  for(const target of [undefined,'other','@guest1','guest1_extra'])assert.equal(matchTweetReceipt(rows,'worker',body,'123',f.at,target).status,'unknown');
+  assert.equal(matchTweetReceipt(rows,'worker',f.text,'123',f.at).status,'confirmed');
+  assert.equal(matchTweetReceipt([{...rows[0],replyTo:null}],'worker',body,null,f.at,'guest1').status,'unknown');
+ }
+});
+test('隐藏前缀不允许缺字段、错账号ID、范围矛盾、额外mention或隐藏后缀',()=>{
+ const cases:Array<{name:string;mutate:(raw:any)=>void}>=[
+  {name:'缺显示范围',mutate:r=>{delete r.legacy.display_text_range;}},
+  {name:'缺回复账号ID',mutate:r=>{delete r.legacy.in_reply_to_user_id_str;}},
+  {name:'回复账号ID与实体不同',mutate:r=>{r.legacy.in_reply_to_user_id_str='9002';}},
+  {name:'实体账号ID与回复不同',mutate:r=>{r.legacy.entities.user_mentions[0].id_str='9002';}},
+  {name:'缺回复账号handle',mutate:r=>{delete r.legacy.in_reply_to_screen_name;}},
+  {name:'回复handle与实体不同',mutate:r=>{r.legacy.in_reply_to_screen_name='other';}},
+  {name:'实体handle与前缀不同',mutate:r=>{r.legacy.entities.user_mentions[0].screen_name='other';}},
+  {name:'缺实体',mutate:r=>{delete r.legacy.entities;}},
+  {name:'实体列表为空',mutate:r=>{r.legacy.entities.user_mentions=[];}},
+  {name:'额外实体',mutate:r=>{r.legacy.entities.user_mentions.push({id_str:'9002',screen_name:'other',indices:[10,16]});}},
+  {name:'实体起点错位',mutate:r=>{r.legacy.entities.user_mentions[0].indices=[1,7];}},
+  {name:'实体终点错位',mutate:r=>{r.legacy.entities.user_mentions[0].indices=[0,8];}},
+  {name:'范围包含隐藏字符',mutate:r=>{r.legacy.display_text_range[0]=7;}},
+  {name:'范围漏掉显示字符',mutate:r=>{r.legacy.display_text_range[0]=9;}},
+  {name:'显示后缀未覆盖',mutate:r=>{r.legacy.display_text_range[1]--;}},
+  {name:'范围越界',mutate:r=>{r.legacy.display_text_range[1]++;}},
+  {name:'范围不是整数',mutate:r=>{r.legacy.display_text_range[0]=8.5;}},
+  {name:'范围类型不符',mutate:r=>{r.legacy.display_text_range=['8',r.legacy.full_text.length];}},
+  {name:'多余范围维度',mutate:r=>{r.legacy.display_text_range.push(1);}},
+  {name:'隐藏后缀',mutate:r=>{r.legacy.full_text+=' hidden';}},
+  {name:'换行不能冒充原生单空格',mutate:r=>{r.legacy.full_text=r.legacy.full_text.replace('@guest1 ','@guest1\n');}},
+  {name:'双空格不是已验收前缀',mutate:r=>{r.legacy.full_text=r.legacy.full_text.replace('@guest1 ','@guest1  ');r.legacy.display_text_range=[9,r.legacy.full_text.length];}},
+ ];
+ for(const scenario of cases){const f=hiddenReply();scenario.mutate(f.raw);const rows=platformTweets(f.raw);assert.equal(rows[0].replyDisplay,undefined,scenario.name);assert.equal(matchTweetReceipt(rows,'worker',f.body,'123',f.at,'guest1').status,'unknown',scenario.name);}
+ const other=hiddenReply('原冻结正文','other');assert.ok(platformTweets(other.raw)[0].replyDisplay);assert.equal(matchTweetReceipt(platformTweets(other.raw),'worker',other.body,'123',other.at,'guest1').status,'unknown');
+});
+test('可见切片必须逐字等于冻结正文，不能顺便trim正文或删除正文里的@',()=>{
+ const f=hiddenReply('  中文🙂正文  '),rows=platformTweets(f.raw);assert.equal(matchTweetReceipt(rows,'worker',f.body,'123',f.at,'guest1').status,'confirmed');
+ assert.equal(matchTweetReceipt(rows,'worker',f.body.trim(),'123',f.at,'guest1').status,'unknown');
+ const visible=hiddenReply('正文里的@符号照原样保留。');assert.equal(matchTweetReceipt(platformTweets(visible.raw),'worker',visible.body,'123',visible.at,'guest1').status,'confirmed');assert.equal(matchTweetReceipt(platformTweets(visible.raw),'worker','正文里的符号照原样保留。','123',visible.at,'guest1').status,'unknown');
+});
+test('同ID显示证据缺失或矛盾不能挑有利副本，但完整原文匹配不依赖可选显示元数据',()=>{
+ const f=hiddenReply(),good=platformTweets(f.raw),missing=structuredClone(f.raw),changed=structuredClone(f.raw);delete missing.legacy.display_text_range;changed.legacy.in_reply_to_user_id_str='9002';changed.legacy.entities.user_mentions[0].id_str='9002';
+ for(const other of [missing,changed]){
+  const separate=platformTweets(other),variants=[[...good,...separate],[...separate,...good],platformTweets([f.raw,other]),platformTweets([other,f.raw]),[...platformTweets([f.raw,other]),...good]];
+  for(const rows of variants){assert.equal(matchTweetReceipt(rows,'worker',f.body,'123',f.at,'guest1').status,'unknown');assert.equal(matchTweetReceipt(rows,'worker',f.text,'123',f.at).status,'confirmed');}
+ }
+ assert.equal(matchTweetReceipt([...good,...good],'worker',f.body,'123',f.at,'guest1').status,'confirmed');
+});
+test('隐藏前缀证明不放宽作者、父目标、时效、完整性、唯一性及原始ID冲突',()=>{
+ const f=hiddenReply(),rows=platformTweets(f.raw);assert.equal(matchTweetReceipt(rows,'other',f.body,'123',f.at,'guest1').status,'unknown');assert.equal(matchTweetReceipt(rows,'worker',f.body,'999',f.at,'guest1').status,'unknown');assert.equal(matchTweetReceipt(rows,'worker',f.body,'123',f.at+5000,'guest1').status,'unknown');assert.equal(matchTweetReceipt(rows,'worker',f.body,'123',0,'guest1').status,'unknown');
+ const old=structuredClone(f.raw);old.legacy.created_at=new Date(f.at-60000).toUTCString();const clipped=structuredClone(f.raw);clipped.legacy.truncated=true;const idConflict=structuredClone(f.raw);idConflict.legacy.id_str='999';
+ for(const raw of [old,clipped,idConflict,{...f.raw,note_tweet:{note_tweet_results:{result:{text:f.text}}}}])assert.equal(matchTweetReceipt(platformTweets(raw),'worker',f.body,'123',f.at,'guest1').status,'unknown');
+ const second=structuredClone(f.raw);second.rest_id='457';second.legacy.id_str='457';assert.equal(matchTweetReceipt([...rows,...platformTweets(second)],'worker',f.body,'123',f.at,'guest1').status,'unknown');
 });
 test('平台 ID 来自显式字段或规范地址，不从内部事件字符串猜测；正文统一校验',()=>{
  const event={id:'account:channel:any-internal',url:'https://x.com/alice/status/123',channel:'public'} as Event;

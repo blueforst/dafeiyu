@@ -18,8 +18,9 @@ const previous=new Map(['SECRETS_DIR','PROFILE_DIR','DATA_DIR','BROWSER_PORT'].m
 mkdirSync(root+'/secrets');mkdirSync(root+'/profile');mkdirSync(root+'/data');
 writeFileSync(root+'/secrets/browser_key',secret,{mode:0o600});writeFileSync(root+'/secrets/model_api_key','fixture-model-key-never-network',{mode:0o600});
 Object.assign(process.env,{SECRETS_DIR:root+'/secrets',PROFILE_DIR:root+'/profile',DATA_DIR:root+'/data',BROWSER_PORT:'0'});
-const rootOnly=process.env.BROKER_ROOT_ONLY==='1';
-const report={evidence:rootOnly?'真实隔离 Camoufox、HTTP Fastify broker、BrowserTransport、持久journal；全部X响应合成，不调用模型或Workflow':'真实隔离 Camoufox、HTTP Fastify broker、BrowserTransport、Workflow、SQLite、统一模型流水；模型为注入模拟，所有 X 请求由路由合成',rootOnly,nativeFixture:'首帧缓存目标和main已存在、无spinner、原生读取延后800ms；根帖CreateTweet省略父字段且原生conversation为自身',checks:[],errors:[],broker:[],nativeReads:0,submitClicks:0,externalRequests:[],screenshots:[],platformNetworkUsed:false,realModelUsed:false,temporaryProfile:true};
+const rootOnly=process.env.BROKER_ROOT_ONLY==='1',replyOnly=process.env.BROKER_REPLY_ONLY==='1';
+if(rootOnly&&replyOnly)throw Error('根帖和回复定向验收开关不能同时启用');
+const report={evidence:rootOnly||replyOnly?'真实隔离 Camoufox、HTTP Fastify broker、BrowserTransport、持久journal；全部X响应合成，不调用模型或Workflow':'真实隔离 Camoufox、HTTP Fastify broker、BrowserTransport、Workflow、SQLite、统一模型流水；模型为注入模拟，所有 X 请求由路由合成',rootOnly,replyOnly,nativeFixture:'首帧缓存目标和main已存在、无spinner、原生读取延后800ms；根帖原生conversation为自身；回复使用唯一隐藏目标mention并通过实际Replies页回查',checks:[],errors:[],broker:[],nativeReads:0,submitClicks:0,externalRequests:[],screenshots:[],platformNetworkUsed:false,realModelUsed:false,temporaryProfile:true};
 const esc=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const journal=()=>existsSync(root+'/profile/transport-journal.json')?JSON.parse(readFileSync(root+'/profile/transport-journal.json','utf8')):{};
 const preflight=()=>existsSync(root+'/profile/posting-preflight-v1.json')?JSON.parse(readFileSync(root+'/profile/posting-preflight-v1.json','utf8')).entries:{};
@@ -28,7 +29,16 @@ let browser,broker,transport,scenario,postScenario,endpoint,sequence=0,chatFixtu
 const chatFixtures={native:readFileSync(new URL('./fixtures/chat/native-shadow.html',import.meta.url),'utf8'),legacy:readFileSync(new URL('./fixtures/chat/legacy.html',import.meta.url),'utf8')};
 const resources=[];
 function persist(){writeFileSync(OUT+'/browser-broker-acceptance.json',JSON.stringify({...report,passed:report.checks.length,failed:report.errors.length},null,2));}
-async function check(name,fn){if(rootOnly&&!name.startsWith('根帖'))return;console.log('[开始] '+name);const started=Date.now();try{const detail=await fn();report.checks.push({name,durationMs:Date.now()-started,...(detail?{detail}:{})});console.log('[通过] '+name);}catch(error){report.errors.push({name,error:error.stack||String(error)});console.log('[失败] '+name+'：'+String(error));}finally{persist();}}
+async function replyPredicate(s,startedAt){
+ const pages=await Promise.all(broker.context.pages().map(async page=>({url:page.url(),dom:await page.evaluate(actor=>{
+  const visible=node=>!!node.getClientRects().length&&getComputedStyle(node).display!=='none'&&getComputedStyle(node).visibility!=='hidden'&&!node.closest('[hidden],[inert],[aria-hidden="true"]');
+  const owned=node=>!node.closest('article,[role="article"],[data-testid="quoteTweet"],[data-testid="card.wrapper"],[role="dialog"],[data-testid="UserDescription"]');
+  const mains=Array.from(document.querySelectorAll('main')),lists=Array.from(document.querySelectorAll('main [role="tablist"]'));
+  return {path:location.pathname,readyState:document.readyState,clickProbe:'same-origin-fixture-fetch',mainCount:mains.length,tablistCount:lists.length,qualifyingTablistCount:lists.filter(node=>visible(node)&&owned(node)).length,tablists:lists.slice(0,4).map(node=>({visible:visible(node),owned:owned(node),rect:{width:node.getBoundingClientRect().width,height:node.getBoundingClientRect().height},tabs:Array.from(node.querySelectorAll('a[role="tab"]')).slice(0,8).map(tab=>{let validHref=false;try{const url=new URL(tab.getAttribute('href')??'',location.origin);validHref=url.origin==='https://x.com'&&!url.username&&!url.password&&!url.search&&!url.hash&&/^\/[A-Za-z0-9_]{1,15}\/with_replies$/.test(url.pathname)&&url.pathname.toLowerCase()==='/'+actor.toLowerCase()+'/with_replies';}catch{}return {href:tab.getAttribute('href'),role:tab.getAttribute('role'),ariaDisabled:tab.getAttribute('aria-disabled'),text:tab.textContent,visible:visible(tab),owned:owned(tab),validHref,onclickType:typeof tab.onclick,onclick:tab.getAttribute('onclick')?.slice(0,250)};})})),mainChildren:mains[0]?Array.from(mains[0].children).slice(0,6).map(node=>({tag:node.tagName,role:node.getAttribute('role')})):[]};
+ },actor).catch(()=>({unreadable:true}))})));
+ return {elapsedMs:Date.now()-startedAt,replyTabClicks:s.replyTabClicks,replyTimelineStarted:s.replyTimelineStarted,replyTimelineFinished:s.replyTimelineFinished,replyTimelineAborted:s.replyTimelineAborted,nativeReads:report.nativeReads,submitClicks:report.submitClicks,reads:s.reads??[],pendingReads:(s.reads??[]).filter(row=>!row.finishedAt&&!row.failedAt).length,ownSnapshotCount:s.ownSnapshotCount??0,ownSnapshots:s.ownSnapshots??[],jsonReads:s.jsonReads??[],pageErrors:s.pageErrors??[],pages,broker:report.broker.slice(-4)};
+}
+async function check(name,fn){if(rootOnly&&!name.startsWith('根帖')||replyOnly&&!name.startsWith('公开回复'))return;console.log('[开始] '+name);const started=Date.now();try{const detail=await fn();report.checks.push({name,durationMs:Date.now()-started,...(detail?{detail}:{})});console.log('[通过] '+name);}catch(error){report.errors.push({name,error:error.stack||String(error)});console.log('[失败] '+name+'：'+String(error));}finally{persist();}}
 async function screenshot(name){const page=broker.context.pages().find(page=>!/^https:\/\/x\.com\/(?:messages|i\/chat)(?:\/|$)/.test(page.url()));assert.ok(page);await page.setViewportSize({width:1440,height:900});const path=OUT+'/'+name+'.png';await page.screenshot({path,fullPage:true});report.screenshots.push(path);}
 function setScenario(id,handle,{deleted=false,unknown=false,nativeDelay=800,hasQuote=false,missingDuringContext=false,unrelated=false}={}){
  const timestamp=Date.now(),event={id:'x:'+id,platformId:id,targetId:id,channel:'public',userId:'x:'+handle,handle,text:(unrelated?'没有账号提及的推荐内容 ':'@'+actor+' 合成新问题 ')+id,url:'https://x.com/'+handle+'/status/'+id,conversationId:id,timestamp,timestampReliable:true};
@@ -50,8 +60,11 @@ function targetBody(){
 }
 function nativeHTML(body,path){
  // 缓存文章及main从首帧就存在，且没有spinner；必须实际等待页面自己的原生读取结束。
- return shell(body,`fetch('/i/api/graphql/fixture/TweetDetail?path='+encodeURIComponent(${JSON.stringify(path)})).then(r=>r.json()).then(()=>{document.querySelector('main').innerHTML=${JSON.stringify(body)}});function openReply(){const d=document.createElement('div');d.setAttribute('role','dialog');d.innerHTML='<div role="textbox" contenteditable="true" data-testid="tweetTextarea_0"></div><button data-testid="tweetButton">发送</button>';document.body.append(d);d.querySelector('button').onclick=()=>{const text=d.querySelector('[contenteditable]').innerText;fetch('/i/api/graphql/fixture/CreateTweet',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,target:${JSON.stringify(scenario?.event.platformId??'')}})}).then(r=>r.json()).then(()=>d.remove())};}`);
+ const operation=path==='/'+actor?'UserOriginalsTimeline':path==='/'+actor+'/with_replies'?'UserRepliesTimeline':'TweetDetail';
+ const emptyProbe=operation==='UserRepliesTimeline'&&scenario?.replyEmptyProbe?`fetch('/i/api/graphql/fixture/UserRepliesTimeline?empty=1&path='+encodeURIComponent(${JSON.stringify(path)})).then(r=>r.json());`:'';
+ return shell(body,`${emptyProbe}fetch('/i/api/graphql/fixture/${operation}?path='+encodeURIComponent(${JSON.stringify(path)})).then(r=>r.json()).then(()=>{document.querySelector('main').innerHTML=${JSON.stringify(body)}});function openReply(){const d=document.createElement('div');d.setAttribute('role','dialog');d.innerHTML='<div role="textbox" contenteditable="true" data-testid="tweetTextarea_0"></div><button data-testid="tweetButton">发送</button>';document.body.append(d);d.querySelector('button').onclick=()=>{const text=d.querySelector('[contenteditable]').innerText;fetch('/i/api/graphql/fixture/CreateTweet',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,target:${JSON.stringify(scenario?.event.platformId??'')}})}).then(r=>r.json()).then(()=>d.remove())};}`);
 }
+function profileTabs(replies=false){return '<div role="tablist" aria-label="Profile timelines"><a role="tab" aria-selected="'+!replies+'" href="/'+actor+'">Posts</a><a role="tab" aria-selected="'+replies+'" href="/'+actor+'/with_replies" onclick="event.preventDefault();const next=this.href;fetch(\'/fixture/replies-tab-click\').then(r=>r.json()).then(()=>location.href=next)">Replies</a></div>';}
 function rootPostHTML(){
  const modal='<div role="dialog" aria-modal="true" style="width:500px;min-height:160px"><div data-testid="tweetTextarea_0" role="textbox" contenteditable="true" style="min-width:200px;min-height:40px"></div><button data-testid="tweetButton" disabled aria-disabled="true">Post</button></div>';
  return shell(modal,`const modal=document.querySelector('[aria-modal="true"]'),input=modal.querySelector('[contenteditable]'),button=modal.querySelector('button');input.oninput=()=>{button.disabled=!input.innerText.trim();button.setAttribute('aria-disabled',String(button.disabled))};button.onclick=()=>{fetch('/i/api/graphql/fixture/CreateTweet',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:input.innerText,rootPost:true})}).then(r=>r.json()).then(()=>modal.remove())};`);
@@ -70,10 +83,34 @@ try{
  browser=await observer();
  broker=await startBrowserServer({launch:async()=>{
   const context=await browser.newContext();
+  context.on('page',page=>{
+   const original=page.evaluate.bind(page);
+   page.evaluate=async(...args)=>{const value=await original(...args);if(scenario?.profileReplyLookup&&typeof args[0]==='function'&&args[0].toString().includes('listIndex')&&args[0].toString().includes('with_replies')){scenario.ownSnapshotCount=(scenario.ownSnapshotCount??0)+1;const snapshots=(scenario.ownSnapshots??=[]);if(snapshots.length>=20)snapshots.shift();snapshots.push({at:Date.now(),url:page.url(),value});}return value;};
+   page.on('pageerror',error=>{if(scenario?.profileReplyLookup)(scenario.pageErrors??=[]).push({at:Date.now(),url:page.url(),message:String(error.message).slice(0,400)});});
+  });
+  const wrappedResponses=new WeakSet();
+  context.on('response',response=>{const url=new URL(response.url()),operation=url.pathname.split('/').at(-1);if(!scenario?.profileReplyLookup||!['TweetDetail','UserOriginalsTimeline','UserRepliesTimeline'].includes(operation)||wrappedResponses.has(response))return;wrappedResponses.add(response);const current=scenario,original=response.json.bind(response);response.json=async()=>{const entry={operation,startedAt:Date.now()};(current.jsonReads??=[]).push(entry);try{const body=await original();entry.finishedAt=Date.now();return body;}catch(error){entry.failedAt=Date.now();throw error;}};});
+  const rootTimelines=new WeakMap(),replyTimelines=new WeakMap(),replyDiagnosticReads=new WeakMap();
+  context.on('request',request=>{const url=new URL(request.url());if(postScenario&&url.pathname.endsWith('/UserOriginalsTimeline')){rootTimelines.set(request,postScenario);postScenario.timelineStarted=(postScenario.timelineStarted??0)+1;}});
+  context.on('requestfinished',request=>{const value=rootTimelines.get(request);if(value)value.timelineFinished=(value.timelineFinished??0)+1;});
+  context.on('requestfailed',request=>{const value=rootTimelines.get(request);if(value)value.timelineAborted=(value.timelineAborted??0)+1;});
+  context.on('request',request=>{const url=new URL(request.url());if(scenario?.profileReplyLookup&&url.pathname.endsWith('/UserRepliesTimeline')){replyTimelines.set(request,scenario);scenario.replyTimelineStarted=(scenario.replyTimelineStarted??0)+1;}});
+  context.on('requestfinished',request=>{const value=replyTimelines.get(request);if(value)value.replyTimelineFinished=(value.replyTimelineFinished??0)+1;});
+  context.on('requestfailed',request=>{const value=replyTimelines.get(request);if(value)value.replyTimelineAborted=(value.replyTimelineAborted??0)+1;});
+  context.on('request',request=>{const url=new URL(request.url()),operation=url.pathname.split('/').at(-1);if(scenario?.profileReplyLookup&&['TweetDetail','UserOriginalsTimeline','UserRepliesTimeline'].includes(operation)){const value={operation,startedAt:Date.now(),pagePath:new URL(request.frame().url()).pathname};(scenario.reads??=[]).push(value);replyDiagnosticReads.set(request,value);}});
+  context.on('requestfinished',request=>{const value=replyDiagnosticReads.get(request);if(value)value.finishedAt=Date.now();});
+  context.on('requestfailed',request=>{const value=replyDiagnosticReads.get(request);if(value)value.failedAt=Date.now();});
   await context.route('**/*',async route=>{
    const request=route.request(),url=new URL(request.url());
    if(url.origin!=='https://x.com'){if(!['about:','data:'].includes(url.protocol))report.externalRequests.push({origin:url.origin,path:url.pathname});await route.abort();return;}
-   if(url.pathname==='/i/api/graphql/fixture/TweetDetail'){report.nativeReads++;const data=[relation(rootEvent(),'900'),...(scenario?[scenario.unrelated?relation(scenario.event,scenario.event.platformId):relation(scenario.event,'900','900',actor)]:[]),...(postScenario?.visible&&url.searchParams.get('path')==='/'+actor?[postScenario.row]:[])];await delay(scenario?.nativeDelay??0);await route.fulfill({status:200,json:{ready:true,data}});return;}
+   if(url.pathname==='/fixture/replies-tab-click'){assert.ok(scenario?.profileReplyLookup);scenario.replyTabClicks=(scenario.replyTabClicks??0)+1;await route.fulfill({status:200,json:{ok:true}});return;}
+   if(['/i/api/graphql/fixture/TweetDetail','/i/api/graphql/fixture/UserOriginalsTimeline','/i/api/graphql/fixture/UserRepliesTimeline'].includes(url.pathname)){
+    report.nativeReads++;const replies=url.pathname.endsWith('/UserRepliesTimeline'),empty=url.searchParams.get('empty')==='1';
+    // 目标详情始终只有主帖和原目标；隐藏前缀的bot回复仅由自己的Replies主列表提供。
+    const data=empty?[]:[relation(rootEvent(),'900'),...(scenario?[scenario.unrelated?relation(scenario.event,scenario.event.platformId):relation(scenario.event,'900','900',actor)]:[]),...(postScenario?.visible&&url.searchParams.get('path')==='/'+actor?[postScenario.row]:[]),...(replies&&scenario?.replyProfileVisible&&url.searchParams.get('path')==='/'+actor+'/with_replies'?[scenario.replyRow]:[])];
+    await delay(empty?0:replies?scenario?.replyTimelineDelay??0:url.pathname.endsWith('/UserOriginalsTimeline')?postScenario?.timelineDelay??0:scenario?.nativeDelay??0);
+    try{await route.fulfill({status:200,json:{ready:true,data}});}catch(error){if(!replies&&!url.pathname.endsWith('/UserOriginalsTimeline'))throw error;}return;
+   }
    if(url.pathname==='/i/api/graphql/fixture/CreateTweet'){
     report.submitClicks++;const body=request.postDataJSON();
     if(body.rootPost===true){
@@ -82,7 +119,9 @@ try{
      await route.fulfill({status:200,json:postScenario.missingReceipt?{acknowledged:true}:{data:{create_tweet:{tweet_results:{result:postScenario.row}}}}});return;
     }
     scenario.clicks++;if(body.target!==scenario.event.platformId){report.errors.push({name:'合成submit目标绑定',error:'fixture-target-mismatch'});await route.fulfill({status:400,json:{error:'fixture-target-mismatch'}});return;}
-    const payload=scenario.unknown?{acknowledged:true}:{data:{create_tweet:{tweet_results:{result:{rest_id:String(7000+report.submitClicks),legacy:{full_text:body.text,created_at:new Date().toUTCString(),in_reply_to_status_id_str:body.target,truncated:false},core:{user_results:{result:{legacy:{screen_name:actor}}}}}}}}};
+    const prefix='@'+scenario.event.handle+' ',fullText=scenario.hiddenReplyMetadata?prefix+body.text:body.text;
+    scenario.replyRow={rest_id:String(7000+report.submitClicks),legacy:{id_str:String(7000+report.submitClicks),full_text:fullText,created_at:new Date().toUTCString(),conversation_id_str:'900',in_reply_to_status_id_str:body.target,truncated:false,...(scenario.hiddenReplyMetadata?{in_reply_to_screen_name:scenario.event.handle,in_reply_to_user_id_str:'333',display_text_range:[prefix.length,fullText.length],entities:{user_mentions:[{screen_name:scenario.event.handle,id_str:'333',indices:[0,prefix.length-1]}]}}:{})},core:{user_results:{result:{legacy:{screen_name:actor}}}}};
+    const payload=scenario.unknown?{acknowledged:true}:{data:{create_tweet:{tweet_results:{result:scenario.replyRow}}}};
     await route.fulfill({status:200,json:payload});return;
    }
    let html;
@@ -90,7 +129,8 @@ try{
    else if(url.pathname==='/compose/post')html=rootPostHTML();
    else if(url.pathname.startsWith('/messages')||url.pathname.startsWith('/i/chat'))html=chatFixtureMode==='empty'?shell('<div data-testid="emptyState">No messages</div>'):chatFixtures[chatFixtureMode].replace('<body>','<body><nav><a data-testid="AppTabBar_Profile_Link" href="/'+actor+'">个人主页</a></nav>');
    else if(url.pathname==='/notifications/mentions'||url.pathname==='/search')html=nativeHTML(scenario?article(scenario.event):'<div data-testid="emptyState">No results</div>',url.pathname);
-   else if(url.pathname==='/'+actor)html=nativeHTML(article(rootEvent()),url.pathname);
+   else if(url.pathname==='/'+actor)html=nativeHTML((scenario?.profileReplyLookup?profileTabs(): '')+article(rootEvent()),url.pathname);
+   else if(scenario?.profileReplyLookup&&url.pathname==='/'+actor+'/with_replies')html=nativeHTML(profileTabs(true)+article(rootEvent()),url.pathname);
    else if(url.pathname==='/'+actor+'/status/900')html=nativeHTML(article(rootEvent())+(scenario?article(scenario.event):'<div data-testid="emptyState">No replies</div>'),url.pathname);
    else if(scenario&&url.pathname===new URL(scenario.event.url).pathname)html=nativeHTML(targetBody(),url.pathname);
    else{report.externalRequests.push({origin:url.origin,path:url.pathname});await route.abort();return;}
@@ -141,15 +181,31 @@ try{
   chatFixtureMode='native';const native=await transport.collectPrivate(actor);assert.equal(native.events.length,0);assert.ok(native.diagnostics.some(entry=>entry.code==='chat-native-time-unverified'));assert.ok(!native.diagnostics.some(entry=>entry.status==='empty'));
   const event={id:'native-unverified-negative',platformId:'11111111-1111-4111-8111-111111111111',channel:'private',userId:'x:fixture_peer',handle:'fixture_peer',text:'合成结构未验收负向输入',url:'https://x.com/i/chat/111-222',conversationId:'111-222',timestamp:Date.now(),timestampReliable:true},before=report.submitClicks,receipt=await transport.send(event,'合成拒绝发送测试',actor);assert.equal(receipt.status,'not_submitted');assert.equal(receipt.diagnostic.code,'private-contract-unverified');assert.equal(receipt.diagnostic.stage,'dm-validate');assert.equal(journal()[event.id],undefined);assert.equal(preflight()[event.id].receipt.status,'not_submitted');assert.equal(report.submitClicks,before);const chatPage=broker.context.pages().find(page=>page.url()==='https://x.com/i/chat/111-222');assert.ok(chatPage);assert.equal(await chatPage.evaluate(()=>window.__requestActions||0),0);assert.equal(report.externalRequests.length,0);return {legacyEvents:1,nativeEvents:0,diagnostic:receipt.diagnostic,noAcceptOrBlockClicks:true};
  });
+ await check('公开回复HTTP发送的唯一隐藏目标mention由原生三方元数据确认，仅提交一次',async()=>{
+  const s=setScenario('201','visitor_native');Object.assign(s,{hiddenReplyMetadata:true,profileReplyLookup:false});const text='合成公开回复：听一首喜欢的歌会很轻松。',before=report.submitClicks;
+  await transport.control('auto');const receipt=await transport.send(s.event,text,actor);
+  assert.equal(receipt.status,'confirmed');assert.equal(receipt.id,s.replyRow.rest_id);assert.equal(s.replyRow.legacy.full_text,'@'+s.event.handle+' '+text);assert.equal(journal()[s.event.id].kind,'reply');assert.equal(journal()[s.event.id].receipt.status,'confirmed');
+  assert.equal((await transport.send(s.event,text,actor)).id,receipt.id);assert.equal((await transport.lookup(s.event,text,actor)).id,receipt.id);assert.equal(s.clicks,1);assert.equal(report.submitClicks-before,1);assert.equal(report.externalRequests.length,0);return {confirmed:true,hiddenTargetMention:true,targetParentAndHandleBound:true,submitClicks:1};
+ });
+ await check('公开回复首次ack未知，实际Replies页延后2.4秒主列表回查收束且不重发',async()=>{
+  const s=setScenario('202','visitor_lookup',{unknown:true});Object.assign(s,{hiddenReplyMetadata:true,profileReplyLookup:true,replyProfileVisible:false,replyTimelineDelay:2400,replyEmptyProbe:true,replyTabClicks:0,replyTimelineStarted:0,replyTimelineFinished:0,replyTimelineAborted:0});
+  const text='合成回查回复：先放下手机喝几口水。',before=report.submitClicks;await transport.control('auto');
+  const firstStarted=Date.now(),first=await transport.send(s.event,text,actor);if(s.replyTabClicks!==1){const predicate=await replyPredicate(s,firstStarted);report.replyFailurePredicate=predicate;assert.fail('首次回复回查未进入唯一实际Replies tab：'+JSON.stringify(predicate));}assert.equal(first.status,'unknown');assert.equal(s.clicks,1);assert.equal(journal()[s.event.id].receipt.status,'unknown');assert.equal(s.replyTabClicks,1);assert.equal(s.replyTimelineStarted,2);assert.equal(s.replyTimelineFinished,2);assert.equal(s.replyTimelineAborted,0);const originalAt=journal()[s.event.id].at;
+  s.replyProfileVisible=true;const started=Date.now(),receipt=await transport.lookup(s.event,text,actor);assert.ok(Date.now()-started>=2000);assert.equal(receipt.status,'confirmed');assert.equal(receipt.id,s.replyRow.rest_id);assert.equal(journal()[s.event.id].at,originalAt);assert.equal(journal()[s.event.id].receipt.status,'confirmed');assert.equal(s.replyTabClicks,2);assert.equal(s.replyTimelineStarted,4);assert.equal(s.replyTimelineFinished,4);
+  const page=broker.context.pages().find(page=>new URL(page.url()).pathname==='/'+actor+'/with_replies');assert.ok(page);await page.goto('https://x.com/home',{waitUntil:'domcontentloaded'});assert.equal(s.replyTimelineAborted,0);
+  assert.equal((await transport.send(s.event,text,actor)).id,receipt.id);assert.equal((await transport.lookup(s.event,text,actor)).id,receipt.id);assert.equal(report.submitClicks-before,1);assert.equal(s.clicks,1);assert.equal(report.externalRequests.length,0);return {initial:'unknown',lookup:'confirmed',submitClicks:1,originalIntentPreserved:true,actualRepliesTabClicks:2,timelineDelayMs:2400,timelineFinished:4,timelineAborted:0,emptyProbeDidNotShortCircuit:true};
+ });
  await check('根帖HTTP提交使用省略父字段的原生自身线程回执，重复同意图不再次点击',async()=>{
   await transport.control('auto');postScenario={text:'合成根帖：留十分钟听一首喜欢的歌。',missingReceipt:false,visible:false,clicks:0};const id='root-native-confirmed',before=report.submitClicks;
   const receipt=await transport.post(postScenario.text,actor,id);assert.equal(receipt.status,'confirmed');assert.equal(receipt.id,postScenario.row.rest_id);assert.equal(journal()[id].kind,'post');assert.equal(journal()[id].receipt.status,'confirmed');assert.equal(postScenario.clicks,1);
   assert.equal((await transport.post(postScenario.text,actor,id)).id,receipt.id);assert.equal((await transport.lookupPost(postScenario.text,actor,id)).id,receipt.id);assert.equal(report.submitClicks-before,1);assert.equal(report.externalRequests.length,0);return {confirmed:true,submitClicks:1,noParentField:true,nativeConversationOwnId:true};
  });
- await check('根帖首次缺回执保持unknown，主页原生自身线程仅回查收束且不重发',async()=>{
-  await transport.control('auto');postScenario={text:'合成回查根帖：慢慢喝完一杯温水。',missingReceipt:true,visible:false,clicks:0};const id='root-native-reconcile',before=report.submitClicks;
-  const first=await transport.post(postScenario.text,actor,id);assert.equal(first.status,'unknown');assert.equal(journal()[id].receipt.status,'unknown');assert.equal(postScenario.clicks,1);const originalAt=journal()[id].at;
-  postScenario.visible=true;const receipt=await transport.lookupPost(postScenario.text,actor,id);assert.equal(receipt.status,'confirmed');assert.equal(receipt.id,postScenario.row.rest_id);assert.equal(journal()[id].at,originalAt);assert.equal(journal()[id].receipt.status,'confirmed');assert.equal((await transport.post(postScenario.text,actor,id)).id,receipt.id);assert.equal(report.submitClicks-before,1);assert.equal(postScenario.clicks,1);assert.equal(report.externalRequests.length,0);return {initial:'unknown',lookup:'confirmed',submitClicks:1,originalIntentPreserved:true};
+ await check('根帖首次缺回执保持unknown，延后2.4秒主列表完成后仅回查收束，立即切页不abort或重发',async()=>{
+  await transport.control('auto');postScenario={text:'合成回查根帖：慢慢喝完一杯温水。',missingReceipt:true,visible:false,clicks:0,timelineDelay:2400,timelineStarted:0,timelineFinished:0,timelineAborted:0};const id='root-native-reconcile',before=report.submitClicks;
+  const first=await transport.post(postScenario.text,actor,id);assert.equal(first.status,'unknown');assert.equal(journal()[id].receipt.status,'unknown');assert.equal(postScenario.clicks,1);assert.equal(postScenario.timelineFinished,1);assert.equal(postScenario.timelineAborted,0);const originalAt=journal()[id].at;
+  postScenario.visible=true;const started=Date.now(),receipt=await transport.lookupPost(postScenario.text,actor,id);assert.ok(Date.now()-started>=2000);assert.equal(receipt.status,'confirmed');assert.equal(receipt.id,postScenario.row.rest_id);assert.equal(journal()[id].at,originalAt);assert.equal(journal()[id].receipt.status,'confirmed');assert.equal(postScenario.timelineStarted,2);assert.equal(postScenario.timelineFinished,2);
+  const profile=broker.context.pages().find(page=>new URL(page.url()).pathname==='/'+actor);assert.ok(profile);await profile.goto('https://x.com/home',{waitUntil:'domcontentloaded'});assert.equal(postScenario.timelineAborted,0);
+  assert.equal((await transport.post(postScenario.text,actor,id)).id,receipt.id);assert.equal(report.submitClicks-before,1);assert.equal(postScenario.clicks,1);assert.equal(report.externalRequests.length,0);return {initial:'unknown',lookup:'confirmed',submitClicks:1,originalIntentPreserved:true,timelineDelayMs:2400,timelineFinished:2,timelineAborted:0};
  });
 }catch(error){report.errors.push({name:'脚本执行异常',error:error.stack||String(error)});}
 finally{
