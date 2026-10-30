@@ -118,7 +118,7 @@ type FrozenSample = {id:string;hash:string;revision:number};
 type ReplayContext = {event:Event;at:number;body:any;hasSnapshot:boolean;memory:unknown;recentReplies:ReplySample[]};
 type Prepared = {id:string;accountId:string;at:number;samples:FrozenSample[];filter:ReplayFilter;candidate:Persona;baseline:Persona;baselineMode:ReplayBaseline;personaRevision:number;personaIdentity?:{id:string;name:string;revision:number};libraryBound?:boolean;promptHints:unknown;dailyState:string;config:Config;estimate:any;compare?:'persona'|'model';modelCandidate?:{key:string;modelId:string;reasoningLevel:string};candidateConfig?:Config;frozenModels?:{baseline:FrozenReplayModel;candidate:FrozenReplayModel};assertCurrent?:()=>void;dispose?:()=>void;expiryTimer?:ReturnType<typeof setTimeout>};
 export type ReplayModelSelection={key:string;modelId:string;reasoningLevel:string};
-type ReplayOptions = {accountId:()=>string;config?:()=>Config;memory?:(userId:string,channel:Channel,accountId:string,at:number)=>unknown;now?:()=>number;resolveModel?:(selection:ReplayModelSelection)=>Promise<{model:Config['model'];revision:number;selection:ReplayModelSelection}>;modelLibraryRevision?:()=>number;freezeModel?:(config:Config,generator:Generator,valid:()=>void)=>Promise<FrozenReplayModel>};
+type ReplayOptions = {accountId:()=>string;config?:()=>Config;memory?:(userId:string,channel:Channel,accountId:string,at:number,currentEvent?:Event)=>unknown;now?:()=>number;resolveModel?:(selection:ReplayModelSelection)=>Promise<{model:Config['model'];revision:number;selection:ReplayModelSelection}>;modelLibraryRevision?:()=>number;freezeModel?:(config:Config,generator:Generator,valid:()=>void)=>Promise<FrozenReplayModel>};
 export class ReplayRunner {
  private estimates=new Map<string,Prepared>();
  private active?:{id:string;accountId:string;controller:AbortController;done:Promise<void>;dispose?:()=>void};
@@ -259,7 +259,7 @@ export class ReplayRunner {
   const event=parse(sample.body) as Event,at=Number.isFinite(event.timestamp)?event.timestamp+60000:sample.created_at+60000;
   const snapshot=this.store.db.prepare('SELECT body_json FROM generation_snapshots WHERE message_id=? AND account_id=?').get(sample.id,prepared.accountId) as any,body=parse(snapshot?.body_json);
   // 快照中的旧记忆永不作为召回；人工删除/修订后只能看到当前允许的内容。
-  const memory=this.options.memory?.(sample.user_id,sample.channel,prepared.accountId,at)??{memories:[],recent:[],experiences:[]};
+  const memory=this.options.memory?.(sample.user_id,sample.channel,prepared.accountId,at,event)??{memories:[],recent:[],experiences:[]};
   // 风格样本也重新检查当前来源；不把快照中已遗忘用户的开头重新带入提示词。
   const styleRows=this.store.db.prepare("SELECT * FROM messages WHERE account_id=? AND created_at<=? AND status IN ('confirmed','draft') AND (channel='public' OR (?='private' AND channel='private' AND json_extract(body,'$.conversationId')=?)) ORDER BY created_at DESC,id DESC LIMIT 50").all(prepared.accountId,at,sample.channel,event.conversationId??'') as any[];
   const recentReplies:ReplySample[]=styleRows.filter(row=>row.id!==sample.id&&this.allowed(row,prepared.accountId)).flatMap(row=>{const draft=parse(row.draft);return draft.action==='reply'&&typeof draft.text==='string'?[{text:draft.text,channel:row.channel,conversationId:parse(row.body).conversationId,accountId:row.account_id,at:row.created_at}]:[];}).slice(0,20);

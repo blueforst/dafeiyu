@@ -6,7 +6,7 @@ import { loadConfig } from './config.js';
 import { readPanelSettings, mergePanelSettings } from './settings.js';
 import type { Store } from './store.js';
 import type { Generator } from './model.js';
-import type { Channel, Config, Receipt } from './types.js';
+import type { Channel, Config, Event, Receipt } from './types.js';
 import { invalidateReplayMemory } from './persona-replay.js';
 import { IdentityLinks } from './identity-links.js';
 import { recallRoleExperiences } from './role-experiences.js';
@@ -15,6 +15,8 @@ export type MemoryPolicy = { recentCount:number; recentDays:number; retentionDay
 export type MemoryKind = 'fact'|'preference'|'topic';
 export type MemoryScope = { accountId:string; userId:string; channel:Channel };
 export type MemorySummaryOptions={signal?:AbortSignal;sessionId?:string;force?:boolean;config?:Config;interactionId?:string;source?:string;purpose?:string;accountId?:string};
+export type PublicContextReference=Pick<Event,'id'|'platformId'|'conversationId'>;
+export type MemoryRecent={id:string;channel:Channel;message:string;timestamp:number;reply?:string;status?:string;platformId?:string;conversationId?:string;url?:string;contextRelation?:'same-public-thread'|'other-public-thread'};
 type ScopeState = { revision:number; cursor:number; lastSummaryAt:number|null };
 type Mutation = MemoryScope & { id:string; itemId:string; textHash:string; sourceIds:string[]; at:number };
 type InputRow = { id:string; body:string; draft:string|null; status:string; created_at:number; processed_seq:number; account_id:string; channel:Channel };
@@ -107,7 +109,25 @@ export class MemoryService {
  items(userId:string,channel:Channel,accountId:string){
   return (this.store.db.prepare('SELECT * FROM memory_items WHERE account_id=? AND user_id=? AND channel=? ORDER BY created_at,id').all(accountId,userId,channel) as any[]).map(r=>({id:r.id,accountId:r.account_id,userId:r.user_id,channel:r.channel,type:r.kind,text:r.text,revision:r.revision,sourceStatus:r.source_status,createdAt:r.created_at,updatedAt:r.updated_at,sources:this.sources(r.id,accountId)}));
  }
- context(userId:string,channel:Channel,accountId:string,at=this.now(),policyOverride?:MemoryPolicy){
+ private publicRecent(userId:string,accountId:string,at:number,policy:MemoryPolicy,current:PublicContextReference):MemoryRecent[]{
+  const rows=this.store.db.prepare(`SELECT m.id,m.user_id,m.account_id,m.platform_id,m.body,m.draft,m.status,m.created_at,m.channel FROM messages m WHERE m.account_id=? AND m.user_id=? AND m.channel='public' AND m.status IN (${PROCESSED},'queued','approved','generating','sending','unknown','merged') AND m.created_at BETWEEN ? AND ? AND NOT EXISTS (SELECT 1 FROM memory_ignored i WHERE i.account_id=m.account_id AND i.user_id=m.user_id AND i.channel=m.channel AND i.message_id=m.id) ORDER BY m.created_at DESC,m.id DESC LIMIT ?`).all(accountId,userId,at-policy.recentDays*86400000,at,Math.max(30,policy.recentCount*5)) as any[];
+  const recent:MemoryRecent[]=[];
+  for(const row of rows){
+   const event=json(row.body),platformId=event.platformId,conversationId=event.conversationId;
+   if(row.id===current.id||platformId===current.platformId)continue;
+   if(event.channel!=='public'||event.userId!==userId||event.accountId!==accountId||typeof event.handle!=='string'||!/^\w{1,15}$/.test(event.handle)||event.timestampReliable!==true||!Number.isSafeInteger(event.timestamp)||event.timestamp!==row.created_at||event.timestamp<=0||typeof event.text!=='string'||!event.text.trim()||typeof platformId!=='string'||!/^\d{1,32}$/.test(platformId)||row.platform_id&&row.platform_id!==platformId||typeof conversationId!=='string'||!/^\d{1,32}$/.test(conversationId)||event.conversationIdReliable===false||event.publicRelationConflict===true)continue;
+   let url:URL;try{url=new URL(event.url);}catch{continue;}
+   if(url.origin!=='https://x.com'||url.username||url.password||url.search||url.hash||url.pathname.toLowerCase()!=='/'+event.handle.toLowerCase()+'/status/'+platformId)continue;
+   const sameThread=conversationId===current.conversationId;
+   // 当前线程的待处理来言由平台上下文与合并消息提供；其他线程只作有来源的参考。
+   if(sameThread&&!['confirmed','draft','skipped','failed'].includes(row.status))continue;
+   const draft=json(row.draft);
+   recent.push({id:row.id,channel:'public' as const,message:event.text,timestamp:row.created_at,status:row.status,platformId,conversationId,url:url.href,contextRelation:sameThread?'same-public-thread':'other-public-thread',...(row.status==='confirmed'&&typeof draft.text==='string'&&draft.text?{reply:draft.text}:{})});
+   if(recent.length>=policy.recentCount)break;
+  }
+  return recent.reverse();
+ }
+ context(userId:string,channel:Channel,accountId:string,at=this.now(),policyOverride?:MemoryPolicy,currentEvent?:PublicContextReference){
   if(this.store.forgotten(userId,accountId))return {memories:[],recent:[],experiences:[]};
   const policy=policyOverride?validateMemoryPolicy(policyOverride):this.policy().policy;
   const linked=this.links.detail(accountId,userId).links;
@@ -126,7 +146,9 @@ export class MemoryService {
   }
   const cross=channel==='private'&&usable.length?usable[0].publicUserId:null;
   const rows=this.store.db.prepare(`SELECT id,body,draft,status,created_at,channel FROM messages WHERE account_id=? AND ((user_id=? AND (?='private' OR channel='public')) OR (?<>'' AND user_id=? AND channel='public')) AND status IN (${PROCESSED}) AND created_at>=? ORDER BY processed_seq DESC LIMIT ?`).all(accountId,userId,channel,cross??'',cross??'',at-policy.recentDays*86400000,policy.recentCount) as any[];
-  const recent=rows.reverse().map(r=>({id:r.id,channel:r.channel,message:json(r.body).text??'',timestamp:r.created_at,...(r.status==='confirmed'?{reply:json(r.draft).text??''}:{})}));
+  const recent:MemoryRecent[]=channel==='public'&&currentEvent&&typeof currentEvent.conversationId==='string'&&/^\d{1,32}$/.test(currentEvent.conversationId)
+   ?this.publicRecent(userId,accountId,at,policy,currentEvent)
+   :rows.reverse().map(r=>({id:r.id,channel:r.channel,message:json(r.body).text??'',timestamp:r.created_at,...(r.status==='confirmed'?{reply:json(r.draft).text??''}:{})}));
   const experiences=recallRoleExperiences(this.store,accountId);
   const privateBackground:Array<{type:MemoryKind;text:string}>=[];let backgroundSize=0;
   if(channel==='public')for(const item of usable.flatMap(link=>this.items(link.privateUserId,'private',accountId)).sort((a,b)=>b.updatedAt-a.updatedAt)){

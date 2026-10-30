@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import type { Store } from './store.js';
+import {hasBlockingUnknown} from './unknown-reviews.js';
 import { applyMigration } from './migrations.js';
 import type { Identity, Channel } from './types.js';
 import { redact } from './config.js';
@@ -245,10 +246,10 @@ export class RuntimeHealth {
  }
  private fallbackSendable(account:string,channel:Channel,input:HealthEvaluation,now:number){
   if((input.cooldown?.[channel]??Number(this.store.get('cooldown:'+channel+':'+account,this.store.get('cooldown:'+channel,'0'))))>now)return false;
-  const unknown=!!this.store.db.prepare("SELECT 1 FROM messages WHERE account_id=? AND channel=? AND status IN ('sending','unknown') LIMIT 1").get(account,channel);if(unknown)return false;
+  if(this.store.db.prepare("SELECT 1 FROM messages WHERE account_id=? AND channel=? AND status='sending' LIMIT 1").get(account,channel)||hasBlockingUnknown(this.store,account,channel))return false;
   const kinds=channel==='public'?"('reply','post')":"('dm')";
   const hasOutbox=table(this.store,'outbox');let count=0;
-  if(hasOutbox){if(this.store.db.prepare("SELECT 1 FROM outbox WHERE account_id=? AND kind IN "+kinds+" AND status IN ('submitting','unknown') LIMIT 1").get(account))return false;count=Number((this.store.db.prepare("SELECT COUNT(*) n FROM outbox WHERE account_id=? AND kind IN "+kinds+" AND status IN ('confirmed','submitting','unknown','rejected') AND submitted_at>?").get(account,now-3600000) as any).n);}
+  if(hasOutbox){count=Number((this.store.db.prepare("SELECT COUNT(*) n FROM outbox WHERE account_id=? AND kind IN "+kinds+" AND status IN ('confirmed','submitting','unknown','rejected') AND submitted_at>?").get(account,now-3600000) as any).n);}
   count+=Number((this.store.db.prepare("SELECT COUNT(*) n FROM messages m WHERE account_id=? AND channel=? AND status IN ('confirmed','sending','unknown') AND updated_at>?"+(hasOutbox?" AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.account_id=m.account_id AND o.source_id=m.id)":"")).get(account,channel,now-3600000) as any).n);
   if(count>=(channel==='public'?input.publicPerHour??10:input.privatePerHour??30))return false;
   if(channel==='private'){

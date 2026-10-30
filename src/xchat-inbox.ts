@@ -21,7 +21,7 @@ export async function readNativeRequestInbox(page:Page,kind:'requests'|'other'):
   if(panels.length!==1||requests.length!==1||!panels[0].contains(requests[0])||!requests[0].getClientRects().length)return base;
   const panel=requests[0],outside=(node:Element)=>!node.closest('[data-dm-message-row],article,[role="article"],[data-testid="messageEntry"]'),ownedUI=(node:Element)=>outside(node)&&!node.closest('[role="option"]');
   if(Array.from(panel.querySelectorAll('input[type="password"]')).some(ownedUI))return {...base,state:'blocked'};
-  if(Array.from(panel.querySelectorAll('[aria-busy="true"],[role="progressbar"],[data-testid="spinner"]')).some(ownedUI))return {...base,state:'loading'};
+  if(panel.getAttribute('aria-busy')==='true'||Array.from(panel.querySelectorAll('[aria-busy="true"],[role="progressbar"],[data-testid="spinner"]')).some(ownedUI))return {...base,state:'loading'};
   const other=panel.querySelectorAll('[data-testid="dm-message-requests-other-button"]');
   base.canOpenOther=kind==='requests'&&other.length===1&&outside(other[0])&&other[0].getClientRects().length>0&&!other[0].closest('[role="listbox"]');
   const listboxes=Array.from(panel.querySelectorAll('[role="listbox"]')).filter(outside),scrollers=panel.querySelectorAll('[data-testid="dm-message-requests-scroller"]');
@@ -41,7 +41,10 @@ export async function readNativeRequestInbox(page:Page,kind:'requests'|'other'):
   const empties=Array.from(panel.querySelectorAll('[data-testid="dm-message-requests-empty"]')).filter(ownedUI),back=panel.querySelectorAll('[data-testid="dm-message-requests-back"]');
   const otherHeader=kind==='other'&&back.length===1&&back[0].parentElement?.textContent?.trim()==='Other';
   const emptyText=empties.length===1?(empties[0].textContent??'').trim().replace(/\s+/g,' '):'';
-  if(empties.length===1&&empties[0].getClientRects().length>0&&!empties[0].querySelector('a,button,input')&&!listboxes.some(node=>node.querySelector('a[href]'))&&!invalid&&(kind==='requests'?/^No message requests\s*You don.t have any message requests from accounts in your network$/.test(emptyText):otherHeader&&/^No message requests(?:\s+.{1,600})?$/.test(emptyText)))return {...base,state:'empty'};
+  // Other 的真实空态使用独立标题与说明节点；textContent 会把两块直接拼接。
+  const otherCopy=empties.length===1?Array.from(empties[0].querySelectorAll('div')).filter(node=>!node.childElementCount):[];
+  const otherEmpty=otherHeader&&otherCopy.length===2&&otherCopy[0].textContent?.trim()==='No hidden requests'&&otherCopy[1].textContent?.trim()==='Message requests from outside of your network, or potentially containing spam';
+  if(empties.length===1&&empties[0].getClientRects().length>0&&!empties[0].querySelector('a,button,input')&&!listboxes.some(node=>node.querySelector('a[href]'))&&!invalid&&(kind==='requests'?/^No message requests\s*You don.t have any message requests from accounts in your network$/.test(emptyText):otherEmpty))return {...base,state:'empty'};
   return {...base,invalid};
  },{kind,expectedPath:paths[kind]});
 }

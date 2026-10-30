@@ -28,6 +28,7 @@ import type {ManualImportsService} from './manual-imports.js';
 import type {RoleExperienceService} from './role-experiences.js';
 import type {CollectionResult} from './collection-health.js';
 import {privateRequestDecision,privateRequestState,recordPrivateRequestState,confirmPrivateRequestState} from './private-requests.js';
+import {hasBlockingUnknown} from './unknown-reviews.js';
 
 export function loggedInHandle(identity:Identity):string {
  const handle=String(identity.handle||'').trim().replace(/^@/,'').toLowerCase();
@@ -127,7 +128,7 @@ export class Workflow {
  }
  channelWaitReason(channel:Channel,c=this.config(),sending=true,excludeUnsubmittedId?:string):string|null {
   if(this.cooldown(channel)>Date.now())return 'cooldown';
-  if(this.store.db.prepare("SELECT 1 FROM messages WHERE account_id=? AND channel=? AND status='unknown' LIMIT 1").get(this.accountId(),channel)||(this.services.outbox&&this.store.db.prepare("SELECT 1 FROM outbox WHERE account_id=? AND channel=? AND status IN ('submitting','unknown') LIMIT 1").get(this.accountId(),channel)))return 'unknown-pending';
+  if(hasBlockingUnknown(this.store,this.accountId(),channel))return 'unknown-pending';
   const excluded=excludeUnsubmittedId?this.store.getMessage(excludeUnsubmittedId,this.accountId()):undefined;
   const reserved=excluded?.status==='sending'&&!this.services.outbox?.source(this.accountId(),channel==='public'?'reply':'dm',excluded.id);
   const hourlyAdjustment=reserved&&excluded.updated_at>Date.now()-3600000?1:0,dailyAdjustment=reserved&&excluded.updated_at>=beijingDayStart(Date.now())?1:0;
@@ -167,7 +168,7 @@ export class Workflow {
   const frozenIdentity=personaIdentity??{...this.services.persona?.activeIdentity?.(),revision:this.services.persona?.get().revision};
   return generateReply({config:c,accountId:this.accountId(),persona,personaService:this.services.persona,generator:this.generator,
    conversation:()=>this.transport.context(e,this.accountId(),{signal:this.abort?.signal}),
-   memory:()=>this.services.memory?this.services.memory.context(e.userId,e.channel,this.accountId(),Date.now(),memoryPolicy):this.store.context(e.userId,e.channel,this.accountId()),
+   memory:()=>this.services.memory?this.services.memory.context(e.userId,e.channel,this.accountId(),Date.now(),memoryPolicy,e):this.store.context(e.userId,e.channel,this.accountId()),
    recentReplies:()=>recentReplySamples(this.store,this.accountId(),e.channel,e.conversationId),dailyState:daily?.state?.content??'暂无当日日程',
    posting:()=>this.services.posting?.get().reply,signal:this.abort!.signal,sessionId:()=>this.modelSession(e.userId,e.channel),
    personaIdentity:()=>frozenIdentity,

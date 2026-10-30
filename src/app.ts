@@ -40,6 +40,8 @@ import {registerRoleExperienceRoutes} from './role-experience-routes.js';
 import {registerPersonaLibraryRoutes} from './persona-library-routes.js';
 import {ChatTestService} from './chat-test.js';
 import {registerChatTestRoutes} from './chat-test-routes.js';
+import {UnknownReviews} from './unknown-reviews.js';
+import {registerUnknownReviewRoutes} from './unknown-review-routes.js';
 import {upgradeSavedPersonas} from './persona-upgrade.js';
 export async function startApp(){
  const app=Fastify({logger:false,bodyLimit:16384});const data=process.env.DATA_DIR||'/data';mkdirSync(data,{recursive:true});
@@ -64,7 +66,7 @@ export async function startApp(){
  workflow.services.scheduler=scheduler;
  let imports:ManualImportsService;
  const feed=new ActivityFeed(store,accountId,()=>loadConfig().maxAgeHours,posting,triage,account=>imports?.summary(account)??{latest:0,pending:0});
- const replay=new ReplayRunner(store,persona,generator,{accountId,config:loadConfig,memory:(userId,channel,account,at)=>memory.context(userId,channel,account,at)});
+ const replay=new ReplayRunner(store,persona,generator,{accountId,config:loadConfig,memory:(userId,channel,account,at,event)=>memory.context(userId,channel,account,at,undefined,event)});
  const experiences=new RoleExperienceService(store,accountId);
  const chat=new ChatTestService({dataDir:data,store,generator,persona,daily,posting,config:loadConfig});
  imports=new ManualImportsService(store,{account:accountId,control:()=>workflow.control(),maxAgeHours:()=>loadConfig().maxAgeHours,triage,inspectPost:(url,account,options)=>transport.inspectPost(url,account,options)});
@@ -102,6 +104,7 @@ export async function startApp(){
  registerChatTestRoutes(app,{service:chat});
  registerMemoryRoutes(app,{memory,account:accountId});
  registerProgramRoutes(app,{store,program,workflow,accountId,manualImports:imports});
+ registerUnknownReviewRoutes(app,new UnknownReviews(store,()=>({accountId:accountId(),control:workflow.control(),busy:workflow.busy||scheduler.busy})));
  registerManualImportRoutes(app,{imports,wake:()=>workflow.wake()});
  registerRoleExperienceRoutes(app,{experiences});
  app.get('/api/collection/sources',async()=>transport.collectionSources());

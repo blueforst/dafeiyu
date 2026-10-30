@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {Store} from '../src/store.js';
 import {Workflow} from '../src/workflow.js';
 import {Outbox} from '../src/outbox.js';
+import {UnknownReviews} from '../src/unknown-reviews.js';
 import {Program} from '../src/program.js';
 import {RuntimeHealth,BrowserResourceGuard,type BrowserResourceHealth} from '../src/unattended-health.js';
 import type {Transport} from '../src/transport.js';
@@ -56,6 +57,20 @@ test('真实资源guard在临界内存下仍只回查旧unknown，私信不生�
  const f=fixture();let restarts=0;const guard=new BrowserResourceGuard({readMemory:()=>({bytes:1980,limitBytes:2000,ratio:.99,source:'cgroup'}),identity:async()=>({handle:'worker',loggedIn:true,needsHuman:false}),restart:async()=>{restarts++;return {handle:'worker',loggedIn:true,needsHuman:false};}});
  try{const original=f.event('901'),source=f.add(original,'unknown'),old=f.outbox.prepare({accountId:'worker',kind:'reply',sourceId:source.id,targetId:original.platformId,event:{...original,id:source.id,accountId:'worker'},text:'临界压力下仍不可重复的旧公开回复'});f.outbox.begin(old.id);f.outbox.settle(old.id,{status:'unknown'});const target=f.add(f.event('private902','private'),'queued');
   f.transport.prepareRound=async(handle,options)=>guard.before('prepare-round','auto',handle,{safePoint:true,protectedReasons:options?.unsettledOutbox?['unsettled-outbox','chat-unlocked']:['chat-unlocked']});await f.begin();await f.workflow.tick();assert.equal(f.store.getMessage(target.id,'worker')?.status,'queued');assert.equal(f.counts().generations,0);assert.equal(f.counts().sends,0);assert.equal(f.counts().collections,0);assert.equal(f.counts().lookups,1);assert.equal(f.outbox.get(old.id)?.status,'unknown');assert.equal(restarts,0);
+ }finally{f.close();}
+});
+
+test('精确人工审核旧公开unknown后新公开回复发送一次，原项仍回查且新unknown重新阻塞',async()=>{
+ const f=fixture();try{
+  f.store.set('activeAccount','worker');
+  const original=f.event('1001'),source=f.add(original,'unknown'),old=f.outbox.prepare({accountId:'worker',kind:'reply',sourceId:source.id,targetId:original.platformId,event:{...original,id:source.id,accountId:'worker'},text:'已经批准的固定正文'});f.outbox.begin(old.id);f.outbox.settle(old.id,{status:'unknown'});
+  const reviews=new UnknownReviews(f.store,()=>({accountId:'worker',control:f.workflow.control(),busy:f.workflow.busy}));
+  assert.equal(f.workflow.channelWaitReason('public'),'unknown-pending');
+  reviews.approve(old.id,{revision:reviews.preview(old.id).revision,confirmed:true,action:'allow-other-public-items'});
+  assert.equal(f.workflow.channelWaitReason('public'),null);const target=f.add(f.event('1002'),'queued');
+  await f.begin();await f.workflow.tick();assert.equal(f.store.getMessage(target.id,'worker')?.status,'confirmed');assert.equal(f.counts().sends,1);assert.equal(f.counts().generations,1);assert.equal(f.counts().lookups,1);assert.equal(f.prepared[0].unsettledOutbox,true);assert.equal(f.outbox.get(old.id)?.status,'unknown');assert.equal(f.store.getMessage(source.id,'worker')?.status,'unknown');
+  await f.workflow.tick();assert.equal(f.counts().sends,1);assert.equal(f.counts().generations,1);assert.equal(f.counts().lookups,2);assert.equal(f.outbox.get(old.id)?.text,'已经批准的固定正文');
+  f.add(f.event('1003'),'unknown');assert.equal(f.workflow.channelWaitReason('public'),'unknown-pending');const blocked=f.add(f.event('1004'),'queued');await f.workflow.tick();assert.equal(f.store.getMessage(blocked.id,'worker')?.status,'queued');assert.equal(f.counts().sends,1);
  }finally{f.close();}
 });
 

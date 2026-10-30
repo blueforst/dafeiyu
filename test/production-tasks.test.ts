@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { Store } from '../src/store.js';
 import { Workflow } from '../src/workflow.js';
 import { Outbox } from '../src/outbox.js';
+import {UnknownReviews} from '../src/unknown-reviews.js';
 import { MemoryService } from '../src/memory.js';
 import { PersonaService,legacyPersona } from '../src/persona.js';
 import { RoleExperienceService } from '../src/role-experiences.js';
@@ -50,5 +51,18 @@ test('任务重试不能覆盖prepared冻结正文，格式元数据继续对应
   const frozen='1. 原冻结正文\n2. 不用新生成正文';f.outbox.prepare({accountId:'worker',kind:'post',sourceId:runId,text:frozen});
   await assert.rejects(productionTaskHandlers(f.workflow).execute('morning-post',{runId,taskId:'morning-post',accountId:'worker',scheduledAt:now,source:'manual',signal:new AbortController().signal,ensureEnabled:()=>true}),/出站正文和目标已冻结/);
   assert.deepEqual(f.posts,[]);assert.deepEqual(JSON.parse(f.store.get('task-result:'+runId)),{format:{issues:['list-or-steps']}});assert.equal(f.outbox.source('worker','post',runId)?.text,frozen);assert.equal(f.calls.length,1);
+ }finally{f.close();}
+});
+
+test('主动帖子共享精确封存门禁，旧unknown保留而任何新unknown继续阻止发帖',async()=>{
+ const f=fixture();try{
+  const event={id:'old-public',platformId:'9981',targetId:'9981',accountId:'worker',channel:'public' as const,userId:'x:visitor',handle:'visitor',text:'原测试评论',url:'https://x.com/visitor/status/9981',conversationId:'9981',timestamp:Date.now()-1000,timestampReliable:true};
+  f.store.ingest(event,'worker');const message=f.store.findByPlatformId('worker','public','9981')!;f.store.update(message.id,'unknown',{draft:{action:'reply',text:'原冻结回复',reason:''}},'worker');
+  const old=f.outbox.prepare({accountId:'worker',kind:'reply',sourceId:message.id,targetId:'9981',event:JSON.parse(f.store.getMessage(message.id,'worker').body),text:'原冻结回复'});f.outbox.begin(old.id);f.outbox.settle(old.id,{status:'unknown'});
+  const reviews=new UnknownReviews(f.store,()=>({accountId:'worker',control:f.workflow.control(),busy:f.workflow.busy}));reviews.approve(old.id,{revision:reviews.preview(old.id).revision,confirmed:true,action:'allow-other-public-items'});
+  await f.workflow.resume();const handlers=productionTaskHandlers(f.workflow),context={runId:'reviewed-post',taskId:'morning-post' as const,accountId:'worker',scheduledAt:Date.now(),source:'manual' as const,signal:new AbortController().signal,ensureEnabled:()=>true};
+  const result=await handlers.execute('morning-post',context);assert.equal(result.status,'completed');assert.equal(f.posts.length,1);assert.equal(f.outbox.get(old.id)?.status,'unknown');assert.equal(f.store.getMessage(message.id,'worker').status,'unknown');
+  f.store.ingest({...event,id:'new-unknown',platformId:'9982',targetId:'9982',url:'https://x.com/visitor/status/9982',conversationId:'9982'},'worker');const next=f.store.findByPlatformId('worker','public','9982')!;f.store.update(next.id,'unknown',{draft:{action:'reply',text:'新未知回复',reason:''}},'worker');
+  const blocked=await handlers.execute('morning-post',{...context,runId:'new-blocked-post'});assert.equal(blocked.status,'skipped');assert.equal(f.posts.length,1);assert.equal(f.calls.length,1);
  }finally{f.close();}
 });

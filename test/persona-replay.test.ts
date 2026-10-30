@@ -32,7 +32,7 @@ function fixture(){
   }catch(error){ledger.finish(id,signal?.aborted?'aborted':'failed',{},now);throw error;}
  }};
  const persona=new PersonaService(store,generator,config),memory=new MemoryService(store,generator,config,()=>now);
- const replay=new ReplayRunner(store,persona,generator,{accountId:()=>account,config,now:()=>now,memory:(userId,channel,accountId,at)=>memory.context(userId,channel,accountId,at)});
+ const replay=new ReplayRunner(store,persona,generator,{accountId:()=>account,config,now:()=>now,memory:(userId,channel,accountId,at,event)=>memory.context(userId,channel,accountId,at,undefined,event)});
  const add=(id:number,over:Partial<Event>={},status='confirmed',accountId=account)=>{
   const event:Event={id:'message-'+id,platformId:String(id),userId:'user-'+id,channel:'public',handle:'person'+id,text:'真实消息'+id,url:'https://x.com/person'+id+'/status/'+id,conversationId:'thread-'+id,timestamp:now-id*60000,timestampReliable:true,...over};
   store.ingest(event,accountId);const row=store.db.prepare('SELECT * FROM messages WHERE account_id=? AND platform_id=?').get(accountId,event.platformId!) as any;
@@ -90,6 +90,25 @@ test('遗忘用户和删除来源不可选，旧来源重新出现仍被排除',
   // 模拟旧数据库恢复时重新出现的已遗忘原文。
   f.store.db.prepare('INSERT INTO messages(id,account_id,source_id,platform_id,target_id,channel,user_id,body,status,created_at,updated_at,ingested_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(hidden.id,'worker-a',hidden.id,hidden.platformId,'','public',hidden.userId,JSON.stringify(hidden),'confirmed',hidden.timestamp,f.now(),f.now());
   const samples=f.replay.samples();assert.deepEqual(samples.items.map(x=>x.id),[visible.id]);assert.equal(samples.excluded,2);
+ }finally{await f.close();}
+});
+
+test('同人另一帖子回放实际模型请求不复活已删除记忆来源的公开原文',async()=>{
+ const f=fixture();try{
+  const secret='被管理员删除来源后不得再次注入的第一帖独特原文',userId='x:alice';
+  const source=f.add(901,{userId,handle:'alice',text:secret,url:'https://x.com/alice/status/901',conversationId:'901',timestamp:f.now()-120000});
+  const current=f.add(902,{userId,handle:'alice',text:'第二个帖子的允许问题，请只回应这条。',url:'https://x.com/alice/status/902',conversationId:'902',timestamp:f.now()-60000});
+  const itemId='deleted-other-thread-source';
+  f.store.db.prepare('INSERT INTO memory_items(id,account_id,user_id,channel,kind,text,source_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(itemId,'worker-a',userId,'public','fact','从第一帖整理的待删除事实','complete',f.now(),f.now());
+  f.store.db.prepare('INSERT INTO memory_sources VALUES(?,?,?)').run(itemId,source.id,source.timestamp);
+  assert.ok(JSON.stringify(f.memory.context(userId,'public','worker-a',f.now(),undefined,current)).includes(secret));
+  f.memory.remove(itemId,'worker-a',1);
+  const samples=f.replay.samples();assert.deepEqual(samples.items.map(row=>row.id),[current.id]);assert.equal(samples.excluded,1);
+  const run=f.replay.start(f.estimate().estimateId,true);await f.replay.waitIdle();
+  assert.equal(f.replay.detail(run.id).status,'completed');assert.equal(f.calls.length,1);
+  assert.ok(f.calls[0].user.includes(current.text));assert.equal(f.calls[0].meta.purpose,'persona-replay');
+  assert.ok(!f.calls[0].user.includes(secret));assert.ok(!f.calls[0].user.includes(source.url));
+  assert.ok(f.store.getMessage(source.id,'worker-a'),'原消息仍在，实际请求必须依靠删除来源保护排除它');
  }finally{await f.close();}
 });
 
