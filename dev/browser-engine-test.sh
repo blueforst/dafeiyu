@@ -6,7 +6,7 @@ project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 artifacts=/var/lib/role-workflow-browser-trial/artifacts/camoufox
 mkdir -p "$artifacts"
 chown 1000:1000 "$artifacts"
-sh "$project/dev/server-heavy.sh" run --init --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+sh "$project/dev/server-heavy.sh" run --network none --init --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   --security-opt "seccomp=$project/seccomp_profile.json" \
   --shm-size 256m --tmpfs /tmp:rw,nosuid,nodev,size=512m \
   -e HOME=/tmp/engine-home -e DISPLAY=:98 -e XDG_RUNTIME_DIR=/tmp/runtime-node \

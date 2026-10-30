@@ -1,7 +1,7 @@
 // 在服务器容器中验证实际选择的浏览器，不访问或发送真实账号消息。
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { launchBrowser, browserProfile } from '../dist/browser-launcher.js';
@@ -20,6 +20,11 @@ const checks = [];
 const result = { engine, checks };
 try {
   assert.notEqual(process.getuid(), 0);
+  if(process.env.LEGACY_DEVICE_PRESET){
+    mkdirSync(browserProfile(profile),{recursive:true});
+    copyFileSync(process.env.LEGACY_DEVICE_PRESET,browserProfile(profile)+'/device-preset.json');
+    result.legacyPresetHash=createHash('sha256').update(readFileSync(process.env.LEGACY_DEVICE_PRESET)).digest('hex');
+  }
   context = await launchBrowser(profile);
   let page = context.pages()[0] || await context.newPage();
   await page.goto(origin);
@@ -46,7 +51,17 @@ try {
 
   const presetPath = browserProfile(profile) + '/device-preset.json';
   const presetHash = createHash('sha256').update(readFileSync(presetPath)).digest('hex');
+  if(result.legacyPresetHash){assert.equal(presetHash,result.legacyPresetHash);checks.push('升级沿用原设备预设，只在独立临时profile访问合成本地页面');}
   await context.close();
+  if(process.env.EXPECTED_FIREFOX_VERSION){
+    const cache='/opt/role-camoufox/cache/camoufox/',active=JSON.parse(readFileSync(cache+'config.json','utf8')).active_version;
+    const ini=readFileSync(cache+active+'/application.ini','utf8');
+    result.binaryVersion=ini.match(/^Version=(.+)$/m)?.[1];assert.ok(result.binaryVersion?.startsWith(process.env.EXPECTED_FIREFOX_VERSION));
+    const prefs=readFileSync(browserProfile(profile)+'/prefs.js','utf8');
+    assert.match(prefs,/user_pref\("services\.settings\.server", "https:\/\/firefox\.settings\.services\.mozilla\.com\/v1"\)/);
+    assert.match(prefs,/user_pref\("extensions\.blocklist\.enabled", true\)/);
+    checks.push('实际固定二进制版本及运行后安全偏好均核对通过');
+  }
   context = await launchBrowser(profile);
   page = context.pages()[0] || await context.newPage();
   await page.goto(origin);
