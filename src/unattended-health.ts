@@ -92,14 +92,14 @@ export function readBrowserMemory(options:{cgroupRoot?:string;procRoot?:string;r
   return {bytes,limitBytes:limit,ratio:limit?bytes/limit:null,source:'process-rss',measurement:'process-rss'};
  }catch{return {bytes:null,limitBytes:null,ratio:null,source:'unavailable'};}
 }
-export type BrowserProtectionReason='unsettled-outbox'|'chat-unlocked'|'chat-unlock-pending'|'needs-human'|'active-round';
-export type BrowserRecoveryGate={safePoint?:boolean;protectedReasons?:BrowserProtectionReason[]};
+export type BrowserProtectionReason='unsettled-outbox'|'reviewed-unsettled-outbox'|'chat-unlocked'|'chat-unlock-pending'|'needs-human'|'active-round';
+export type BrowserRecoveryGate={safePoint?:boolean;protectedReasons?:BrowserProtectionReason[];allowSessionRecovery?:boolean};
 export type BrowserResourceFault='memory-pressure-recurred'|'recovery-budget-exhausted'|'protected-session-pressure';
 export const BROWSER_RECOVERY_POLICY=Object.freeze({pressureConfirmMs:30000,minSamples:2,sampleGapMs:1000,minRestartIntervalMs:300000,maxRestartsPerHour:2,criticalMemoryRatio:.95});
 export type BrowserResourceHealth={sessionId?:string;stale?:boolean;at:number;startedAt:number;memory:BrowserMemory;lastRestartAt:number|null;lastRestartReason:string|null;restarts:number;restartError:string|null;lastRestartAttemptAt?:number;lastRestartStage?:BrowserRecoveryStage;lastRestartFailureCode?:BrowserRecoveryCode|null;lastRestartDurationMs?:number;memoryPressureSince?:number|null;memoryPressureSamples?:number;pendingRecoveryReason?:'memory-threshold'|'runtime-threshold'|null;recoveryDeferredReason?:'pressure-observation'|'post-recovery-observation'|'unsafe-point'|'protected-operation'|'protected-session'|'control-not-auto'|null;protectedReasons?:BrowserProtectionReason[];resourceFault?:BrowserResourceFault|null;lastRestartBeforeMemory?:BrowserMemory;lastRestartAfterMemory?:BrowserMemory;businessBlocked?:boolean};
 export type BrowserGuardDeps={readMemory?:()=>BrowserMemory;clock?:()=>number;restart:(stage?:(value:BrowserRecoveryStage)=>void,expectedHandle?:string)=>Promise<Identity>;identity:()=>Promise<Identity>;settings?:()=>Partial<HealthSettings>;onRestart?:(info:{at:number;reason:string;ok:boolean;stage?:BrowserRecoveryStage;failureCode?:BrowserRecoveryCode;durationMs?:number;memory?:BrowserMemory;afterMemory?:BrowserMemory})=>void};
-export type BrowserRecoveryStage='precheck-identity'|'close-context'|'launch-context'|'navigate-home'|'wait-identity'|'verify-identity'|'completed';
-export type BrowserRecoveryCode='identity-not-ready'|'identity-mismatch'|'needs-human'|'account-restricted'|'identity-read-failed'|'timeout'|'page-closed'|'context-closed'|'launch-failed'|'navigation-failed'|'unexpected-error';
+export type BrowserRecoveryStage='precheck-identity'|'precheck-chat'|'close-context'|'launch-context'|'navigate-home'|'wait-identity'|'verify-identity'|'verify-chat'|'completed';
+export type BrowserRecoveryCode='identity-not-ready'|'identity-mismatch'|'needs-human'|'account-restricted'|'identity-read-failed'|'chat-recovery-unverified'|'chat-checkpoint-missing'|'control-changed'|'timeout'|'page-closed'|'context-closed'|'launch-failed'|'navigation-failed'|'unexpected-error';
 export class BrowserRecoveryFailure extends Error {
  constructor(readonly recoveryCode:BrowserRecoveryCode,readonly recoveryStage:BrowserRecoveryStage){super('浏览器恢复阶段未完成：'+recoveryStage+'／'+recoveryCode);}
 }
@@ -110,6 +110,7 @@ export function browserRecoveryCode(error:unknown,stage:BrowserRecoveryStage):Br
  if(name==='TimeoutError'||/timed? out|timeout|超时/i.test(value))return 'timeout';
  if(/target page|page has been closed|page.*closed/i.test(value))return 'page-closed';
  if(/context.*closed|browser.*closed/i.test(value))return 'context-closed';
+ if(stage==='precheck-chat'||stage==='verify-chat')return 'chat-recovery-unverified';
  return stage==='launch-context'?'launch-failed':stage==='navigate-home'?'navigation-failed':stage==='wait-identity'||stage==='precheck-identity'?'identity-read-failed':'unexpected-error';
 }
 /** DOMContentLoaded 只代表文档已到达；SPA 身份必须有界等待后单独确认。 */
@@ -129,7 +130,7 @@ export async function waitForIdentityReady(read:()=>Promise<Identity>,expectedHa
  }
 }
 export class BrowserResourceGuard {
- private state:BrowserResourceHealth;private restarting=false;private lastPressureSampleAt:number|null=null;private restartHistory:number[]=[];
+ private state:BrowserResourceHealth;private restarting=false;private lastPressureSampleAt:number|null=null;private restartHistory:number[]=[];private lastActualRestartAt:number|null=null;
  constructor(readonly deps:BrowserGuardDeps){const now=(deps.clock??Date.now)();this.state={sessionId:randomUUID(),at:now,startedAt:now,memory:{bytes:null,limitBytes:null,ratio:null,source:'unavailable'},lastRestartAt:null,lastRestartReason:null,restarts:0,restartError:null,memoryPressureSince:null,memoryPressureSamples:0,pendingRecoveryReason:null,recoveryDeferredReason:null,protectedReasons:[],resourceFault:null,businessBlocked:false};}
  snapshot(){return structuredClone(this.state);}
  sample(){
@@ -143,36 +144,42 @@ export class BrowserResourceGuard {
  private fault(reason:BrowserResourceFault):never{this.state.resourceFault=reason;this.state.businessBlocked=true;throw Object.assign(new Error(reason==='memory-pressure-recurred'?'浏览器恢复后内存压力很快再次出现，已停止重复重启':reason==='recovery-budget-exhausted'?'浏览器一小时内资源恢复次数已达上限，需要人工检查':'浏览器私信会话受保护且持续高内存，需要人工检查'),{code:'browser-resource-pressure',resourceReason:reason,browserPaused:true});}
  async before(operation:string,control:string,expectedHandle='',gate:BrowserRecoveryGate={}){
   const state=this.sample(),config=healthSettings(this.deps.settings?.()??{}),memoryHigh=state.memory.ratio!==null&&state.memory.ratio>=config.memoryRatio,reason=memoryHigh?'memory-threshold':state.at-state.startedAt>=config.browserMaxAgeHours*3600000?'runtime-threshold':null;
-  const knownProtections=new Set<BrowserProtectionReason>(['unsettled-outbox','chat-unlocked','chat-unlock-pending','needs-human','active-round']);
-  this.state.protectedReasons=[...new Set((gate.protectedReasons??[]).filter(value=>knownProtections.has(value)))];this.state.pendingRecoveryReason=reason;this.state.recoveryDeferredReason=null;this.state.businessBlocked=!!this.state.resourceFault;
-  if(!reason){if(control==='auto'&&operation==='prepare-round'&&gate.safePoint&&state.memory.ratio!==null){this.state.resourceFault=null;this.state.businessBlocked=false;}return this.snapshot();}
-  if(this.restarting||['send','post','lookup','lookupPost','lookup-post','control','health'].includes(operation)){this.state.recoveryDeferredReason='protected-operation';return this.snapshot();}
+  const boundary=operation==='prepare-round'||operation==='finish-round';
+  this.state.pendingRecoveryReason=reason;
+  // 回查和健康采样不能覆盖上一安全边界的准入结论或保护来源。
+  if(!boundary){if(reason)this.state.recoveryDeferredReason=['send','post','lookup','lookupPost','lookup-post','control','health'].includes(operation)?'protected-operation':'unsafe-point';return this.snapshot();}
+  const knownProtections=new Set<BrowserProtectionReason>(['unsettled-outbox','reviewed-unsettled-outbox','chat-unlocked','chat-unlock-pending','needs-human','active-round']);
+  const protections=[...new Set((gate.protectedReasons??[]).filter(value=>knownProtections.has(value)))];this.state.protectedReasons=protections;this.state.recoveryDeferredReason=null;this.state.businessBlocked=!!this.state.resourceFault||!!this.state.restartError;
+  if(this.state.restartError)throw Object.assign(new Error(this.state.restartError),{code:'browser-recovery-failed',recoveryStage:this.state.lastRestartStage,recoveryCode:this.state.lastRestartFailureCode});
+  if(!reason){if(control==='auto'&&operation==='prepare-round'&&gate.safePoint===true&&state.memory.ratio!==null){this.state.resourceFault=null;this.state.businessBlocked=false;}return this.snapshot();}
+  if(this.restarting){this.state.recoveryDeferredReason='protected-operation';return this.snapshot();}
   if(control!=='auto'){this.state.recoveryDeferredReason='control-not-auto';return this.snapshot();}
-  if(operation!=='prepare-round'||gate.safePoint!==true){this.state.recoveryDeferredReason='unsafe-point';return this.snapshot();}
-  if(this.state.protectedReasons.length){this.state.recoveryDeferredReason='protected-session';
-   // 延后轮换不等于全局停工。未知出站由工作流按通道防重发，不能因此饿死其他通道。
-   // 真实故障、无法测量或已到临界内存时仍只允许回查，且始终保留受保护会话。
-   const unsettled=this.state.protectedReasons.includes('unsettled-outbox'),critical=state.memory.ratio===null||state.memory.ratio>=BROWSER_RECOVERY_POLICY.criticalMemoryRatio;
-   this.state.businessBlocked=!!this.state.resourceFault||(unsettled&&critical);
-   if(this.state.resourceFault&&!this.state.protectedReasons.includes('unsettled-outbox'))this.fault(this.state.resourceFault);
-   // 临界压力下unknown仍可回查；不能通过关闭会话或重新提交来解除保护。
-   if(memoryHigh&&this.pressureConfirmed()&&(state.memory.ratio??0)>=BROWSER_RECOVERY_POLICY.criticalMemoryRatio&&!this.state.protectedReasons.includes('unsettled-outbox'))this.fault('protected-session-pressure');
+  if(gate.safePoint!==true){this.state.recoveryDeferredReason='unsafe-point';return this.snapshot();}
+  const authorized=gate.allowSessionRecovery===true,soft=(value:BrowserProtectionReason)=>value==='chat-unlocked'||value==='reviewed-unsettled-outbox';
+  const blocking=protections.filter(value=>!authorized||!soft(value)),unsettled=blocking.includes('unsettled-outbox'),critical=state.memory.ratio===null||state.memory.ratio>=BROWSER_RECOVERY_POLICY.criticalMemoryRatio;
+  if(this.state.resourceFault){this.state.businessBlocked=true;if(!unsettled)this.fault(this.state.resourceFault);this.state.recoveryDeferredReason='protected-session';return this.snapshot();}
+  if(blocking.length){
+   this.state.recoveryDeferredReason='protected-session';this.state.businessBlocked=unsettled&&critical;
+   if(memoryHigh&&this.pressureConfirmed()&&critical&&!unsettled)this.fault('protected-session-pressure');
    return this.snapshot();
   }
+  // 轮首只作准入；已授权的软会话可完成本轮后在唯一轮末边界恢复。
+  if(operation==='prepare-round'){this.state.businessBlocked=critical&&!authorized;this.state.recoveryDeferredReason=memoryHigh&&!this.pressureConfirmed()?'pressure-observation':'unsafe-point';return this.snapshot();}
   if(memoryHigh&&!this.pressureConfirmed()){this.state.recoveryDeferredReason='pressure-observation';return this.snapshot();}
   this.restartHistory=this.restartHistory.filter(at=>state.at-at<3600000);
-  if(memoryHigh&&this.state.lastRestartAt!==null&&state.at-this.state.lastRestartAt<BROWSER_RECOVERY_POLICY.minRestartIntervalMs)this.fault('memory-pressure-recurred');
+  if(this.lastActualRestartAt!==null&&state.at-this.lastActualRestartAt<BROWSER_RECOVERY_POLICY.minRestartIntervalMs)this.fault('memory-pressure-recurred');
   if(this.restartHistory.length>=BROWSER_RECOVERY_POLICY.maxRestartsPerHour)this.fault('recovery-budget-exhausted');
-  this.restarting=true;const started=(this.deps.clock??Date.now)();let stage:BrowserRecoveryStage='precheck-identity';this.state.lastRestartAttemptAt=started;this.state.lastRestartReason=reason;this.state.lastRestartBeforeMemory=state.memory;
+  this.restarting=true;const started=(this.deps.clock??Date.now)();let stage:BrowserRecoveryStage='precheck-identity',closed=false;this.state.lastRestartAttemptAt=started;this.state.lastRestartReason=reason;this.state.lastRestartBeforeMemory=state.memory;
+  const actualAttempt=()=>{if(!closed){closed=true;const at=(this.deps.clock??Date.now)();this.lastActualRestartAt=at;this.restartHistory.push(at);}};
   try{
    const before=await this.deps.identity(),previous=String(before.handle||'').replace(/^@/,'').toLowerCase(),expected=expectedHandle.replace(/^@/,'').toLowerCase();
    if(before.restricted)throw new BrowserRecoveryFailure('account-restricted',stage);if(before.needsHuman)throw new BrowserRecoveryFailure('needs-human',stage);if(!before.loggedIn||!previous)throw new BrowserRecoveryFailure('identity-not-ready',stage);if(expected&&expected!==previous)throw new BrowserRecoveryFailure('identity-mismatch',stage);
-   const identity=await this.deps.restart(value=>{stage=value;this.state.lastRestartStage=value;},previous),handle=String(identity.handle||'').replace(/^@/,'').toLowerCase();stage='verify-identity';
+   const identity=await this.deps.restart(value=>{stage=value;this.state.lastRestartStage=value;if(value==='close-context')actualAttempt();},previous);const handle=String(identity.handle||'').replace(/^@/,'').toLowerCase();stage='verify-identity';
    if(identity.restricted)throw new BrowserRecoveryFailure('account-restricted',stage);if(identity.needsHuman)throw new BrowserRecoveryFailure('needs-human',stage);if(!identity.loggedIn||!handle)throw new BrowserRecoveryFailure('identity-not-ready',stage);if(handle!==previous)throw new BrowserRecoveryFailure('identity-mismatch',stage);
-   const at=(this.deps.clock??Date.now)();this.state.startedAt=at;this.state.lastRestartAt=at;this.state.lastRestartStage='completed';this.state.lastRestartFailureCode=null;this.state.lastRestartDurationMs=Math.max(0,at-started);this.state.restarts++;this.restartHistory.push(at);this.state.restartError=null;this.state.resourceFault=null;this.state.businessBlocked=false;this.state.memoryPressureSince=null;this.state.memoryPressureSamples=0;this.lastPressureSampleAt=null;
+   const at=(this.deps.clock??Date.now)();this.state.startedAt=at;this.state.lastRestartAt=at;this.state.lastRestartStage='completed';this.state.lastRestartFailureCode=null;this.state.lastRestartDurationMs=Math.max(0,at-started);this.state.restarts++;this.state.restartError=null;this.state.resourceFault=null;this.state.businessBlocked=false;this.state.memoryPressureSince=null;this.state.memoryPressureSamples=0;this.lastPressureSampleAt=null;
    const after=this.sample();this.state.lastRestartAfterMemory=after.memory;this.state.pendingRecoveryReason=after.memory.ratio!==null&&after.memory.ratio>=config.memoryRatio?'memory-threshold':null;this.state.recoveryDeferredReason=this.state.pendingRecoveryReason?'post-recovery-observation':null;
    this.deps.onRestart?.({at,reason,ok:true,stage:'completed',durationMs:this.state.lastRestartDurationMs,memory:state.memory,afterMemory:after.memory});return this.snapshot();
-  }catch(error){const at=(this.deps.clock??Date.now)(),failureCode=browserRecoveryCode(error,stage);this.state.restartError='浏览器资源恢复失败，需要人工检查';this.state.lastRestartStage=error instanceof BrowserRecoveryFailure?error.recoveryStage:stage;this.state.lastRestartFailureCode=failureCode;this.state.lastRestartDurationMs=Math.max(0,at-started);this.deps.onRestart?.({at,reason,ok:false,stage:this.state.lastRestartStage,failureCode,durationMs:this.state.lastRestartDurationMs,memory:state.memory});throw Object.assign(new Error(this.state.restartError),{code:'browser-recovery-failed',recoveryStage:this.state.lastRestartStage,recoveryCode:failureCode});}
+  }catch(error){const at=(this.deps.clock??Date.now)(),failureCode=browserRecoveryCode(error,stage),cancelledBeforeClose=failureCode==='control-changed'&&!closed;this.state.restartError=cancelledBeforeClose?null:'浏览器资源恢复失败，需要人工检查';this.state.businessBlocked=!cancelledBeforeClose||!!this.state.resourceFault;this.state.lastRestartStage=error instanceof BrowserRecoveryFailure?error.recoveryStage:stage;this.state.lastRestartFailureCode=failureCode;this.state.lastRestartDurationMs=Math.max(0,at-started);if(cancelledBeforeClose)this.state.recoveryDeferredReason='control-not-auto';this.deps.onRestart?.({at,reason,ok:false,stage:this.state.lastRestartStage,failureCode,durationMs:this.state.lastRestartDurationMs,memory:state.memory});throw Object.assign(new Error(this.state.restartError??'浏览器恢复已随控制变更停止'),{code:'browser-recovery-failed',recoveryStage:this.state.lastRestartStage,recoveryCode:failureCode});}
   finally{this.restarting=false;}
  }
 }

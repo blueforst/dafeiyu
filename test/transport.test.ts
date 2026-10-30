@@ -2,8 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,writeFileSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import {createServer} from 'node:http';
 import { TransportJournal,matchTweetReceipt,platformTweets,platformId,validateOutboundText } from '../src/browser.js';
+import {BrowserTransport} from '../src/transport.js';
 import type { Event } from '../src/types.js';
+
+test('轮首和轮末RPC使用POST，分别传未收束保护和精确审核ID且不把signal写入body',async()=>{
+ const requests:Array<{path:string;method:string;key:string;body:any}>=[];
+ const server=createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;requests.push({path:req.url??'',method:req.method??'',key:String(req.headers['x-browser-key']??''),body:JSON.parse(body)});res.setHeader('content-type','application/json');res.end(JSON.stringify({ready:true,mode:'auto'}));});
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const transport=new BrowserTransport('http://127.0.0.1:'+(server.address() as {port:number}).port,'fixture-round-key'),abort=new AbortController();
+  const roundId='48312874-1511-4e96-9450-a8de6d94aa1a';
+  await transport.prepareRound('worker',{signal:abort.signal,roundId,unsettledOutbox:false,reviewedUnknownOutboxIds:['exact-reviewed-old']});
+  await transport.finishRound('worker',{signal:abort.signal,timeoutMs:120000,roundId,unsettledOutbox:true,reviewedUnknownOutboxIds:['exact-reviewed-old']});
+  await transport.finishRound('worker');
+  assert.deepEqual(requests.map(row=>[row.path,row.method,row.key]),[['/prepare-round','POST','fixture-round-key'],['/finish-round','POST','fixture-round-key'],['/finish-round','POST','fixture-round-key']]);
+  for(const [index,row] of requests.entries()){const {runtimeHealth,...body}=row.body;assert.ok(runtimeHealth&&typeof runtimeHealth==='object');assert.deepEqual(body,{handle:'worker',unsettledOutbox:index===1,reviewedUnknownOutboxIds:index===2?[]:['exact-reviewed-old'],...(index===1?{roundId}:{})});}
+ }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+test('轮末RPC保留browserPaused错误和用户中止信号，均不自动重试',async()=>{
+ let calls=0,entered!:()=>void;const waiting=new Promise<void>(resolve=>{entered=resolve;});
+ const server=createServer(async(req,res)=>{for await(const _chunk of req){}calls++;if(calls===1){res.statusCode=409;res.setHeader('content-type','application/json');res.end(JSON.stringify({browserPaused:true,browserMode:'paused',error:'合成恢复失败'}));}else entered();});
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const transport=new BrowserTransport('http://127.0.0.1:'+(server.address() as {port:number}).port,'fixture-round-key');await assert.rejects(transport.finishRound('worker'),(error:any)=>error.browserPaused===true&&error.browserMode==='paused');assert.equal(calls,1);
+  const abort=new AbortController(),pending=transport.finishRound('worker',{signal:abort.signal,timeoutMs:120000});await waiting;abort.abort();await assert.rejects(pending);assert.equal(calls,2);
+ }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
 
 function hiddenReply(body='你好，听一首喜欢的歌吧。',targetHandle='guest1'){
  const at=Date.now()-1000,prefix='@'+targetHandle+' ',text=prefix+body;

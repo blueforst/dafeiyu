@@ -28,7 +28,7 @@ import type {ManualImportsService} from './manual-imports.js';
 import type {RoleExperienceService} from './role-experiences.js';
 import type {CollectionResult} from './collection-health.js';
 import {privateRequestDecision,privateRequestState,recordPrivateRequestState,confirmPrivateRequestState} from './private-requests.js';
-import {hasBlockingUnknown} from './unknown-reviews.js';
+import {hasBlockingUnknown,UnknownReviews} from './unknown-reviews.js';
 
 export function loggedInHandle(identity:Identity):string {
  const handle=String(identity.handle||'').trim().replace(/^@/,'').toLowerCase();
@@ -217,19 +217,28 @@ export class Workflow {
    try{await this.sendDraft(e,draft.text,handle,roundId,c,undefined,true);}catch{if(this.store.getMessage(row.id)?.status==='sending')this.store.update(row.id,'draft',{error:'批准发送预检失败，等待人工检查'});}
   }
  }
+ /** 只复用仍有效的精确审核，不改旧unknown、冻结意图或回查资格。 */
+ private roundProtection(handle:string){
+  const hasOutbox=!!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='outbox'").get();
+  const unsettledOutbox=hasBlockingUnknown(this.store,handle,'public')||hasBlockingUnknown(this.store,handle,'private')||!!this.store.db.prepare("SELECT 1 FROM messages WHERE account_id=? AND status='sending' LIMIT 1").get(handle)||hasOutbox&&!!this.store.db.prepare("SELECT 1 FROM outbox WHERE account_id=? AND status='submitting' LIMIT 1").get(handle);
+  const reviewedUnknownOutboxIds=new UnknownReviews(this.store,()=>({accountId:handle,control:this.control(),busy:this.busy})).list().items.filter(item=>item.reviewed).map(item=>item.outboxId);
+  return {unsettledOutbox,reviewedUnknownOutboxIds};
+ }
+ private roundInFlight(handle:string){
+  return !!this.store.db.prepare("SELECT 1 FROM messages WHERE account_id=? AND status IN ('generating','sending') LIMIT 1").get(handle)||!!(this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='outbox'").get()&&this.store.db.prepare("SELECT 1 FROM outbox WHERE account_id=? AND status='submitting' LIMIT 1").get(handle))||!!this.services.scheduler?.busy;
+ }
  async tick(){
-  if(this.busy)return;this.busy=true;this.abort=new AbortController();const roundId=randomUUID(),startedAt=Date.now();this.startedAt=startedAt;const budget=new RoundBudget(this.abort,(()=>{try{return this.config().health;}catch{return {};}})());this.roundId=roundId;this.roundCalls=new Set();let mainStarted=false,roundFailed=false;
+  if(this.busy)return;this.busy=true;this.abort=new AbortController();const roundId=randomUUID(),startedAt=Date.now(),roundControlRevision=this.controlRevision;this.startedAt=startedAt;const budget=new RoundBudget(this.abort,(()=>{try{return this.config().health;}catch{return {};}})());this.roundId=roundId;this.roundCalls=new Set();let mainStarted=false,roundFailed=false,mainCompleted=false,roundHandle='';
   try{
    if(this.control()==='running'){
     const c=structuredClone(this.config()),personaState=this.services.persona?.get(),persona=personaState?.persona,personaIdentity={...this.services.persona?.activeIdentity?.(),revision:personaState?.revision},memoryPolicy=this.services.memory?.policy().policy;
     const identity=await this.stage('identity',roundId,()=>this.transport.identity());this.store.set('identity',JSON.stringify(identity));const handle=loggedInHandle(identity);
     if(!handle||(this.activeHandle&&handle!==this.activeHandle)){await this.safetyPause('登录状态或账号已变化，请检查浏览器后重新恢复');return;}
-    this.activeHandle=handle;this.store.set('activeAccount',handle);
+    this.activeHandle=handle;this.store.set('activeAccount',handle);roundHandle=handle;
     if(this.services.triage)this.services.triage.closures=()=>{const window=this.replyHours();return window.agePolicy??window.closures;};
     const window=this.replyHours(startedAt,handle);
     if(this.services.scheduler){this.services.scheduler.recordMainStart(roundId,handle,startedAt);mainStarted=true;}
-    const unsettledOutbox=!!this.store.db.prepare("SELECT 1 FROM messages WHERE account_id=? AND status IN ('sending','unknown') LIMIT 1").get(handle)||!!(this.services.outbox&&this.store.db.prepare("SELECT 1 FROM outbox WHERE account_id=? AND status IN ('submitting','unknown') LIMIT 1").get(handle));
-    const prepared=this.transport.prepareRound?await this.stage('browser-prepare',roundId,()=>this.transport.prepareRound!(handle,{signal:this.abort!.signal,unsettledOutbox})):undefined;
+    const prepared=this.transport.prepareRound?await this.stage('browser-prepare',roundId,()=>this.transport.prepareRound!(handle,{signal:this.abort!.signal,...this.roundProtection(handle)})):undefined;
     await this.reconcile(handle,roundId);if(this.control()!=='running')return;
     if(prepared?.businessBlocked){this.lastTick=Date.now();this.store.set('lastTick',String(this.lastTick));this.store.log('browser-resource-wait',JSON.stringify({roundId,accountId:handle,reason:'pending-recovery-with-protected-session'}),'warn');return;}
     if(window.open)await this.sendApproved(c,handle,roundId);
@@ -297,10 +306,21 @@ export class Workflow {
      if(this.services.memory){for(const row of this.services.memory.due(handle,5,1))await this.stage('summary',roundId,()=>this.services.memory!.summarize(row.userId,row.channel,handle,{signal:this.abort!.signal,sessionId:this.modelSession(row.userId,row.channel),config:c})).catch(()=>this.store.log('summary-error',JSON.stringify({roundId}),'warn'));}
      else {const due=this.store.db.prepare("SELECT m.user_id,m.channel,count(*) AS n FROM messages m WHERE m.account_id=? AND m.processed_seq>COALESCE((SELECT value FROM runtime WHERE key='summary-seq:'||m.account_id||':'||m.user_id||':'||m.channel),0) GROUP BY m.user_id,m.channel HAVING count(*)>=5 LIMIT 1").get(handle) as any;if(due)await this.summarize(due.user_id,due.channel).catch(()=>this.store.log('summary-error','摘要整理失败','warn'));}
     }
-    this.lastTick=Date.now();this.store.set('lastTick',String(this.lastTick));this.store.prune(c.retentionDays);pruneReplayData(this.store,Date.now()-c.retentionDays*86400000);
+    this.lastTick=Date.now();this.store.set('lastTick',String(this.lastTick));this.store.prune(c.retentionDays);pruneReplayData(this.store,Date.now()-c.retentionDays*86400000);mainCompleted=true;
    }
    if(!this.abort.signal.aborted&&this.services.scheduler){this.schedulerActive=true;try{await this.services.scheduler.tick();}finally{this.schedulerActive=false;}}
-  }catch(error){if((error as any)?.browserPaused)await this.safetyPause('浏览器已安全暂停，请检查后显式恢复');roundFailed=true;if(this.services.program){const failure=this.services.program.begin('error',{roundId,accountId:this.accountId()});this.services.program.end(failure,this.abort.signal.aborted?'aborted':'failed',error);}throw error;}
+   if(mainCompleted&&this.control()==='running'&&!this.abort.signal.aborted&&this.accountId()===roundHandle&&!this.roundInFlight(roundHandle)&&this.transport.finishRound){
+    // 维护独占busy，但使用自己的有界RPC预算；用户暂停仍中止同一个signal。
+    budget.dispose();await this.stage('browser-finish',roundId,async()=>{
+     try{return await this.transport.finishRound!(roundHandle,{signal:this.abort!.signal,timeoutMs:120000,roundId,...this.roundProtection(roundHandle)});}
+     catch(error){
+      // 断连或超时同样无法确认维护结果；仅当前控制代次可触发暂停，不能覆盖后来的管理员操作。
+      if(this.control()==='running'&&!this.abort!.signal.aborted&&this.controlRevision===roundControlRevision)throw Object.assign(new Error(error instanceof Error?error.message:'轮末浏览器维护请求失败',{cause:error}),error&&typeof error==='object'?error:{},{browserPaused:true});
+      throw error;
+     }
+    });
+   }
+  }catch(error){if((error as any)?.browserPaused&&this.control()==='running'&&this.controlRevision===roundControlRevision)await this.safetyPause('浏览器已安全暂停，请检查后显式恢复');roundFailed=true;if(this.services.program){const failure=this.services.program.begin('error',{roundId,accountId:this.accountId()});this.services.program.end(failure,this.abort.signal.aborted?'aborted':'failed',error);}throw error;}
   finally{budget.dispose();this.startedAt=0;if(mainStarted)this.services.scheduler!.recordMainEnd(roundId,this.abort.signal.aborted||this.control()!=='running'?'cancelled':roundFailed?'failed':'completed',[...this.roundCalls]);try{await this.sampleHealth();}finally{this.busy=false;this.abort=undefined;}}
  }
  async summarize(userId:string,visibility:Channel){

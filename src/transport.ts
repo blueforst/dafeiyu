@@ -8,12 +8,14 @@ import type {CollectionResult} from './collection-health.js';
 import type {InspectPostResult} from './public-target.js';
 import type {PrivateRequestCandidate,PrivateRequestResult} from './private-requests.js';
 export type TransportRequestOptions={signal?:AbortSignal;deadline?:number;timeoutMs?:number};
+export type TransportRoundOptions=TransportRequestOptions&{unsettledOutbox?:boolean;reviewedUnknownOutboxIds?:string[];roundId?:string};
 export interface Transport {
  identity(options?:TransportRequestOptions):Promise<Identity>;
  capabilities?():Promise<PostingCapabilities>;
  health?():Promise<BrowserResourceHealth&{ready?:boolean;mode?:string}>;
  compliance?(handle:string,options?:TransportRequestOptions):Promise<ComplianceObservation>;
- prepareRound?(handle:string,options?:TransportRequestOptions&{unsettledOutbox?:boolean}):Promise<BrowserResourceHealth&{ready?:boolean;mode?:string}>;
+ prepareRound?(handle:string,options?:TransportRoundOptions):Promise<BrowserResourceHealth&{ready?:boolean;mode?:string}>;
+ finishRound?(handle:string,options?:TransportRoundOptions):Promise<BrowserResourceHealth&{ready?:boolean;mode?:string}>;
  collectionSources?():Promise<{sources:Array<{id:string;label:string;enabled:boolean;status:string;reason?:string}>}>;
  inspectPost?(url:string,handle:string,options?:TransportRequestOptions):Promise<InspectPostResult>;
  collect(handle:string,options?:TransportRequestOptions):Promise<CollectionResult>;
@@ -40,7 +42,8 @@ export class BrowserTransport implements Transport {
  identity(options?:TransportRequestOptions){return this.rpc('/identity',undefined,options);}
  capabilities(){return this.rpc('/capabilities',{});}
  health(){return this.rpc('/health');}
- prepareRound(handle:string,options?:TransportRequestOptions&{unsettledOutbox?:boolean}){return this.rpc('/prepare-round',{handle,unsettledOutbox:options?.unsettledOutbox===true},options);}
+ prepareRound(handle:string,options?:TransportRoundOptions){return this.rpc('/prepare-round',{handle,unsettledOutbox:options?.unsettledOutbox===true,reviewedUnknownOutboxIds:options?.reviewedUnknownOutboxIds??[]},options);}
+ finishRound(handle:string,options?:TransportRoundOptions){return this.rpc('/finish-round',{handle,unsettledOutbox:options?.unsettledOutbox===true,reviewedUnknownOutboxIds:options?.reviewedUnknownOutboxIds??[],...(options?.roundId!==undefined?{roundId:options.roundId}:{})},options);}
  collectionSources(){return this.rpc('/collection-sources');}
  inspectPost(url:string,handle:string,options?:TransportRequestOptions){return this.rpc('/inspect-post',{url,handle,...(options?.deadline!==undefined?{deadline:options.deadline}:{})},options);}
  compliance(handle:string,options?:TransportRequestOptions){return this.rpc('/compliance',{handle},options);}

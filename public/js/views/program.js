@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { notice, onEvent } from '../state.js';
 import { field, empty, table, json, editorGuard, errorBox } from '../view-utils.js';
 
-const STAGE = { waiting: '等待', identity: '身份检查', 'browser-prepare':'浏览器轮次准备', 'manual-import':'核对补录', 'experience-verify':'核对角色经历', 'collect-public': '公开采集', 'collect-private': '私信采集', 'private-request':'接受私信请求', collect: '采集', queue: '排队', context: '读取上下文', memory: '记忆召回', semantic: '语义判定', 'semantic-trigger': '语义判定', 'daily-state': '虚构日程', prompt: '组装提示词', generation: '生成', generate: '生成', send: '发送', sending: '发送', lookup: '回查', summary: '整理', cooldown: '退避', error: '错误' };
+const STAGE = { waiting: '等待', identity: '身份检查', 'browser-prepare':'浏览器轮次准备', 'browser-finish':'轮末浏览器维护', 'manual-import':'核对补录', 'experience-verify':'核对角色经历', 'collect-public': '公开采集', 'collect-private': '私信采集', 'private-request':'接受私信请求', collect: '采集', queue: '排队', context: '读取上下文', memory: '记忆召回', semantic: '语义判定', 'semantic-trigger': '语义判定', 'daily-state': '虚构日程', prompt: '组装提示词', generation: '生成', generate: '生成', send: '发送', sending: '发送', lookup: '回查', summary: '整理', cooldown: '退避', error: '错误' };
 const STATUS = { running: '进行中', completed: '已完成', success: '已完成', failed: '失败', aborted: '已中止', interrupted: '重启中断', queued: '排队', generating: '生成中', draft: '草稿', sending: '发送中', unknown: '待回查', confirmed: '已确认', skipped: '已跳过', paused: '已暂停', manual: '人工接管', draining: '等待排空' };
 const CONTROL_LABEL = { paused: '暂停', running: '运行', manual: '人工', auto: '自动' };
 

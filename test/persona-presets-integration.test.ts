@@ -38,6 +38,8 @@ async function fixture(){
    if(req.method==='GET'&&req.url==='/identity')return respond(200,{handle:'PresetBot',loggedIn:true,needsHuman:false});
    if(req.method==='POST'&&req.url==='/control')return respond(200,{ok:true});
    if(req.method==='POST'&&req.url==='/prepare-round')return respond(200,{ready:true,mode:'auto',businessBlocked:false});
+   // 仅确认正常轮末协议；此人设夹具不关闭上下文或执行任何维护动作。
+   if(req.method==='POST'&&req.url==='/finish-round')return respond(200,{ready:true,mode:'auto',businessBlocked:false});
    if(req.method==='POST'&&req.url==='/collect/public')return respond(200,{events,warnings:[]});
    if(req.method==='POST'&&req.url==='/collect/private')return respond(200,{events:[],warnings:[]});
    if(req.method==='POST'&&req.url==='/context')return respond(200,{text:''});
@@ -159,11 +161,12 @@ test('真实生产工作流保留本轮人设快照，保存后的下一轮使�
   let entered!:()=>void;const generating=new Promise<void>(resolve=>entered=resolve);
   const gate=new Promise<void>(resolve=>release=resolve);
   f.onReply(async()=>{if(f.calls.filter(call=>call.purpose==='reply').length===1){entered();await gate;}});
-  f.events([publicEvent('7001')]);await f.workflow.resume();pending=f.workflow.tick();
+  f.events([publicEvent('7001')]);await f.workflow.resume();const firstRoundAt=f.requests.length;pending=f.workflow.tick();
   await Promise.race([generating,pending.then(()=>{throw new Error('工作流未进入回复生成：'+JSON.stringify({logs:f.store.logs(10),requests:f.requests,calls:f.calls}));})]);
+  assert.equal(f.requests.includes('POST /finish-round'),false);assert.equal(f.workflow.busy,true);
   const chosen=structuredClone(PERSONA_PRESETS.find(item=>item.id==='claude')!.persona);
   const saved=await f.app.inject({method:'PUT',url:'/api/persona',headers:f.writeHeaders,payload:{persona:chosen,revision:0}});assert.equal(saved.statusCode,200,saved.body);assert.equal(f.workflow.control(),'running');
-  release();await pending;pending=undefined;
+  release();await pending;pending=undefined;const firstRoundRequests=f.requests.slice(firstRoundAt),secondRoundAt=f.requests.length;
   f.events([publicEvent('7002')]);await f.workflow.tick();
   const replies=f.calls.filter(call=>call.purpose==='reply');assert.equal(replies.length,2);
   assert.ok(replies[0].system.includes(defaultPersona().sections[0].content));assert.equal(replies[0].system.includes(chosen.sections[0].content),false);
@@ -174,5 +177,10 @@ test('真实生产工作流保留本轮人设快照，保存后的下一轮使�
   assert.equal(f.workflow.services.daily!.get('presetbot')!.configRevision,0);
   assert.equal(f.workflow.control(),'running');assert.deepEqual(f.unexpected,[]);
   assert.equal(f.requests.some(request=>/\/(?:send|post|lookup)/.test(request)),false);
+  for(const requests of [firstRoundRequests,f.requests.slice(secondRoundAt)]){
+   const expected=['GET /identity','POST /prepare-round','POST /collect/public','POST /collect/private','POST /context','POST /finish-round'],positions=expected.map(request=>requests.indexOf(request));
+   for(let i=0;i<positions.length;i++){assert.ok(positions[i]>=0,expected[i]);if(i>0)assert.ok(positions[i-1]<positions[i],expected.join(' → '));}
+   assert.equal(requests.filter(request=>request==='POST /finish-round').length,1);assert.equal(requests.at(-1),'POST /finish-round');
+  }
  }finally{release();try{if(pending)await pending;}finally{await f.close();}}
 });

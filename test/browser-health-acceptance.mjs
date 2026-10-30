@@ -8,11 +8,12 @@ import {tmpdir} from 'node:os';
 import {once} from 'node:events';
 import {launch} from '/opt/role-camoufox/launch.mjs';
 import {BrowserResourceGuard,assessCompliance,readBrowserMemory,waitForIdentityReady} from '../dist/unattended-health.js';
-import {readCompliance,identity as browserIdentity,collectPublicWithBudget,collectPrivateWithBudget} from '../dist/browser.js';
+import {readCompliance,identity as browserIdentity,readTweets,collectPublicWithBudget,collectPrivateWithBudget} from '../dist/browser.js';
 import {Store} from '../dist/store.js';
 import {Workflow} from '../dist/workflow.js';
 import {readPrivatePeer} from '../dist/chat-dom.js';
 import {readPublicPageSnapshot} from '../dist/public-collection.js';
+import {PublicRelations} from '../dist/public-relations.js';
 
 const artifactDir=process.env.ARTIFACT_DIR||'/artifacts';mkdirSync(artifactDir,{recursive:true});
 const temporary=mkdtempSync(tmpdir()+'/role-browser-health-'),profile=temporary+'/profile';
@@ -39,14 +40,14 @@ try{
  const actualMemory=readBrowserMemory();assert.ok(['cgroup','process-rss','unavailable'].includes(actualMemory.source));checks('真实容器只读内存采样或明确无法确认', {memory:actualMemory});
  await openContext();await context.addCookies([{name:'health_profile_marker',value:marker,url:origin,httpOnly:true,sameSite:'Lax',expires:Math.floor(Date.now()/1000)+86400}]);
  const presetPath=profile+'/device-preset.json',presetBefore=sha(readFileSync(presetPath)),fingerprintBefore=await fingerprint();assert.equal((await localIdentity()).loggedIn,true);checks('全新临时profile与localhost持久cookie', {devicePresetHash:presetBefore});
- const guard=new BrowserResourceGuard({clock:()=>now,settings:()=>({memoryRatio:.75,browserMaxAgeHours:24}),readMemory:()=>({bytes:memoryRatio*2147483648,limitBytes:2147483648,ratio:memoryRatio,source:'cgroup'}),identity:localIdentity,restart:async()=>{const previous=context;await previous.close();assert.equal(previous.pages().length,0);await openContext();restarts++;return localIdentity();}});
- memoryRatio=.9;await guard.before('prepare-round','auto','fixture_worker',{safePoint:true});now+=31000;await guard.before('prepare-round','auto','fixture_worker',{safePoint:true});assert.equal(restarts,1);assert.equal((await localIdentity()).loggedIn,true);assert.equal(sha(readFileSync(presetPath)),presetBefore);assert.deepEqual(await fingerprint(),fingerprintBefore);assert.equal(guard.snapshot().lastRestartReason,'memory-threshold');checks('高内存触发真实close与launch，cookie及设备预设保持', {restarts});
+ const guard=new BrowserResourceGuard({clock:()=>now,settings:()=>({memoryRatio:.75,browserMaxAgeHours:24}),readMemory:()=>({bytes:memoryRatio*2147483648,limitBytes:2147483648,ratio:memoryRatio,source:'cgroup'}),identity:localIdentity,restart:async reportStage=>{const previous=context;reportStage?.('close-context');await previous.close();assert.equal(previous.pages().length,0);await openContext();restarts++;return localIdentity();}});
+ memoryRatio=.9;await guard.before('prepare-round','auto','fixture_worker',{safePoint:true});now+=31000;await guard.before('prepare-round','auto','fixture_worker',{safePoint:true});assert.equal(restarts,0);await guard.before('finish-round','auto','fixture_worker',{safePoint:true});assert.equal(restarts,1);assert.equal((await localIdentity()).loggedIn,true);assert.equal(sha(readFileSync(presetPath)),presetBefore);assert.deepEqual(await fingerprint(),fingerprintBefore);assert.equal(guard.snapshot().lastRestartReason,'memory-threshold');checks('高内存轮首不关闭，轮末触发真实close与launch，cookie及设备预设保持', {restarts});
  for(const operation of ['send','post','lookup','lookupPost'])await guard.before(operation,'auto','fixture_worker');await guard.before('collect/public','manual','fixture_worker');await guard.before('collect/private','draining','fixture_worker');assert.equal(restarts,1);checks('send／post／lookup／manual／draining不重启', {restarts});
  const protectedContext=context;now+=31000;await guard.before('prepare-round','auto','fixture_worker',{safePoint:true,protectedReasons:['chat-unlocked']});assert.equal(context,protectedContext);assert.equal(restarts,1);assert.equal((await localIdentity()).loggedIn,true);assert.equal(guard.snapshot().recoveryDeferredReason,'protected-session');checks('合成Chat保护标记下持续高内存保持真实上下文和持久标记', {syntheticProtection:true,restarts});
- memoryRatio=.2;now+=25*3600000;await guard.before('prepare-round','auto','fixture_worker',{safePoint:true});assert.equal(restarts,2);assert.equal(guard.snapshot().lastRestartReason,'runtime-threshold');assert.equal((await localIdentity()).loggedIn,true);assert.equal(sha(readFileSync(presetPath)),presetBefore);checks('运行时长触发真实上下文恢复，持久标记保持', {restarts});
- let mode='auto',failureNow=0;const failedGuard=new BrowserResourceGuard({clock:()=>failureNow,identity:localIdentity,readMemory:()=>({bytes:200,limitBytes:200,ratio:1,source:'cgroup'}),restart:async()=>{throw Error('合成重启故障');}});
+ memoryRatio=.2;now+=25*3600000;await guard.before('prepare-round','auto','fixture_worker',{safePoint:true});assert.equal(restarts,1);await guard.before('finish-round','auto','fixture_worker',{safePoint:true});assert.equal(restarts,2);assert.equal(guard.snapshot().lastRestartReason,'runtime-threshold');assert.equal((await localIdentity()).loggedIn,true);assert.equal(sha(readFileSync(presetPath)),presetBefore);checks('运行时长轮首不关闭，轮末触发真实上下文恢复，持久标记保持', {restarts});
+ let mode='auto',failureNow=0;const failedGuard=new BrowserResourceGuard({clock:()=>failureNow,identity:localIdentity,readMemory:()=>({bytes:200,limitBytes:200,ratio:1,source:'cgroup'}),restart:async reportStage=>{reportStage?.('close-context');throw Error('合成重启故障');}});
  await failedGuard.before('prepare-round',mode,'fixture_worker',{safePoint:true});failureNow+=31000;
- try{await failedGuard.before('prepare-round',mode,'fixture_worker',{safePoint:true});assert.fail('故障应中止操作');}catch(error){if(error.code==='browser-recovery-failed')mode='paused';else throw error;}assert.equal(mode,'paused');assert.ok(failedGuard.snapshot().restartError);checks('资源恢复故障经浏览器适配器进入暂停', {injectedFailure:true});
+ await failedGuard.before('prepare-round',mode,'fixture_worker',{safePoint:true});assert.equal(failedGuard.snapshot().lastRestartAttemptAt,undefined);try{await failedGuard.before('finish-round',mode,'fixture_worker',{safePoint:true});assert.fail('故障应中止操作');}catch(error){if(error.code==='browser-recovery-failed')mode='paused';else throw error;}assert.equal(mode,'paused');assert.ok(failedGuard.snapshot().restartError);checks('轮首不尝试恢复，轮末资源恢复故障经浏览器适配器进入暂停', {injectedFailure:true});
  const navigations=[];let writes=0,complianceMarkup='';const complianceReadiness={timeoutMs:1000,stableMs:20,intervalMs:10};
  const complianceHeader=(name,bio,label='')=>'<main><div data-testid="primaryColumn"><a href="/settings/profile">Edit profile</a><div data-testid="UserName"><div>'+name+'</div><div>@fixture_worker</div></div><div data-testid="UserDescription">'+bio+'</div>'+label+'<a href="/fixture_worker/following">1 Following</a><a href="/fixture_worker/verified_followers">2 Followers</a></div></main>';
  // page级route优先于外部网络拒绝规则，仅合成本地HTML，保留待判定页面的真实URL。
@@ -63,8 +64,26 @@ try{
  await page.setContent('<main>合成 SPA 账号导航尚未水合</main>');let hydrationReads=0;
  const hydrated=await waitForIdentityReady(async()=>{const current=await browserIdentity(page);hydrationReads++;if(hydrationReads===1){assert.equal(current.loggedIn,false);await page.evaluate(()=>{const a=document.createElement('a');a.dataset.testid='AppTabBar_Profile_Link';a.setAttribute('href','/fixture_worker');document.body.appendChild(a);});}return current;},'fixture_worker',{timeoutMs:3000,intervalMs:25});assert.equal(hydrated.loggedIn,true);assert.ok(hydrationReads>=2);checks('DOMContentLoaded后的实际合成SPA水合延迟等待，不误判登录丢失', {syntheticDOM:true,identityReads:hydrationReads});
  const stamp=new Date().toISOString(),article=(handle,id,text)=>'<article data-testid="tweet"><a href="/'+handle+'/status/'+id+'"><time datetime="'+stamp+'"></time></a><div data-testid="tweetText">'+text+'</div></article>';
- let publicClock=0,publicLocation='';const publicNavigations=[];
- const partialPublic=await collectPublicWithBudget({page,handle:'fixture_worker',source:2,deadline:100,now:()=>publicClock,stableMs:0,minimumObserveMs:0,intervalMs:10,pageTimeoutMs:1000,sleep:async ms=>{publicClock+=ms;},inspect:async p=>{const snapshot=await readPublicPageSnapshot(p);if(publicLocation.endsWith('/status/101'))publicClock=101;return {...snapshot,url:publicLocation};},navigate:async(p,url)=>{publicLocation=url;publicNavigations.push(url);if(url==='https://x.com/fixture_worker')await p.setContent('<main>'+article('fixture_worker','101','合成原帖一')+article('fixture_worker','102','合成原帖二')+'</main>');else if(url==='https://x.com/fixture_worker/status/101')await p.setContent('<main aria-busy="true">'+article('fixture_worker','101','合成目标帖')+article('alice','201','已读到的公开回复')+'</main>');else throw Error('超预算后不得开始第二个帖文读取');}});
+ let publicClock=0,publicLocation='';const publicNavigations=[],publicRelations=new PublicRelations();
+ const nativeRelation=(handle,id,parent=null)=>({rest_id:id,legacy:{conversation_id_str:parent??id,in_reply_to_status_id_str:parent,...(parent?{in_reply_to_screen_name:'fixture_worker'}:{}),created_at:stamp},core:{user_results:{result:{legacy:{screen_name:handle}}}}});
+ const partialPublic=await(async()=>{
+  // 当前线程关系只由页面自己发出的合成原生响应旁观取得，不用DOM排列伪造201→101。
+  await page.route('https://x.com/**',async route=>{
+   const path=new URL(route.request().url()).pathname;
+   if(path==='/i/api/graphql/fixture/UserOriginalsTimeline')return route.fulfill({status:200,json:{data:[nativeRelation('fixture_worker','101'),nativeRelation('fixture_worker','102')]}});
+   if(path==='/i/api/graphql/fixture/TweetDetail')return route.fulfill({status:200,json:{data:[nativeRelation('fixture_worker','101'),nativeRelation('alice','201','101')]}});
+   const profile=path==='/fixture_worker',thread=path==='/fixture_worker/status/101';if(!profile&&!thread)return route.abort();
+   const posts=profile?article('fixture_worker','101','合成原帖一')+article('fixture_worker','102','合成原帖二'):article('fixture_worker','101','合成原帖一')+article('alice','201','已读到的公开回复');
+   return route.fulfill({status:200,contentType:'text/html; charset=utf-8',body:'<!doctype html><html><body><main><div data-testid="primaryColumn"'+(thread?' aria-busy="true"':'')+'>'+posts+'</div></main><script>window.__healthPublicRead=fetch("/i/api/graphql/fixture/'+(profile?'UserOriginalsTimeline':'TweetDetail')+'").then(response=>response.json())</script></body></html>'});
+  });
+  try{return await collectPublicWithBudget({page,handle:'fixture_worker',source:2,relations:publicRelations,deadline:100,now:()=>publicClock,stableMs:0,minimumObserveMs:0,intervalMs:10,pageTimeoutMs:1000,sleep:async ms=>{publicClock+=ms;},inspect:async p=>{const snapshot=await readPublicPageSnapshot(p);if(publicLocation.endsWith('/status/101'))publicClock=101;return snapshot;},navigate:async(p,url)=>{
+   publicLocation=url;publicNavigations.push(url);if(!['https://x.com/fixture_worker','https://x.com/fixture_worker/status/101'].includes(url))throw Error('超预算后不得开始第二个帖文读取');
+   await p.goto(url,{waitUntil:'domcontentloaded'});await p.evaluate(()=>window.__healthPublicRead);
+   // 浏览器fetch完成和Node旁观JSON完成是两个时点；确认真实解析已就绪再触发假时钟截断。
+   const expected=url.endsWith('/status/101')?['101','201']:['101','102'],until=Date.now()+3000;
+   while(true){const rows=publicRelations.enrich(await readTweets(p));if(expected.every(id=>rows.some(row=>row.platformId===id&&row.conversationIdReliable===true)))break;if(Date.now()>=until)throw Error('公开预算夹具的原生父链旁观未就绪');await delay(10);}
+  }});}finally{await page.unroute('https://x.com/**');}
+ })();
  assert.equal(partialPublic.events.length,1);assert.equal(partialPublic.events[0].platformId,'201');assert.ok(partialPublic.diagnostics.some(d=>d.code==='public-budget-exhausted'&&d.status==='partial'));assert.equal(publicNavigations.length,2);
  // 本项验收预算耗尽后的部分采集仍进入草稿链路，作息另有专项覆盖。
  const store=new Store(temporary+'/partial-workflow.sqlite');let generated=0;const config={mode:'draft',pollSeconds:60,maxAgeHours:6,maxPerRound:2,publicPerHour:10,privatePerHour:30,replyHours:{enabled:false,closeDelayMinutes:30},retentionDays:30,persona:'明确为AI的隔离测试角色',dailyState:'合成测试',model:{provider:'custom',api:'openai-completions',baseUrl:'',id:'',reasoning:false,reasoningLevel:'off',vision:false,maxTokens:4096,timeoutMs:60000}};
