@@ -70,6 +70,12 @@ test('资料可可靠读取时标签证据冲突仍为unknown，不误记标签�
  assert.equal(inspectComplianceProfileSnapshot(profile({automatedLabels:0}),'fixture_worker').automatedLabel,false);
 });
 
+test('原生姓名管理行分离后的唯一本人handle仍须绑定目标，管理号不能替代本人',()=>{
+ const clean=profile({name:'AI 角色',handles:['fixture_worker'],automatedLabels:1});
+ assert.equal(inspectComplianceProfileSnapshot(clean,'fixture_worker').automatedLabel,true);
+ for(const handles of [['fixture_owner'],['fixture_worker','fixture_owner']])assert.deepEqual(inspectComplianceProfileSnapshot({...clean,handles},'fixture_worker'),unknownProfile);
+});
+
 test('唯一关联质量过滤控件接受明确原生或ARIA状态，false不会被当作未读取',()=>{
  for(const [nativeChecked,ariaChecked,expected] of [
   [null,'true',true],[null,'false',false],[true,null,true],[false,null,false],

@@ -84,8 +84,6 @@ export async function readComplianceProfileSnapshot(page:Page):Promise<Complianc
   const owned=(node:Element)=>visible(node)&&!node.closest('article,[data-testid="tweet"],[data-testid="UserCell"],[data-testid="HoverCard"],[role="dialog"]');
   const names=scope?Array.from(scope.querySelectorAll('[data-testid="UserName"]')).filter(owned):[],name=names.length===1?names[0]:null;
   const content=(node:Element|null)=>(node as HTMLElement|null)?.innerText?.trim()??node?.textContent?.trim()??'';
-  const handles=name?Array.from(new Set((content(name).match(/(?:^|\s)@([a-zA-Z0-9_]{1,15})(?=\s|$)/g)??[]).map(value=>value.trim().slice(1).toLowerCase()))):[];
-  const handle=handles.length===1?handles[0]:'';
   // 原生“Set up profile”是未完善资料时的本人入口；与编辑入口共同计数，仍必须唯一且不属于可编辑正文或时间线。
   const edit=scope?Array.from(scope.querySelectorAll('a[href]')).filter(node=>{
    if(!owned(node)||node.closest(excluded)||name?.contains(node))return false;
@@ -94,14 +92,12 @@ export async function readComplianceProfileSnapshot(page:Page):Promise<Complianc
   }):[];
   const bios=scope?Array.from(scope.querySelectorAll('[data-testid="UserDescription"]')).filter(owned):[];
   const profileLinks=scope?Array.from(scope.querySelectorAll('a[href]')).filter(owned).map(node=>node.getAttribute('href')??''):[];
-  const following=profileLinks.filter(href=>href.toLowerCase()==='/'+handle+'/following').length;
-  const followers=profileLinks.filter(href=>['/'+handle+'/followers','/'+handle+'/verified_followers'].includes(href.toLowerCase())).length;
   // “自动化”字样必须位于资料专用标签，或在去除可编辑资料和时间线后的平台行中且链接指向该标注的管理账号。
-  const labelCandidates=scope?Array.from(scope.querySelectorAll('[data-testid="UserLabel"],[data-testid="UserAutomatedLabel"],a[href]')).filter(node=>owned(node)&&!node.closest(excluded)&&node!==name&&!name?.contains(node)):[];
+  const labelCandidates=scope?Array.from(scope.querySelectorAll('[data-testid="UserLabel"],[data-testid="UserAutomatedLabel"],a[href]')).filter(node=>owned(node)&&!node.closest(excluded)&&node!==name):[];
   const labelRoots=new Set<Element>();let labelConflict=false;
   for(const candidate of labelCandidates){
    const dedicated=candidate.matches('[data-testid="UserLabel"],[data-testid="UserAutomatedLabel"]');
-   const root=dedicated?candidate:candidate.parentElement;if(!root||root===scope||!owned(root)||root.closest(excluded)||name?.contains(root))continue;
+   const root=dedicated?candidate:candidate.parentElement;if(!root||root===scope||root===name||!owned(root)||root.closest(excluded))continue;
    const text=content(root).replace(/\s+/g,' ').trim(),match=/^(?:Automated by\s+@([a-zA-Z0-9_]{1,15})|由\s*@([a-zA-Z0-9_]{1,15})\s*自动(?:化)?(?:管理)?)\s*[?？]?$/i.exec(text);
    if(!match){if(dedicated&&/automated|自动/i.test(text))labelConflict=true;continue;}
    const owner=(match[1]??match[2]).toLowerCase(),links=Array.from(root.querySelectorAll('a[href]')).filter(owned);
@@ -110,9 +106,15 @@ export async function readComplianceProfileSnapshot(page:Page):Promise<Complianc
   }
   // 嵌套专用节点与其链接父节点代表同一个标签。
   const labels=Array.from(labelRoots).filter(node=>!Array.from(labelRoots).some(other=>other!==node&&other.contains(node)));
+  // 原生UserName同时包含本人handle和“Automated by”管理行；仅排除已由完整文案及管理链接证实的标签子树。
+  const nameParts:string[]=[];
+  if(name){const walker=document.createTreeWalker(name,NodeFilter.SHOW_TEXT);while(walker.nextNode()){const node=walker.currentNode,parent=node.parentElement;if(parent&&owned(parent)&&!labels.some(label=>label.contains(node))&&node.textContent?.trim())nameParts.push(node.textContent.trim());}}
+  const profileNameText=nameParts.join('\n'),handles=Array.from(new Set((profileNameText.match(/(?:^|\s)@([a-zA-Z0-9_]{1,15})(?=\s|$)/g)??[]).map(value=>value.trim().slice(1).toLowerCase()))),handle=handles.length===1?handles[0]:'';
+  const following=profileLinks.filter(href=>href.toLowerCase()==='/'+handle+'/following').length;
+  const followers=profileLinks.filter(href=>['/'+handle+'/followers','/'+handle+'/verified_followers'].includes(href.toLowerCase())).length;
   const states=scope?Array.from(scope.querySelectorAll('[role="alert"],[data-testid="error-detail"]')).filter(owned):[];
   const progress=scope?Array.from(scope.querySelectorAll('[role="progressbar"],[data-testid="spinner"],[data-testid="loading"],[aria-busy="true"]')).filter(owned):[];
-  const nameText=content(name).split(/\r?\n/).map(value=>value.trim()).filter(value=>value&&!/^@[a-zA-Z0-9_]{1,15}$/.test(value)).join('\n');
+  const nameText=profileNameText.split(/\r?\n/).map(value=>value.trim()).filter(value=>value&&!/^@[a-zA-Z0-9_]{1,15}$/.test(value)).join('\n');
   return {url:location.href,mainCount:mains.length,nameCount:names.length,handles,ownEditLinks:edit.length,detailsComplete:following===1&&followers===1,loading:!!scope&&(scope.getAttribute('aria-busy')==='true'||progress.some(node=>!node.closest('[data-testid="cellInnerDiv"]'))),failed:!scope||states.some(node=>/something went wrong|try reloading|could(?:n.t| not) (?:load|retrieve)|unable to load|发生错误|出了点问题|加载失败|重新加载/i.test(content(node))),name:nameText,bio:bios.length===1?content(bios[0]):'',bioCount:bios.length,automatedLabels:labels.length,automatedLabelConflict:labelConflict||labels.length>1};
  });
 }
