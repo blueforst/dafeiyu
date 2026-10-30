@@ -12,7 +12,7 @@
 
 # OpenSpec
 
-- 2026-10-30 安全返修及试聊会话菜单处于候选阶段，未发布。并发构建导致宿主内存及 swap 耗尽，发生 global OOM；原因及恢复见 `docs/实施记录/2026-10-30-内存耗尽复盘.md`。现在正式 0.1.28.1 healthy，程序账号页已恢复且保持最新 paused／auto；后续仍须实时核对控制。所有候选构建、测试和批量渲染必须经过 `dev/server-heavy.sh` 的共享锁、宿主余量检查及实际容器硬上限，不直接运行无限额 docker build。禁止并发执行浏览器资源解包和完整测试。
+- 2026-10-30 安全返修及试聊会话菜单已完成候选验收，未发布：运行源码3e01f06、验收支持9c7f982，正常Dockerfile全套742项、新浏览器新profile七项／旧预设八项／原生DOM七项、真实隔离VNC五项及适用UI通过，费用$0；见 `docs/实施记录/2026-10-30-安全返修验收.md`。并发无限额构建导致宿主内存及swap耗尽、global OOM，原因及恢复见 `docs/实施记录/2026-10-30-内存耗尽复盘.md`。正式0.1.28.1 healthy，程序账号页已恢复，最新paused／auto；仍须实时核对控制。所有候选构建、测试和批量渲染必须经过 `dev/server-heavy.sh` 共享锁、宿主余量检查及实际容器硬上限，不直接运行无限额docker build。禁止并发执行浏览器资源解包和完整测试。
 
 - 需求、架构和跨模块变更采用 OpenSpec，先阅读 `openspec/README.md` 与 `openspec/config.yaml`。
 - 七页生产基线提案为 `openspec/changes/add-seven-page-production-bot/`；按 `proposal.md`、完整增量规格、`design.md`、`tasks.md` 理解范围。旧七页计划保留为来源，后续修改同步到提案，避免两份设计分叉。
