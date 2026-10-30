@@ -1,0 +1,34 @@
+// 服务器隔离 Camoufox 合成编辑器；不挂载生产 profile，不连接 X 或模型。
+import assert from 'node:assert/strict';
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {observer} from '/opt/role-camoufox/launch.mjs';
+import {readPublicPostComposer,publicPostComposerLocators,waitForPublicPostComposer} from '../dist/public-composer.js';
+
+const out=process.env.ARTIFACT_DIR||'/artifacts';mkdirSync(out,{recursive:true});
+const browser=await observer(),page=await browser.newPage({viewport:{width:1000,height:800}});
+const report={evidence:'服务器隔离Camoufox，合成UI与全量网络拦截，零生产账号和模型调用',checks:[],errors:[]};
+const editor='<div data-testid="tweetTextarea_0" role="textbox" contenteditable="true" style="min-width:200px;min-height:40px"></div>';
+const modal='<div role="dialog"><div role="dialog" aria-modal="true" style="width:500px;min-height:160px"><div role="progressbar" style="height:3px"></div>'+editor+'<div data-testid="toolBar"><button data-testid="tweetButton" aria-disabled="true" disabled>Post</button></div></div></div>';
+const background='<main>'+editor+'<button data-testid="tweetButtonInline">Post background</button></main>';
+const fast={timeoutMs:2000,intervalMs:20,stableMs:40};
+await page.route('https://x.com/**',route=>route.fulfill({status:200,contentType:'text/html',body:'<!doctype html><html><body></body></html>'}));
+await page.goto('https://x.com/compose/post',{waitUntil:'load'});
+
+async function reset(content=background+modal){
+ await page.evaluate(()=>history.replaceState(null,'','/compose/post'));
+ await page.setContent('<!doctype html><html><body>'+content+'</body></html>');
+ await page.evaluate(()=>{window.__submits={modal:0,background:0};const scope=document.querySelector('[aria-modal="true"]'),button=scope?.querySelector('[data-testid="tweetButton"]'),input=scope?.querySelector('[data-testid="tweetTextarea_0"]');if(button)button.onclick=()=>window.__submits.modal++;const background=document.querySelector('[data-testid="tweetButtonInline"]');if(background)background.onclick=()=>window.__submits.background++;if(input)input.oninput=()=>setTimeout(()=>{button.disabled=false;button.setAttribute('aria-disabled','false');},100);});
+}
+async function check(name,fn){try{await reset();await fn();report.checks.push(name);}catch(error){report.errors.push({name,error:error.stack||String(error)});}}
+
+try{
+ await check('实际compose路由先零编辑器、延后水合modal时等待正确编辑器',async()=>{await reset(background);await page.evaluate(html=>setTimeout(()=>document.body.insertAdjacentHTML('beforeend',html),180),modal);const started=Date.now(),composer=await waitForPublicPostComposer(page,fast);assert.ok(Date.now()-started>=150);assert.equal(composer.proof.modalCount,1);assert.equal(composer.proof.submitEnabled,false);});
+ await check('背景Home与modal共两个编辑器时只填活动modal，按钮延后启用再提交',async()=>{assert.equal(await page.getByTestId('tweetTextarea_0').count(),2);const composer=await waitForPublicPostComposer(page,fast);await composer.input.fill('合成独立帖子');assert.equal(await page.locator('main').getByTestId('tweetTextarea_0').innerText(),'');const ready=await waitForPublicPostComposer(page,{...fast,requireSubmit:true,expectedText:'合成独立帖子'});await ready.submit.click();assert.deepEqual(await page.evaluate(()=>window.__submits),{modal:1,background:0});});
+ await check('空稿按钮禁用不阻止编辑器就绪，要求提交时仍拒绝',async()=>{assert.equal((await publicPostComposerLocators(page)).proof.submitEnabled,false);await assert.rejects(waitForPublicPostComposer(page,{timeoutMs:100,intervalMs:10,stableMs:0,requireSubmit:true}),error=>error.code==='editor-unavailable');assert.deepEqual(await page.evaluate(()=>window.__submits),{modal:0,background:0});});
+ await check('两个活动modal、隐藏modal和缺失modal均不选择背景编辑器',async()=>{for(const mutation of ['duplicate','hidden','missing']){await reset();await page.locator('[aria-modal="true"]').evaluate((scope,mutation)=>{if(mutation==='duplicate')document.body.append(scope.cloneNode(true));else if(mutation==='hidden')scope.style.display='none';else scope.remove();},mutation);await assert.rejects(publicPostComposerLocators(page),error=>error.code==='editor-unavailable');assert.deepEqual(await page.evaluate(()=>window.__submits),{modal:0,background:0});}});
+ await check('错误路由、panel自身busy、不可编辑及重复提交按钮均在intent前拒绝',async()=>{for(const mutation of ['wrong-route','busy','readonly','duplicate-button']){await reset();await page.locator('[aria-modal="true"]').evaluate((scope,mutation)=>{if(mutation==='wrong-route')history.replaceState(null,'','/home');else if(mutation==='busy')scope.setAttribute('aria-busy','true');else if(mutation==='readonly')scope.querySelector('[data-testid="tweetTextarea_0"]').setAttribute('contenteditable','false');else scope.append(scope.querySelector('[data-testid="tweetButton"]').cloneNode(true));},mutation);await assert.rejects(publicPostComposerLocators(page),error=>error.code==='editor-unavailable');}});
+ await check('提交前正文变化及aria-disabled保留时拒绝，不认领其他编辑内容',async()=>{const composer=await waitForPublicPostComposer(page,fast);await composer.input.fill('原合成正文');await waitForPublicPostComposer(page,{...fast,requireSubmit:true,expectedText:'原合成正文'});await composer.input.fill('后来被修改');await assert.rejects(publicPostComposerLocators(page,{requireSubmit:true,expectedText:'原合成正文'}),error=>error.code==='editor-unavailable');await composer.input.fill('原合成正文');await waitForPublicPostComposer(page,{...fast,requireSubmit:true,expectedText:'原合成正文'});await composer.submit.evaluate(button=>button.setAttribute('aria-disabled','true'));await assert.rejects(publicPostComposerLocators(page,{requireSubmit:true,expectedText:'原合成正文'}),error=>error.code==='editor-unavailable');assert.deepEqual(await page.evaluate(()=>window.__submits),{modal:0,background:0});});
+ await check('旧modal被替换时冻结的提交元素脱离文档，不能点击新modal',async()=>{const composer=await waitForPublicPostComposer(page,fast);await composer.input.fill('唯一正文');const ready=await waitForPublicPostComposer(page,{...fast,requireSubmit:true,expectedText:'唯一正文'}),button=await ready.submit.elementHandle();await ready.scope.evaluate(scope=>scope.replaceWith(scope.cloneNode(true)));assert.equal(await button.evaluate(node=>node.isConnected),false);assert.deepEqual(await page.evaluate(()=>window.__submits),{modal:0,background:0});});
+ await check('常驻无标签progressbar不冒充加载，输入框角色不符仍拒绝',async()=>{assert.equal((await readPublicPostComposer(page)).busy,false);assert.equal((await waitForPublicPostComposer(page,fast)).proof.editable,true);await page.locator('[aria-modal="true"]').getByTestId('tweetTextarea_0').evaluate(input=>input.setAttribute('role','article'));await assert.rejects(publicPostComposerLocators(page),error=>error.code==='editor-unavailable');});
+}finally{await browser.close();writeFileSync(out+'/public-composer-dom.json',JSON.stringify(report,null,2));}
+console.log(JSON.stringify(report));if(report.errors.length)process.exitCode=1;

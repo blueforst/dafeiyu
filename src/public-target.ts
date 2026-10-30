@@ -2,7 +2,7 @@ import type {Page} from 'playwright-core';
 import type {Event} from './types.js';
 import {BrowserOperationError,safeBrowserDiagnostic,type BrowserDiagnostic} from './browser-operation.js';
 import {readPublicPosts,type PublicExtras} from './public-post.js';
-import {observeNativeReads} from './public-collection.js';
+import {observeNativeReads,readPublicPageSnapshot} from './public-collection.js';
 import {publicAncestors,type PublicRelations} from './public-relations.js';
 
 export type PublicArticleSnapshot={index:number;id:string;handle:string;timestamp:number;timestampReliable:boolean;text:string;mediaUnavailable:boolean;conversationId?:string;conversationIdReliable?:boolean;publicRelationConflict?:boolean;replyToId?:string|null;replyToHandle?:string}&PublicExtras;
@@ -13,7 +13,7 @@ export type PublicTargetInput={page:Page;event:Event;verifyCollected?:boolean;de
 /** 只读取页面已经呈现的 DOM，不构造平台请求。引用卡片里的 status 链接不能冒充主目标。 */
 export async function publicTargetSnapshot(page:Page,relations?:PublicRelations):Promise<PublicTargetSnapshot>{
  const snapshot=await page.evaluate(()=>{
-  const main=document.querySelector('main'),visible=(node:Element)=>!!(node as HTMLElement).getClientRects().length;
+  const main=document.querySelector('main'),visible=(node:Element)=>{const style=getComputedStyle(node);return style.display!=='none'&&style.visibility!=='hidden'&&!!node.getClientRects().length;};
   const articles=Array.from(document.querySelectorAll('article[data-testid="tweet"]')).slice(0,60).flatMap((article,index)=>{
    const owned=(node:Element)=>node.closest('article[data-testid="tweet"]')===article&&!node.closest('[data-testid="quoteTweet"],[data-testid="card.wrapper"],div[role="link"]');
    const time=Array.from(article.querySelectorAll('time')).find(owned),href=time?.closest('a')?.getAttribute('href')||'',match=href.match(/^\/([A-Za-z0-9_]+)\/status\/(\d+)(?:[/?#]|$)/);if(!match)return [];
@@ -23,11 +23,10 @@ export async function publicTargetSnapshot(page:Page,relations?:PublicRelations)
   });
   const notices=main?Array.from(main.querySelectorAll('[data-testid="error-detail"],[data-testid="emptyState"],[role="alert"]')).filter(node=>!node.closest('article')&&visible(node)).map(node=>(node as HTMLElement).innerText||node.textContent||''):[];
   const unavailable=notices.some(text=>/this (?:post|tweet) (?:was deleted|is unavailable|is no longer available)|(?:post|tweet) (?:has been|was) deleted|hmm.{0,12}this page (?:doesn.t|does not) exist|(?:此|这)(?:条|则)?(?:帖子|贴文|推文).{0,12}(?:已删除|已被删除|无法查看|不可用)|(?:帖子|贴文|推文)不存在|此页面不存在/i.test(text));
-  const loading=!!main&&Array.from(main.querySelectorAll('[role="progressbar"],[aria-busy="true"]')).some(visible);
-  return {url:location.href,main:!!main,loading,unavailable,articles};
+  return {url:location.href,main:!!main,unavailable,articles};
  });
- const raw=await readPublicPosts(page),posts=relations?relations.enrich(raw):raw;
- return {...snapshot,articles:snapshot.articles.map(article=>{const post=posts.find(value=>value.platformId===article.id&&value.handle===article.handle&&value.timestamp===article.timestamp);return {...article,...(post?{text:post.text,mediaUnavailable:!!post.mediaUnavailable,conversationId:post.conversationId,conversationIdReliable:post.conversationIdReliable,publicRelationConflict:post.publicRelationConflict,replyToId:post.replyToId,replyToHandle:post.replyToHandle}:{}),...(post?.quote?{quote:post.quote}:{}),...(post?.card?{card:post.card}:{})};})};
+ const [raw,readiness]=await Promise.all([readPublicPosts(page),readPublicPageSnapshot(page)]),posts=relations?relations.enrich(raw):raw;
+ return {...snapshot,main:snapshot.main&&readiness.mainPresent,loading:readiness.loading||readiness.url!==snapshot.url,articles:snapshot.articles.map(article=>{const post=posts.find(value=>value.platformId===article.id&&value.handle===article.handle&&value.timestamp===article.timestamp);return {...article,...(post?{text:post.text,mediaUnavailable:!!post.mediaUnavailable,conversationId:post.conversationId,conversationIdReliable:post.conversationIdReliable,publicRelationConflict:post.publicRelationConflict,replyToId:post.replyToId,replyToHandle:post.replyToHandle}:{}),...(post?.quote?{quote:post.quote}:{}),...(post?.card?{card:post.card}:{})};})};
 }
 function targetId(event:Event):string{
  let url:URL;try{url=new URL(event.url);}catch{throw new BrowserOperationError('invalid-request','request');}

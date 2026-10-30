@@ -26,6 +26,7 @@ import {PrivateAcceptJournal,type PrivateRequestCandidate} from './private-reque
 import {acceptNativePrivateRequest,nativeComposerLocators,observeNativePending,matchNativePrivateReceipt,type NativeSubmitEvidence} from './xchat-actions.js';
 import type {CollectionDiagnostic} from './collection-health.js';
 import {readObservedComplianceProfile,readObservedComplianceFilters,readObservedComplianceQuality,type ComplianceWaitOptions} from './account-compliance-dom.js';
+import {waitForPublicPostComposer,publicPostComposerLocators} from './public-composer.js';
 const exec=promisify(execFile);
 export function browserProxy(value?:string):{server:string}|undefined {
  if(!value?.trim())return undefined;
@@ -504,16 +505,20 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
   const previous=preflight.get(requestId,'post',handle,'',text);if(previous)return previous;
   attempt!.setStage('editor-validate');const initialValidation=await validationFor(text,'post',handle);if(!initialValidation.allowed)return attempt!.block(initialValidation);
   attempt!.setStage('post-open');await navigate(publicPage,'https://x.com/compose/post');
-  const input=publicPage.getByTestId('tweetTextarea_0');if(await input.count()!==1)throw new BrowserOperationError('editor-unavailable','post-open');attempt!.setStage('post-fill');await input.fill(text);
+  const composer=await waitForPublicPostComposer(publicPage);attempt!.setStage('post-fill');await composer.input.fill(text);
   attempt!.setStage('identity');await check(handle);if(mode!=='auto')throw new BrowserOperationError('control-unavailable','control');
   attempt!.setStage('editor-validate');const validation=await validationFor(text,'post',handle);if(!validation.allowed)return attempt!.block(validation);
-  const submit=publicPage.getByTestId('tweetButton');if(await submit.count()!==1||!await submit.isEnabled())return attempt!.block({...validation,allowed:false,code:'editor-unavailable',reason:'编辑器未允许提交，未保存提交意图'});
+  await waitForPublicPostComposer(publicPage,{requireSubmit:true,expectedText:text});
   const toastsBefore=await publicPage.getByTestId('toast').allTextContents();
-  attempt!.beforeIntent();journal.intent(requestId,'post',handle,'',text);attempt!.setStage('submit-click');
-  const rows=await capture(publicPage,async()=>{const button=publicPage.getByTestId('tweetButton');if(await button.count()!==1)throw new Error('无法唯一识别发帖按钮');await button.click({timeout:15000});});
-  attempt!.setStage('receipt-read');const toast=await publicPage.getByTestId('toast').allTextContents();
-  let r=matchTweetReceipt(rows,handle,text,null,journal.get(requestId)!.at);if(r.status!=='confirmed')try{r=await lookupPost(text,requestId,handle);}catch{r={status:'unknown',reason:'尚未取得可靠回执，保持待回查'};}
-  return journal.settle(requestId,resolveSubmissionSignals(r,toastsBefore,toast));
+  const finalComposer=await publicPostComposerLocators(publicPage,{requireSubmit:true,expectedText:text}),submit=await finalComposer.submit.elementHandle();
+  if(!submit)throw new BrowserOperationError('editor-unavailable','editor-validate');
+  try{
+   attempt!.beforeIntent();journal.intent(requestId,'post',handle,'',text);attempt!.setStage('submit-click');
+   const rows=await capture(publicPage,async()=>{await publicPostComposerLocators(publicPage,{requireSubmit:true,expectedText:text});if(!await submit.evaluate(button=>button.isConnected))throw new BrowserOperationError('editor-unavailable','submit-click');await submit.click({timeout:15000});});
+   attempt!.setStage('receipt-read');const toast=await publicPage.getByTestId('toast').allTextContents();
+   let r=matchTweetReceipt(rows,handle,text,null,journal.get(requestId)!.at);if(r.status!=='confirmed')try{r=await lookupPost(text,requestId,handle);}catch{r={status:'unknown',reason:'尚未取得可靠回执，保持待回查'};}
+   return journal.settle(requestId,resolveSubmissionSignals(r,toastsBefore,toast));
+  }finally{await submit.dispose().catch(()=>{});}
  }));
  app.setErrorHandler((err,req,reply)=>{const diagnostic=safeBrowserDiagnostic(err);reply.code(500).send({error:browserOperationReason(diagnostic.code),diagnostic,browserPaused:mode!=='auto',browserMode:mode});});
  app.addHook('onClose',async()=>{shuttingDown=true;await context.close().catch(()=>{});});

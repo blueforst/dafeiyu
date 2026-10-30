@@ -36,7 +36,9 @@ export async function readPublicPageSnapshot(page:Page):Promise<PublicPageSnapsh
   const failed=/something went wrong|try reloading|could(?:n.t| not) (?:load|retrieve)|unable to load|发生错误|出了点问题|加载失败|重新加载/i.test(statusText);
   const replies=/no (?:replies|responses)|be the first to reply|(?:暂无|尚无|还没有|没有)(?:任何)?回复/i.test(statusText);
   const timeline=/no (?:notifications|results|posts|tweets)|nothing to see|nothing here yet|(?:暂无|尚无|还没有|没有)(?:任何)?(?:通知|结果|帖子|贴文|推文)/i.test(statusText);
-  const progress=main?[...main.querySelectorAll('[role="progressbar"],[data-testid="spinner"],[data-testid="loading"],[aria-busy="true"]')].some(visible):false;
+  // 真实X页面把侧栏及不会自动水合的内联回复占位也放在main中；它们不表示目标帖仍在加载。
+  const primary=main?.querySelector('[data-testid="primaryColumn"]')??main;
+  const progress=primary?[primary,...primary.querySelectorAll('[role="progressbar"],[data-testid="spinner"],[data-testid="loading"],[aria-busy="true"]')].some(node=>node.matches('[role="progressbar"],[data-testid="spinner"],[data-testid="loading"],[aria-busy="true"]')&&visible(node)&&!node.closest('[data-testid="inline_reply_offscreen"]')):false;
   return {url:location.href,mainPresent:!!main,loading:!!main&&(main.getAttribute('aria-busy')==='true'||progress),empty:replies?'replies':timeline?'timeline':null,error:missing?'target-unavailable':failed?'page-error':null} as PublicPageSnapshot;
  });
 }

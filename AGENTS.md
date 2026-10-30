@@ -12,7 +12,7 @@
 
 # OpenSpec
 
-- 2026-10-30 公开链路候选：按管理员明确授权实现精确旧unknown永久封存（可撤销，原记录/回查/额度保留）、同人跨帖公开上下文与Other真实空态识别；当前仍正式0.1.28.2，维护验证中paused，未把候选当上线。两份独立提案为review-legacy-unknown-outbound和add-cross-thread-public-context；真实验收使用本机Ceyi登录的cn4bie与John2q1u互动，成功后只清理本轮新增公开内容，私信保留。采集轮次间隔已通过正规API改30秒。
+- 2026-10-30 公开链路：0.1.28.3／e647f69已成对发布，精确旧unknown已按管理员授权封存，原状态及出站行不变；跨帖实际生成输入已验证。首次真实发帖与公开回复均在平台提交前被编辑器/目标就绪校验拦截，失败记录及费用保留；0.1.28.4发送返修候选正在隔离验证，不复活已cancelled出站。两份独立提案为review-legacy-unknown-outbound和add-cross-thread-public-context；真实验收使用本机Ceyi登录的cn4bie与John2q1u互动，成功后只清理本轮新增公开内容，私信保留。采集轮次间隔已通过正规API改30秒。
 
 - 本轮0.1.28.2已成对发布，运行源码bd489e0基于0.1.28.1／a0dba43。全套720项、独立真实平台读回及四条前文实际上下文通过，私信仅发送一条；两次模型请求估算$0.0008244，峰价保守$0.0025896。最新running／auto、时效3小时，旧公开unknown保留；Other来源unverified单独待验证。详见docs/发布记录/2026-10-30-0.1.28.2.md。所有构建和测试使用dev/server-heavy.sh的共享锁、640MiB硬限额、无额外swap和单CPU，不并发重任务。浏览器仅替换同源dist，不升级内核或混入未发布安全候选；保留profile、journal和旧unknown。
 
