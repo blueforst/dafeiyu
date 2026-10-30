@@ -26,7 +26,7 @@ import {PrivateAcceptJournal,type PrivateRequestCandidate} from './private-reque
 import {acceptNativePrivateRequest,nativeComposerLocators,observeNativePending,matchNativePrivateReceipt,type NativeSubmitEvidence} from './xchat-actions.js';
 import type {CollectionDiagnostic} from './collection-health.js';
 import {readObservedComplianceProfile,readObservedComplianceFilters,readObservedComplianceQuality,type ComplianceWaitOptions} from './account-compliance-dom.js';
-import {waitForPublicPostComposer,publicPostComposerLocators} from './public-composer.js';
+import {waitForPublicPostComposer,publicPostComposerLocators,enterPublicComposerText,assertPublicComposerText,waitForPublicComposerSubmit} from './public-composer.js';
 const exec=promisify(execFile);
 export function browserProxy(value?:string):{server:string}|undefined {
  if(!value?.trim())return undefined;
@@ -453,11 +453,12 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
   if(e.channel==='public'){
    attempt!.setStage('target-validate');const article=p.locator('article[data-testid="tweet"]').nth(await replyArticleIndex(p,target));
    attempt!.setStage('reply-open');await article.getByTestId('reply').click({timeout:10000});
-   const dialog=p.getByRole('dialog');attempt!.setStage('reply-fill');await dialog.getByTestId('tweetTextarea_0').fill(text,{timeout:10000});
+   const dialog=p.getByRole('dialog'),input=dialog.getByTestId('tweetTextarea_0');attempt!.setStage('reply-fill');await enterPublicComposerText(p,input,text,'reply-fill');
    attempt!.setStage('identity');await check(handle);if(mode!=='auto')throw new BrowserOperationError('control-unavailable','control');
    attempt!.setStage('editor-validate');const validation=await validationFor(text,'reply',handle);if(!validation.allowed)return attempt!.block(validation);
-   const submit=dialog.getByTestId('tweetButton');if(await submit.count()!==1||!await submit.isEnabled())return attempt!.block({...validation,allowed:false,code:'editor-unavailable',reason:'编辑器未允许提交，未保存提交意图'});
+   const submit=dialog.getByTestId('tweetButton');await waitForPublicComposerSubmit(p,input,submit,text);
    toastsBefore=await p.getByTestId('toast').allTextContents();
+   await assertPublicComposerText(input,text);
    attempt!.beforeIntent();journal.intent(requestId,'reply',handle,target,text);attempt!.setStage('submit-click');
    responseRows=await capture(p,async()=>{await dialog.getByTestId('tweetButton').click({timeout:15000});});
   }else{
@@ -505,7 +506,7 @@ export async function startBrowserServer(options:{launch?:typeof launchBrowser}=
   const previous=preflight.get(requestId,'post',handle,'',text);if(previous)return previous;
   attempt!.setStage('editor-validate');const initialValidation=await validationFor(text,'post',handle);if(!initialValidation.allowed)return attempt!.block(initialValidation);
   attempt!.setStage('post-open');await navigate(publicPage,'https://x.com/compose/post');
-  const composer=await waitForPublicPostComposer(publicPage);attempt!.setStage('post-fill');await composer.input.fill(text);
+  const composer=await waitForPublicPostComposer(publicPage);attempt!.setStage('post-fill');await enterPublicComposerText(publicPage,composer.input,text,'post-fill');
   attempt!.setStage('identity');await check(handle);if(mode!=='auto')throw new BrowserOperationError('control-unavailable','control');
   attempt!.setStage('editor-validate');const validation=await validationFor(text,'post',handle);if(!validation.allowed)return attempt!.block(validation);
   await waitForPublicPostComposer(publicPage,{requireSubmit:true,expectedText:text});

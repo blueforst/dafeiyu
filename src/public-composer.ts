@@ -1,8 +1,49 @@
-import type {Page} from 'playwright-core';
+import type {Locator,Page} from 'playwright-core';
 import {BrowserOperationError} from './browser-operation.js';
 
 export type PublicPostComposerSnapshot={locationValid:boolean;modalCount:number;inputCount:number;submitCount:number;editable:boolean;submitEnabled:boolean;busy:boolean;text:string};
 type ComposerOptions={requireSubmit?:boolean;expectedText?:string};
+const normalizedText=(text:string)=>text.trim().replace(/\r\n/g,'\n').normalize('NFC');
+
+export async function assertPublicComposerText(input:Locator,text:string,stage:'post-fill'|'reply-fill'|'editor-validate'='editor-validate'){
+ if(await input.count()!==1||!await input.isVisible()||!await input.isEditable()||normalizedText(await input.innerText())!==normalizedText(text))throw new BrowserOperationError('editor-unavailable',stage);
+}
+
+/** 回复按钮可能晚于正文进入可用状态；等待中正文和作用域不能改变。 */
+export async function waitForPublicComposerSubmit(page:Page,input:Locator,submit:Locator,text:string,options:{timeoutMs?:number;intervalMs?:number;stableMs?:number}={}){
+ const until=Date.now()+Math.max(1,Math.min(10000,options.timeoutMs??3000)),interval=Math.max(1,Math.min(250,options.intervalMs??50)),stableMs=Math.max(0,Math.min(500,options.stableMs??100));let enabledAt:number|null=null;
+ while(true){
+  await assertPublicComposerText(input,text);
+  const count=await submit.count();if(count>1)throw new BrowserOperationError('editor-unavailable','editor-validate');
+  if(count===1&&await submit.isVisible()&&await submit.isEnabled()){if(enabledAt===null)enabledAt=Date.now();if(Date.now()-enabledAt>=stableMs)return;}else enabledAt=null;
+  if(Date.now()>=until)throw new BrowserOperationError('editor-unavailable','editor-validate');
+  await page.waitForTimeout(Math.max(1,Math.min(interval,until-Date.now())));
+ }
+}
+
+/** 只设置浏览器选区，正文由可信键盘输入；不改DOM正文、React状态或派发合成事件。 */
+export async function enterPublicComposerText(page:Page,input:Locator,text:string,stage:'post-fill'|'reply-fill'='reply-fill'){
+ const until=Date.now()+10000;
+ while(true){const count=await input.count();if(count>1)throw new BrowserOperationError('editor-unavailable',stage);if(count===1&&await input.isVisible()&&await input.isEditable())break;if(Date.now()>=until)throw new BrowserOperationError('editor-unavailable',stage);await page.waitForTimeout(50);}
+ await input.evaluate(node=>{
+  if(!node.closest('[role="dialog"]')||node.getAttribute('role')!=='textbox'||node.getAttribute('contenteditable')!=='true')throw new Error('公开编辑器归属不符');
+  (node as HTMLElement).focus();const range=document.createRange();range.selectNodeContents(node);const selection=getSelection();if(!selection)throw new Error('浏览器选区不可用');selection.removeAllRanges();selection.addRange(range);
+ });
+ await page.keyboard.press('Backspace');
+ const waitForText=async(value:string)=>{const until=Date.now()+3000;while(Date.now()<until){if(normalizedText(await input.innerText())===normalizedText(value))return;await page.waitForTimeout(50);}throw new BrowserOperationError('editor-unavailable',stage);};
+ await waitForText('');
+ if(text){
+  await input.evaluate(node=>{
+   const contents=node.querySelectorAll('[data-contents="true"]');if(contents.length>1)throw new Error('公开编辑器正文容器不唯一');
+   let caret:Element=node;
+   if(contents.length===1){const leaves=contents[0].querySelectorAll('[data-text="true"]');if(leaves.length!==1)throw new Error('公开编辑器空正文叶子不唯一');caret=leaves[0].tagName==='BR'?leaves[0].parentElement!:leaves[0];}
+   (node as HTMLElement).focus();const range=document.createRange();range.selectNodeContents(caret);range.collapse(true);const selection=getSelection();if(!selection)throw new Error('浏览器选区不可用');selection.removeAllRanges();selection.addRange(range);
+  });
+  await page.keyboard.insertText(text);
+  await waitForText(text);
+ }
+ await assertPublicComposerText(input,text,stage);
+}
 
 /** 只认独立发帖路由上的活动 modal，背景 Home 编辑器不能充当目标。 */
 export async function readPublicPostComposer(page:Page):Promise<PublicPostComposerSnapshot>{
@@ -22,7 +63,7 @@ export async function readPublicPostComposer(page:Page):Promise<PublicPostCompos
 }
 
 function ready(snapshot:PublicPostComposerSnapshot,options:ComposerOptions){
- return snapshot.locationValid&&snapshot.modalCount===1&&snapshot.inputCount===1&&snapshot.submitCount===1&&snapshot.editable&&!snapshot.busy&&(!options.requireSubmit||snapshot.submitEnabled)&&(options.expectedText===undefined||snapshot.text.trim().normalize('NFC')===options.expectedText.trim().replace(/\r\n/g,'\n').normalize('NFC'));
+ return snapshot.locationValid&&snapshot.modalCount===1&&snapshot.inputCount===1&&snapshot.submitCount===1&&snapshot.editable&&!snapshot.busy&&(!options.requireSubmit||snapshot.submitEnabled)&&(options.expectedText===undefined||normalizedText(snapshot.text)===normalizedText(options.expectedText));
 }
 
 /** 调用方在 intent 保存前再次读取；不在页面上写入定位标记。 */
