@@ -117,7 +117,8 @@ export class PreflightJournal {
   this.entries=next;return receipt;
  }
 }
-export type PlatformTweet={id:string;handle:string;text:string;timestamp:number;replyTo:string|null|undefined;url:string;complete?:boolean;textSource?:'legacy'|'unverified-long'};
+export type PlatformTweet={id:string;handle:string;text:string;timestamp:number;replyTo:string|null|undefined;url:string;complete?:boolean;textSource?:'legacy'|'unverified-long';evidenceConflict?:boolean};
+function sameTweetEvidence(left:PlatformTweet,right:PlatformTweet){return !left.evidenceConflict&&!right.evidenceConflict&&left.id===right.id&&left.handle.toLowerCase()===right.handle.toLowerCase()&&left.text===right.text&&left.timestamp===right.timestamp&&left.replyTo===right.replyTo&&(left.complete!==false)===(right.complete!==false);}
 // 仅解析页面自身已经取得的响应，不构造或调用平台私有接口。
 export function platformTweets(data:unknown):PlatformTweet[] {
  const found=new Map<string,PlatformTweet>();let visited=0;
@@ -125,15 +126,28 @@ export function platformTweets(data:unknown):PlatformTweet[] {
   const legacy=value.legacy;const user=value.core?.user_results?.result;const handle=user?.legacy?.screen_name??user?.core?.screen_name;
   const id=value.rest_id??legacy?.id_str;const timestamp=Date.parse(legacy?.created_at??'');
   if(legacy&&/^\d+$/.test(String(id??''))&&typeof handle==='string'&&/^[A-Za-z0-9_]{1,15}$/.test(handle)&&typeof legacy.full_text==='string'&&Number.isFinite(timestamp)){
-   const replyTo=!Object.hasOwn(legacy,'in_reply_to_status_id_str')?undefined:legacy.in_reply_to_status_id_str===null?null:String(legacy.in_reply_to_status_id_str);
-   found.set(String(id),{id:String(id),handle:handle.toLowerCase(),text:legacy.full_text,timestamp,replyTo,url:'https://x.com/'+handle+'/status/'+id,complete:twitterText.parseTweet(legacy.full_text).weightedLength<=280&&legacy.truncated!==true&&!value.note_tweet&&!value.note_tweet_results&&!value.note_tweet_id,textSource:value.note_tweet||value.note_tweet_results||value.note_tweet_id?'unverified-long':'legacy'});
+   const ownId=String(id),hasParent=Object.hasOwn(legacy,'in_reply_to_status_id_str'),parent=legacy.in_reply_to_status_id_str,hasConversation=Object.hasOwn(legacy,'conversation_id_str'),conversation=legacy.conversation_id_str;
+   const idConsistent=legacy.id_str===undefined||typeof legacy.id_str==='string'&&legacy.id_str===ownId,conversationValid=!hasConversation||typeof conversation==='string'&&/^\d+$/.test(conversation),ownConversation=typeof id==='string'&&conversation===ownId;
+   const rootMetadataClean=['in_reply_to_status_id','in_reply_to_user_id','in_reply_to_user_id_str','in_reply_to_screen_name'].every(key=>legacy[key]===undefined||legacy[key]===null);
+   let replyTo:string|null|undefined;
+   // CreateTweet 的根帖会省略父字段；只有原生线程ID为自身且无矛盾元数据才证明根关系。
+   if(idConsistent&&conversationValid){
+    if(rootMetadataClean&&((!hasParent&&ownConversation)||(hasParent&&parent===null&&(!hasConversation||ownConversation))))replyTo=null;
+    else if(hasParent&&typeof parent==='string'&&/^\d+$/.test(parent)&&parent!==ownId&&(!hasConversation||conversation!==ownId))replyTo=parent;
+   }
+   const row:PlatformTweet={id:ownId,handle:handle.toLowerCase(),text:legacy.full_text,timestamp,replyTo,url:'https://x.com/'+handle+'/status/'+id,complete:twitterText.parseTweet(legacy.full_text).weightedLength<=280&&legacy.truncated!==true&&!value.note_tweet&&!value.note_tweet_results&&!value.note_tweet_id,textSource:value.note_tweet||value.note_tweet_results||value.note_tweet_id?'unverified-long':'legacy'};
+   const previous=found.get(ownId);
+   // 冲突标记必须保留到跨响应回执匹配，不能挑最后一份或只保留有利证据。
+   found.set(ownId,!previous||sameTweetEvidence(previous,row)?row:{...previous,replyTo:undefined,complete:false,evidenceConflict:true});
   }
   for(const child of Object.values(value))if(child&&typeof child==='object')Array.isArray(child)?child.slice(0,1000).forEach(x=>walk(x,depth+1)):walk(child,depth+1);
  };walk(data,0);return [...found.values()];
 }
 export function matchTweetReceipt(rows:PlatformTweet[],handle:string,text:string,targetId:string|null,since:number):Receipt {
  if(!since)return {status:'unknown',reason:'缺少原提交时间，无法可靠确认历史发送'};
- const candidates=[...new Map(rows.filter(x=>x.complete!==false&&x.handle===handle.toLowerCase()&&x.text.trim()===text.trim()&&x.replyTo===targetId&&x.timestamp>=Math.floor(since/1000)*1000&&x.timestamp<=Date.now()+60000).map(x=>[x.id,x])).values()];
+ const unique=new Map<string,PlatformTweet|null>();
+ for(const row of rows){const previous=unique.get(row.id);if(row.evidenceConflict||unique.has(row.id)&&(!previous||!sameTweetEvidence(previous,row)))unique.set(row.id,null);else unique.set(row.id,row);}
+ const candidates=[...unique.values()].filter((x):x is PlatformTweet=>!!x&&!x.evidenceConflict&&x.complete!==false&&x.handle===handle.toLowerCase()&&x.text.trim()===text.trim()&&x.replyTo===targetId&&x.timestamp>=Math.floor(since/1000)*1000&&x.timestamp<=Date.now()+60000);
  return candidates.length===1?{status:'confirmed',id:candidates[0].id,url:candidates[0].url}:{status:'unknown',reason:'尚无唯一且匹配作者、目标、正文及提交时间的平台回执'};
 }
 /** 唯一回执优先；仅本次点击后新增、能明确归属于发送的提示可作为拒绝证据。 */

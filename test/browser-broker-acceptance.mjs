@@ -18,16 +18,17 @@ const previous=new Map(['SECRETS_DIR','PROFILE_DIR','DATA_DIR','BROWSER_PORT'].m
 mkdirSync(root+'/secrets');mkdirSync(root+'/profile');mkdirSync(root+'/data');
 writeFileSync(root+'/secrets/browser_key',secret,{mode:0o600});writeFileSync(root+'/secrets/model_api_key','fixture-model-key-never-network',{mode:0o600});
 Object.assign(process.env,{SECRETS_DIR:root+'/secrets',PROFILE_DIR:root+'/profile',DATA_DIR:root+'/data',BROWSER_PORT:'0'});
-const report={evidence:'真实隔离 Camoufox、HTTP Fastify broker、BrowserTransport、Workflow、SQLite、统一模型流水；模型为注入模拟，所有 X 请求由路由合成',nativeFixture:'首帧缓存目标和main已存在、无spinner、原生读取延后800ms',checks:[],errors:[],broker:[],nativeReads:0,submitClicks:0,externalRequests:[],screenshots:[],platformNetworkUsed:false,realModelUsed:false,temporaryProfile:true};
+const rootOnly=process.env.BROKER_ROOT_ONLY==='1';
+const report={evidence:rootOnly?'真实隔离 Camoufox、HTTP Fastify broker、BrowserTransport、持久journal；全部X响应合成，不调用模型或Workflow':'真实隔离 Camoufox、HTTP Fastify broker、BrowserTransport、Workflow、SQLite、统一模型流水；模型为注入模拟，所有 X 请求由路由合成',rootOnly,nativeFixture:'首帧缓存目标和main已存在、无spinner、原生读取延后800ms；根帖CreateTweet省略父字段且原生conversation为自身',checks:[],errors:[],broker:[],nativeReads:0,submitClicks:0,externalRequests:[],screenshots:[],platformNetworkUsed:false,realModelUsed:false,temporaryProfile:true};
 const esc=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const journal=()=>existsSync(root+'/profile/transport-journal.json')?JSON.parse(readFileSync(root+'/profile/transport-journal.json','utf8')):{};
 const preflight=()=>existsSync(root+'/profile/posting-preflight-v1.json')?JSON.parse(readFileSync(root+'/profile/posting-preflight-v1.json','utf8')).entries:{};
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-let browser,broker,transport,scenario,endpoint,sequence=0,chatFixtureMode='empty';
+let browser,broker,transport,scenario,postScenario,endpoint,sequence=0,chatFixtureMode='empty';
 const chatFixtures={native:readFileSync(new URL('./fixtures/chat/native-shadow.html',import.meta.url),'utf8'),legacy:readFileSync(new URL('./fixtures/chat/legacy.html',import.meta.url),'utf8')};
 const resources=[];
 function persist(){writeFileSync(OUT+'/browser-broker-acceptance.json',JSON.stringify({...report,passed:report.checks.length,failed:report.errors.length},null,2));}
-async function check(name,fn){console.log('[开始] '+name);const started=Date.now();try{const detail=await fn();report.checks.push({name,durationMs:Date.now()-started,...(detail?{detail}:{})});console.log('[通过] '+name);}catch(error){report.errors.push({name,error:error.stack||String(error)});console.log('[失败] '+name+'：'+String(error));}finally{persist();}}
+async function check(name,fn){if(rootOnly&&!name.startsWith('根帖'))return;console.log('[开始] '+name);const started=Date.now();try{const detail=await fn();report.checks.push({name,durationMs:Date.now()-started,...(detail?{detail}:{})});console.log('[通过] '+name);}catch(error){report.errors.push({name,error:error.stack||String(error)});console.log('[失败] '+name+'：'+String(error));}finally{persist();}}
 async function screenshot(name){const page=broker.context.pages().find(page=>!/^https:\/\/x\.com\/(?:messages|i\/chat)(?:\/|$)/.test(page.url()));assert.ok(page);await page.setViewportSize({width:1440,height:900});const path=OUT+'/'+name+'.png';await page.screenshot({path,fullPage:true});report.screenshots.push(path);}
 function setScenario(id,handle,{deleted=false,unknown=false,nativeDelay=800,hasQuote=false,missingDuringContext=false,unrelated=false}={}){
  const timestamp=Date.now(),event={id:'x:'+id,platformId:id,targetId:id,channel:'public',userId:'x:'+handle,handle,text:(unrelated?'没有账号提及的推荐内容 ':'@'+actor+' 合成新问题 ')+id,url:'https://x.com/'+handle+'/status/'+id,conversationId:id,timestamp,timestampReliable:true};
@@ -51,6 +52,10 @@ function nativeHTML(body,path){
  // 缓存文章及main从首帧就存在，且没有spinner；必须实际等待页面自己的原生读取结束。
  return shell(body,`fetch('/i/api/graphql/fixture/TweetDetail?path='+encodeURIComponent(${JSON.stringify(path)})).then(r=>r.json()).then(()=>{document.querySelector('main').innerHTML=${JSON.stringify(body)}});function openReply(){const d=document.createElement('div');d.setAttribute('role','dialog');d.innerHTML='<div role="textbox" contenteditable="true" data-testid="tweetTextarea_0"></div><button data-testid="tweetButton">发送</button>';document.body.append(d);d.querySelector('button').onclick=()=>{const text=d.querySelector('[contenteditable]').innerText;fetch('/i/api/graphql/fixture/CreateTweet',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,target:${JSON.stringify(scenario?.event.platformId??'')}})}).then(r=>r.json()).then(()=>d.remove())};}`);
 }
+function rootPostHTML(){
+ const modal='<div role="dialog" aria-modal="true" style="width:500px;min-height:160px"><div data-testid="tweetTextarea_0" role="textbox" contenteditable="true" style="min-width:200px;min-height:40px"></div><button data-testid="tweetButton" disabled aria-disabled="true">Post</button></div>';
+ return shell(modal,`const modal=document.querySelector('[aria-modal="true"]'),input=modal.querySelector('[contenteditable]'),button=modal.querySelector('button');input.oninput=()=>{button.disabled=!input.innerText.trim();button.setAttribute('aria-disabled',String(button.disabled))};button.onclick=()=>{fetch('/i/api/graphql/fixture/CreateTweet',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:input.innerText,rootPost:true})}).then(r=>r.json()).then(()=>modal.remove())};`);
+}
 function workflowFixture(onGenerate){
  const folder=root+'/workflow-'+(++sequence);mkdirSync(folder);const store=new Store(folder+'/workflow.sqlite'),outbox=new Outbox(store),program=new Program(store);
  // 本套核对浏览器提交与回查边界，显式排除夜间作息对生成路径的遮挡。
@@ -68,14 +73,21 @@ try{
   await context.route('**/*',async route=>{
    const request=route.request(),url=new URL(request.url());
    if(url.origin!=='https://x.com'){if(!['about:','data:'].includes(url.protocol))report.externalRequests.push({origin:url.origin,path:url.pathname});await route.abort();return;}
-   if(url.pathname==='/i/api/graphql/fixture/TweetDetail'){report.nativeReads++;const data=[relation(rootEvent(),'900'),...(scenario?[scenario.unrelated?relation(scenario.event,scenario.event.platformId):relation(scenario.event,'900','900',actor)]:[])];await delay(scenario?.nativeDelay??0);await route.fulfill({status:200,json:{ready:true,data}});return;}
+   if(url.pathname==='/i/api/graphql/fixture/TweetDetail'){report.nativeReads++;const data=[relation(rootEvent(),'900'),...(scenario?[scenario.unrelated?relation(scenario.event,scenario.event.platformId):relation(scenario.event,'900','900',actor)]:[]),...(postScenario?.visible&&url.searchParams.get('path')==='/'+actor?[postScenario.row]:[])];await delay(scenario?.nativeDelay??0);await route.fulfill({status:200,json:{ready:true,data}});return;}
    if(url.pathname==='/i/api/graphql/fixture/CreateTweet'){
-    report.submitClicks++;scenario.clicks++;const body=request.postDataJSON();if(body.target!==scenario.event.platformId){report.errors.push({name:'合成submit目标绑定',error:'fixture-target-mismatch'});await route.fulfill({status:400,json:{error:'fixture-target-mismatch'}});return;}
+    report.submitClicks++;const body=request.postDataJSON();
+    if(body.rootPost===true){
+     assert.ok(postScenario);postScenario.clicks++;assert.equal(body.text,postScenario.text);const id=String(8000+report.submitClicks);
+     postScenario.row={rest_id:id,legacy:{id_str:id,conversation_id_str:id,full_text:body.text,created_at:new Date().toUTCString(),truncated:false},core:{user_results:{result:{core:{screen_name:actor}}}}};
+     await route.fulfill({status:200,json:postScenario.missingReceipt?{acknowledged:true}:{data:{create_tweet:{tweet_results:{result:postScenario.row}}}}});return;
+    }
+    scenario.clicks++;if(body.target!==scenario.event.platformId){report.errors.push({name:'合成submit目标绑定',error:'fixture-target-mismatch'});await route.fulfill({status:400,json:{error:'fixture-target-mismatch'}});return;}
     const payload=scenario.unknown?{acknowledged:true}:{data:{create_tweet:{tweet_results:{result:{rest_id:String(7000+report.submitClicks),legacy:{full_text:body.text,created_at:new Date().toUTCString(),in_reply_to_status_id_str:body.target,truncated:false},core:{user_results:{result:{legacy:{screen_name:actor}}}}}}}}};
     await route.fulfill({status:200,json:payload});return;
    }
    let html;
    if(url.pathname==='/home')html=shell('<div data-testid="emptyState">No posts</div>');
+   else if(url.pathname==='/compose/post')html=rootPostHTML();
    else if(url.pathname.startsWith('/messages')||url.pathname.startsWith('/i/chat'))html=chatFixtureMode==='empty'?shell('<div data-testid="emptyState">No messages</div>'):chatFixtures[chatFixtureMode].replace('<body>','<body><nav><a data-testid="AppTabBar_Profile_Link" href="/'+actor+'">个人主页</a></nav>');
    else if(url.pathname==='/notifications/mentions'||url.pathname==='/search')html=nativeHTML(scenario?article(scenario.event):'<div data-testid="emptyState">No results</div>',url.pathname);
    else if(url.pathname==='/'+actor)html=nativeHTML(article(rootEvent()),url.pathname);
@@ -128,6 +140,16 @@ try{
   chatFixtureMode='legacy';const legacy=await transport.collectPrivate(actor);assert.equal(legacy.events.length,1);assert.equal(legacy.events[0].platformId,'legacy-platform-message');assert.equal(legacy.events[0].timestampReliable,true);
   chatFixtureMode='native';const native=await transport.collectPrivate(actor);assert.equal(native.events.length,0);assert.ok(native.diagnostics.some(entry=>entry.code==='chat-native-time-unverified'));assert.ok(!native.diagnostics.some(entry=>entry.status==='empty'));
   const event={id:'native-unverified-negative',platformId:'11111111-1111-4111-8111-111111111111',channel:'private',userId:'x:fixture_peer',handle:'fixture_peer',text:'合成结构未验收负向输入',url:'https://x.com/i/chat/111-222',conversationId:'111-222',timestamp:Date.now(),timestampReliable:true},before=report.submitClicks,receipt=await transport.send(event,'合成拒绝发送测试',actor);assert.equal(receipt.status,'not_submitted');assert.equal(receipt.diagnostic.code,'private-contract-unverified');assert.equal(receipt.diagnostic.stage,'dm-validate');assert.equal(journal()[event.id],undefined);assert.equal(preflight()[event.id].receipt.status,'not_submitted');assert.equal(report.submitClicks,before);const chatPage=broker.context.pages().find(page=>page.url()==='https://x.com/i/chat/111-222');assert.ok(chatPage);assert.equal(await chatPage.evaluate(()=>window.__requestActions||0),0);assert.equal(report.externalRequests.length,0);return {legacyEvents:1,nativeEvents:0,diagnostic:receipt.diagnostic,noAcceptOrBlockClicks:true};
+ });
+ await check('根帖HTTP提交使用省略父字段的原生自身线程回执，重复同意图不再次点击',async()=>{
+  await transport.control('auto');postScenario={text:'合成根帖：留十分钟听一首喜欢的歌。',missingReceipt:false,visible:false,clicks:0};const id='root-native-confirmed',before=report.submitClicks;
+  const receipt=await transport.post(postScenario.text,actor,id);assert.equal(receipt.status,'confirmed');assert.equal(receipt.id,postScenario.row.rest_id);assert.equal(journal()[id].kind,'post');assert.equal(journal()[id].receipt.status,'confirmed');assert.equal(postScenario.clicks,1);
+  assert.equal((await transport.post(postScenario.text,actor,id)).id,receipt.id);assert.equal((await transport.lookupPost(postScenario.text,actor,id)).id,receipt.id);assert.equal(report.submitClicks-before,1);assert.equal(report.externalRequests.length,0);return {confirmed:true,submitClicks:1,noParentField:true,nativeConversationOwnId:true};
+ });
+ await check('根帖首次缺回执保持unknown，主页原生自身线程仅回查收束且不重发',async()=>{
+  await transport.control('auto');postScenario={text:'合成回查根帖：慢慢喝完一杯温水。',missingReceipt:true,visible:false,clicks:0};const id='root-native-reconcile',before=report.submitClicks;
+  const first=await transport.post(postScenario.text,actor,id);assert.equal(first.status,'unknown');assert.equal(journal()[id].receipt.status,'unknown');assert.equal(postScenario.clicks,1);const originalAt=journal()[id].at;
+  postScenario.visible=true;const receipt=await transport.lookupPost(postScenario.text,actor,id);assert.equal(receipt.status,'confirmed');assert.equal(receipt.id,postScenario.row.rest_id);assert.equal(journal()[id].at,originalAt);assert.equal(journal()[id].receipt.status,'confirmed');assert.equal((await transport.post(postScenario.text,actor,id)).id,receipt.id);assert.equal(report.submitClicks-before,1);assert.equal(postScenario.clicks,1);assert.equal(report.externalRequests.length,0);return {initial:'unknown',lookup:'confirmed',submitClicks:1,originalIntentPreserved:true};
  });
 }catch(error){report.errors.push({name:'脚本执行异常',error:error.stack||String(error)});}
 finally{
