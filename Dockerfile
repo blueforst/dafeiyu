@@ -35,7 +35,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund \
     && node --input-type=module -e "import { ensureModel, Generator } from 'fpgen-js'; await ensureModel(); new Generator().generate({browser:'Firefox',os:'Linux'});" \
     && ln -s /tmp/role-camoufox-fontconfig cache/camoufox/fontconfig
 # fpgen公开预热默认目录与Camoufox指定目录不同，迁移数据后支持非root只读启动。
-RUN test ! -e cache/camoufox/fpgen && mv cache/fpgen cache/camoufox/fpgen
+RUN test ! -e cache/camoufox/fpgen && mv cache/fpgen cache/camoufox/fpgen && chmod -R a+rX cache/camoufox/fpgen
 COPY browser-engines/camoufox/launch.mjs ./launch.mjs
 
 FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS browser
